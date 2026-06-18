@@ -1,6 +1,21 @@
 {
-  "current": "v1.9.1",
+  "current": "v1.10",
   "entries": [
+    {
+      "version": "v1.10",
+      "date": "2026-06-18",
+      "title": "系统治理与知识库联动",
+      "type": "feat",
+      "items": [
+        "docs 文档体系：架构、数据模型、发布流程、开发指南、Obsidian 策略",
+        "宪法文件系统搭建说明书_1.1 正式纳入 docs 导航",
+        "Obsidian 一向导出方案（不做双向同步）",
+        "GET /api/export/obsidian.zip Markdown 打包下载",
+        "侧边栏「导出 Obsidian」入口与 toast 反馈",
+        "README 文档导航入口",
+        "pytest 覆盖 Obsidian zip 导出与 frontmatter"
+      ]
+    },
     {
       "version": "v1.9.1",
       "date": "2026-06-18",

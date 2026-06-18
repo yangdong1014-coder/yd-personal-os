@@ -6,6 +6,7 @@ import ai_service
 import changelog
 import config
 import database
+import obsidian_export
 import prompt_specs
 import settings_store
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
@@ -248,6 +249,22 @@ def api_export():
             },
         )
     except database.ExportError as exc:
+        return _error(str(exc), 500)
+
+
+@app.route("/api/export/obsidian.zip", methods=["GET"])
+def api_export_obsidian():
+    try:
+        body = obsidian_export.build_obsidian_zip()
+        filename = obsidian_export.zip_filename()
+        return Response(
+            body,
+            mimetype="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            },
+        )
+    except obsidian_export.ObsidianExportError as exc:
         return _error(str(exc), 500)
 
 
