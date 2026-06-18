@@ -55,6 +55,12 @@ def test_inbox_analyze(client, monkeypatch):
 
 参考：`tests/test_inbox.py`
 
+### 智能归档手动验证注意点
+
+- goal/asset/review/capability_entry 可直接入库；project 需 `goal_id`，task 需 `project_id`
+- AI 常返回项目名称字符串而非数字 ID，此时 UI 会展示校验 errors，建议先手动建目标/项目
+- 真实 AI 验证前建议 `GET /api/export` 备份生产库；`data/backup_*.json` 已 gitignore
+
 ## 目录约定
 
 | 路径 | 职责 |

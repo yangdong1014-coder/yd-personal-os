@@ -72,5 +72,9 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 ```
 
 - 解析层：`inbox_service.py` + `prompts/inbox/analyze.*`
-- 原则：AI 不静默入库；低置信度默认 uncertain；事务批量提交，失败回滚
+- 原则：AI 解析 → 人工确认 → 入库；不静默创建虚假目标/项目
+- 可独立入库：goal、asset、review、capability_entry
+- 外键约束：project 需有效 `goal_id`；task 需有效 `project_id`（均为数字 ID）
+- AI 若返回项目名称而非 ID，commit 前校验跳过并返回明确 errors
+- 批量归档支持部分成功：有效建议写入，无效建议保留 pending 并列出 errors
 - 拒绝：`POST /api/inbox/suggestions/<id>/reject`

@@ -1,5 +1,8 @@
 data/yd_os.db
 data/settings.json
+data/backup_*.json
+data/*backup*.json
+scripts/
 __pycache__/
 *.pyc
 venv/

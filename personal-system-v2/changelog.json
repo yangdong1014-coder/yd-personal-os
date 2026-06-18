@@ -12,7 +12,12 @@
         "解析预览 + 人工勾选确认后批量入库，不静默写入",
         "新增 inbox_entries / inbox_suggestions 表保存原文与建议",
         "支持单条建议拒绝与重复提交跳过",
-        "pytest 覆盖 analyze/commit/reject 与 AI mock"
+        "pytest 覆盖 analyze/commit/reject 与 AI mock",
+        "真实 AI 流程验证通过（任务型 / 知识卡片型 / 能力训练型）",
+        "commit 提交前校验：project/task 缺少有效 goal_id/project_id 时跳过并返回明确 errors",
+        "批量归档支持部分成功，不再因一条无效建议导致全部失败",
+        "前端展示部分成功/失败明细与分级 toast 提示",
+        "pytest 增加外键无效建议跳过测试"
       ]
     },
     {

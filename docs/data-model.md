@@ -104,6 +104,17 @@ inbox_entries (1) ──< inbox_suggestions (N)
 | status | pending / accepted / rejected / committed |
 | created_at | 创建时间 |
 
+#### 智能归档入库边界
+
+| target_type | 入库条件 |
+|-------------|----------|
+| goal / asset / review / capability_entry | 字段满足即可独立写入 |
+| project | `suggested_payload.goal_id` 必须为已存在目标的数字 ID |
+| task | `suggested_payload.project_id` 必须为已存在项目的数字 ID |
+
+- 校验失败时该 suggestion 保持 `pending`，`commit` 响应 `errors` 列出原因
+- 系统不会为通过校验而自动创建占位 goal/project
+
 ## 外键与级联
 
 | 删除对象 | 行为 |
