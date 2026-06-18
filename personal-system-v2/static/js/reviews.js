@@ -133,11 +133,14 @@ document.addEventListener("DOMContentLoaded", () => {
             method: "POST",
             body: JSON.stringify({
               title: data.title,
-              trigger_context: data.trigger_context,
-              core_content: data.core_content,
-              asset_type: "知识卡片",
+              asset_type: data.asset_type || "本质洞察",
+              fields: {
+                现象: data.trigger_context || "",
+                底层本质: data.core_content || "",
+              },
               capability_tags: data.capability_tags,
               source_review_id: review.id,
+              maturity: "草稿",
             }),
           });
           showToast("已保存到资产模块，可前往「资产」页查看", "success");

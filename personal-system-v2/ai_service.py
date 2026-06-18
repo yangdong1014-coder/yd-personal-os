@@ -106,23 +106,48 @@ def refine_review_to_asset(review_id):
         "trigger_context": (data.get("trigger_context") or "").strip(),
         "capability_tags": _filter_capability_tags(data.get("capability_tags")),
         "source_review_id": review_id,
-        "asset_type": "知识卡片",
+        "asset_type": "本质洞察",
+    }
+
+
+def _asset_prompt_context(asset):
+    import asset_schemas
+
+    fields = asset.get("fields") or {}
+    field_lines = [
+        f"- {key}: {value}"
+        for key, value in fields.items()
+        if (value or "").strip()
+    ]
+    return {
+        "title": asset.get("title", ""),
+        "asset_type": asset.get("asset_type", ""),
+        "summary": asset.get("summary", ""),
+        "reusable_scenario": asset.get("reusable_scenario", ""),
+        "trigger_context": asset.get("trigger_context", ""),
+        "core_content": asset.get("core_content", ""),
+        "fields_text": "\n".join(field_lines) or "无",
+        "fields": fields,
+        "asset_schemas": asset_schemas,
     }
 
 
 def optimize_asset(asset_id):
     asset = database.get_asset(asset_id)
     if not asset:
-        raise AIServiceError("知识卡片不存在")
+        raise AIServiceError("资产不存在")
 
+    ctx = _asset_prompt_context(asset)
     system_prompt = load_prompt("assets", "optimize")
     user_prompt = load_prompt(
         "assets",
         "optimize",
         kind="user",
-        title=asset.get("title", ""),
-        trigger_context=asset.get("trigger_context", ""),
-        core_content=asset.get("core_content", ""),
+        title=ctx["title"],
+        asset_type=ctx["asset_type"],
+        trigger_context=ctx["trigger_context"],
+        core_content=ctx["core_content"],
+        fields_text=ctx["fields_text"],
     )
 
     data = _chat_json(system_prompt, user_prompt)
@@ -132,11 +157,20 @@ def optimize_asset(asset_id):
     if not title or not core_content:
         raise AIServiceError("AI 未能生成有效优化结果，请重试")
 
+    fields = ctx["asset_schemas"].merge_ai_fields(
+        asset["asset_type"], ctx["fields"], data
+    )
     return {
         "asset_id": asset_id,
         "title": title,
+        "asset_type": asset.get("asset_type"),
         "trigger_context": (data.get("trigger_context") or "").strip(),
         "core_content": core_content,
+        "fields": fields,
+        "summary": ctx["asset_schemas"].extract_summary(fields, core_content),
+        "reusable_scenario": ctx["asset_schemas"].extract_reusable_scenario(
+            asset["asset_type"], fields
+        ),
     }
 
 
@@ -445,8 +479,9 @@ def _format_capability_context():
 def classify_asset(asset_id):
     asset = database.get_asset(asset_id)
     if not asset:
-        raise AIServiceError("知识卡片不存在")
+        raise AIServiceError("资产不存在")
 
+    ctx = _asset_prompt_context(asset)
     system_prompt = load_prompt(
         "assets",
         "classify",
@@ -457,18 +492,23 @@ def classify_asset(asset_id):
         "assets",
         "classify",
         kind="user",
-        title=asset.get("title", ""),
-        asset_type=asset.get("asset_type", ""),
+        title=ctx["title"],
+        asset_type=ctx["asset_type"],
         capability_tags=", ".join(asset.get("capability_tags") or []) or "无",
-        trigger_context=asset.get("trigger_context", ""),
-        core_content=asset.get("core_content", ""),
+        trigger_context=ctx["trigger_context"],
+        core_content=ctx["core_content"],
+        fields_text=ctx["fields_text"],
     )
 
     data = _chat_json(system_prompt, user_prompt)
 
-    asset_type = (data.get("asset_type") or "").strip()
-    if asset_type not in database.ASSET_TYPES:
-        asset_type = asset.get("asset_type") or "知识卡片"
+    import asset_schemas
+
+    asset_type = asset_schemas.normalize_asset_type(
+        (data.get("asset_type") or "").strip(),
+        ctx["title"],
+        ctx["core_content"],
+    )
 
     return {
         "asset_id": asset_id,
@@ -481,22 +521,24 @@ def classify_asset(asset_id):
 def template_asset(asset_id, target_type):
     asset = database.get_asset(asset_id)
     if not asset:
-        raise AIServiceError("知识卡片不存在")
+        raise AIServiceError("资产不存在")
 
-    allowed = ("SOP", "提示词")
+    allowed = ("SOP", "模型", "方法论", "提示词")
     target_type = (target_type or "").strip()
     if target_type not in allowed:
-        raise AIServiceError("目标类型仅支持 SOP 或 提示词")
+        raise AIServiceError("目标类型仅支持 SOP、模型、方法论、提示词")
 
+    ctx = _asset_prompt_context(asset)
     system_prompt = load_prompt("assets", "template", target_type=target_type)
     user_prompt = load_prompt(
         "assets",
         "template",
         kind="user",
-        title=asset.get("title", ""),
-        asset_type=asset.get("asset_type", ""),
-        trigger_context=asset.get("trigger_context", ""),
-        core_content=asset.get("core_content", ""),
+        title=ctx["title"],
+        asset_type=ctx["asset_type"],
+        trigger_context=ctx["trigger_context"],
+        core_content=ctx["core_content"],
+        fields_text=ctx["fields_text"],
     )
 
     data = _chat_json(system_prompt, user_prompt)
@@ -506,12 +548,26 @@ def template_asset(asset_id, target_type):
     if not title or not core_content:
         raise AIServiceError("AI 未能生成有效模板，请重试")
 
+    import asset_schemas
+
+    fields = asset_schemas.merge_ai_fields(target_type, {}, data)
+    if not fields:
+        fields = asset_schemas.build_fields_from_legacy(
+            target_type,
+            (data.get("trigger_context") or "").strip(),
+            core_content,
+        )
     return {
         "asset_id": asset_id,
         "asset_type": target_type,
         "title": title,
         "trigger_context": (data.get("trigger_context") or "").strip(),
         "core_content": core_content,
+        "fields": fields,
+        "summary": asset_schemas.extract_summary(fields, core_content),
+        "reusable_scenario": asset_schemas.extract_reusable_scenario(
+            target_type, fields
+        ),
     }
 
 

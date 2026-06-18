@@ -15,7 +15,7 @@ def _read_md(zf, path):
 
 def _assert_export_version(content):
     assert "export_version:" in content
-    assert "v1.10.1" in content
+    assert "v1.12.0" in content
 
 
 STRUCTURE_FILES = (
@@ -83,7 +83,8 @@ def test_export_obsidian_zip_structure(client):
             "title": "Obsidian资产",
             "trigger_context": "情境",
             "core_content": "内容",
-            "asset_type": "知识卡片",
+            "asset_type": "本质洞察",
+            "fields": {"底层本质": "测试导出"},
             "capability_tags": ["本质力"],
         },
     )

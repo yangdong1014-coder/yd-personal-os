@@ -3,3 +3,5 @@
 当前标签：{capability_tags}
 触发情境：{trigger_context}
 核心内容：{core_content}
+结构化字段：
+{fields_text}

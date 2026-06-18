@@ -12,7 +12,7 @@
 | 目标 | `/goals` | 目标管理、项目拆解、AI 拆解项目 |
 | 任务 | `/tasks` | 任务管理、今日推进、AI 拆任务/今日推荐 |
 | 复盘 | `/reviews` | 日复盘/周复盘、AI 补全、周聚合、AI 提炼资产 |
-| 资产 | `/assets` | 知识卡片、AI 优化/归类/模板化 |
+| 资产 | `/assets` | 可复用资产库（多类型 + 动态字段）、AI 优化/归类/类型转换 |
 | 能力 | `/capabilities` | 八能力模块记录、AI 归因/诊断 |
 | AI管理 | `/prompts` | 模型切换、提示词编辑、AI 生成初版 |
 | 版本日志 | `/changelog` | 各版本更新记录 |
@@ -81,7 +81,7 @@ python app.py
 - v1.11.1+：同批 project/task 可通过 `local_ref` / `parent_ref` 链式入库；卡片上可选择已有目标/项目；`POST /api/inbox/commit` 支持 `override_payload` 补充 `goal_id` / `project_id`。
 - 归档历史：`GET /api/inbox` 或页面 `/inbox/history` 查看最近 20 条输入与解析状态。
 
-Obsidian zip 结构（v1.10.1+）：
+Obsidian zip 结构（v1.12.0+）：
 
 | 文件 | 说明 |
 |------|------|

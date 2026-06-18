@@ -3,6 +3,7 @@ import json
 from flask import Flask, Response, jsonify, render_template, request
 
 import ai_service
+import asset_schemas
 import changelog
 import config
 import database
@@ -82,6 +83,8 @@ def assets():
         active_page="assets",
         nav_items=NAV_ITEMS,
         asset_types=database.ASSET_TYPES,
+        maturity_levels=database.MATURITY_LEVELS,
+        asset_field_schemas=asset_schemas.get_frontend_schemas(),
         capability_modules=database.CAPABILITY_MODULES,
     )
 
@@ -360,8 +363,12 @@ def api_delete_review(review_id):
 @app.route("/api/assets", methods=["GET"])
 def api_list_assets():
     tag = request.args.get("tag") or None
+    asset_type = request.args.get("asset_type") or None
     try:
-        return jsonify({"ok": True, "data": database.list_assets(tag)})
+        return jsonify({
+            "ok": True,
+            "data": database.list_assets(tag, asset_type=asset_type),
+        })
     except ValueError as exc:
         return _error(str(exc))
 
@@ -372,11 +379,15 @@ def api_create_asset():
     try:
         asset = database.create_asset(
             payload.get("title", ""),
-            payload.get("trigger_context", ""),
-            payload.get("core_content", ""),
             payload.get("asset_type", ""),
-            payload.get("capability_tags", []),
-            payload.get("source_review_id"),
+            capability_tags=payload.get("capability_tags", []),
+            fields=payload.get("fields"),
+            summary=payload.get("summary", ""),
+            reusable_scenario=payload.get("reusable_scenario", ""),
+            maturity=payload.get("maturity", "草稿"),
+            source_review_id=payload.get("source_review_id"),
+            trigger_context=payload.get("trigger_context"),
+            core_content=payload.get("core_content"),
         )
         return jsonify({"ok": True, "data": asset})
     except (ValueError, TypeError) as exc:
@@ -387,17 +398,19 @@ def api_create_asset():
 def api_update_asset(asset_id):
     payload = request.get_json(silent=True) or {}
     try:
-        asset = database.update_asset(
-            asset_id,
-            payload.get("title", ""),
-            payload.get("trigger_context", ""),
-            payload.get("core_content", ""),
-            payload.get("asset_type"),
-            payload.get("capability_tags"),
-        )
+        asset = database.update_asset(asset_id, **payload)
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/assets/<int:asset_id>/reuse", methods=["POST"])
+def api_increment_asset_reuse(asset_id):
+    try:
+        asset = database.increment_asset_reuse(asset_id)
+        return jsonify({"ok": True, "data": asset})
+    except ValueError as exc:
+        return _error(str(exc), 404)
 
 
 @app.route("/api/assets/<int:asset_id>", methods=["DELETE"])

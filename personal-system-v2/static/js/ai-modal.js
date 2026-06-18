@@ -310,7 +310,21 @@ function readAssetClassifyForm() {
   };
 }
 
-function buildAssetEditHtml(draft) {
+function buildAssetEditHtml(draft, fieldSchemas = {}) {
+  const assetType = draft.asset_type || "本质洞察";
+  const schema = fieldSchemas[assetType] || [];
+  const fields = draft.fields || {};
+  const fieldHtml = schema
+    .map((field) => {
+      const value = escapeHtml(fields[field.key] || "");
+      return `
+        <div class="form-row">
+          <label class="form-label">${escapeHtml(field.label)}</label>
+          <textarea class="textarea draft-field" data-key="${escapeAttr(field.key)}" rows="3">${value}</textarea>
+        </div>`;
+    })
+    .join("");
+
   return `
     <div class="stacked-form">
       <div class="form-row">
@@ -318,22 +332,38 @@ function buildAssetEditHtml(draft) {
         <input type="text" id="draft-title" class="input full-width" value="${escapeAttr(draft.title || "")}">
       </div>
       <div class="form-row">
-        <label class="form-label">触发情境</label>
-        <textarea id="draft-trigger" class="textarea" rows="2">${escapeHtml(draft.trigger_context || "")}</textarea>
+        <label class="form-label">资产类型</label>
+        <input type="text" id="draft-asset-type" class="input full-width" value="${escapeAttr(assetType)}" readonly>
       </div>
-      <div class="form-row">
-        <label class="form-label">核心内容</label>
-        <textarea id="draft-content" class="textarea" rows="8">${escapeHtml(draft.core_content || "")}</textarea>
-      </div>
+      ${fieldHtml || `
+        <div class="form-row">
+          <label class="form-label">触发情境</label>
+          <textarea id="draft-trigger" class="textarea" rows="2">${escapeHtml(draft.trigger_context || "")}</textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label">核心内容</label>
+          <textarea id="draft-content" class="textarea" rows="8">${escapeHtml(draft.core_content || "")}</textarea>
+        </div>`}
     </div>
   `;
 }
 
-function readAssetEditForm() {
+function readAssetEditForm(fieldSchemas = {}) {
+  const title = document.getElementById("draft-title")?.value.trim() || "";
+  const assetType = document.getElementById("draft-asset-type")?.value.trim() || "";
+  const fieldInputs = document.querySelectorAll(".draft-field");
+  if (fieldInputs.length) {
+    const fields = {};
+    fieldInputs.forEach((el) => {
+      fields[el.dataset.key] = el.value.trim();
+    });
+    return { title, asset_type: assetType, fields };
+  }
   return {
-    title: document.getElementById("draft-title").value.trim(),
-    trigger_context: document.getElementById("draft-trigger").value.trim(),
-    core_content: document.getElementById("draft-content").value.trim(),
+    title,
+    asset_type: assetType,
+    trigger_context: document.getElementById("draft-trigger")?.value.trim() || "",
+    core_content: document.getElementById("draft-content")?.value.trim() || "",
   };
 }
 

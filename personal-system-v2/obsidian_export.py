@@ -7,7 +7,7 @@ from datetime import datetime
 import database
 
 SOURCE = "yd-personal-os"
-EXPORT_VERSION = "v1.10.1"
+EXPORT_VERSION = "v1.12.0"
 ROOT = "Obsidian"
 INVALID_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 WHITESPACE = re.compile(r"\s+")
@@ -421,28 +421,56 @@ def build_obsidian_zip():
                 review_line = _wiki_link("Reviews", review_map[review_id])
             tags = asset.get("capability_tags") or []
             capability = ", ".join(tags) if tags else None
+            fields = asset.get("fields") or {}
             body = [
                 f"# {asset['title'] or _untitled_fallback('asset', asset['id'])}",
                 "",
                 f"- **资产类型**：{asset['asset_type']}",
+                f"- **成熟度**：{asset.get('maturity') or '—'}",
+                f"- **复用次数**：{asset.get('reuse_count', 0)}",
                 f"- **能力标签**：{', '.join(tags) if tags else '—'}",
                 f"- **来源复盘**：{review_line}",
+                f"- **来源类型**：{asset.get('source_type') or '—'}",
                 f"- **创建时间**：{asset['created_at']}",
+                f"- **更新时间**：{asset.get('updated_at') or asset['created_at']}",
                 "",
-                "## 触发情境",
+                "## 简要说明",
                 "",
-                asset.get("trigger_context") or "—",
+                asset.get("summary") or "—",
                 "",
-                "## 核心内容",
+                "## 复用场景",
                 "",
-                asset.get("core_content") or "—",
+                asset.get("reusable_scenario") or "—",
                 "",
             ]
+            if fields:
+                body.extend(["## 结构化字段", ""])
+                for key, value in fields.items():
+                    if value:
+                        body.extend([f"### {key}", "", str(value), ""])
+            else:
+                body.extend(
+                    [
+                        "## 触发情境",
+                        "",
+                        asset.get("trigger_context") or "—",
+                        "",
+                        "## 核心内容",
+                        "",
+                        asset.get("core_content") or "—",
+                        "",
+                    ]
+                )
             fm = _base_frontmatter(
                 asset["id"],
                 "asset",
                 asset["created_at"],
+                asset_type=asset.get("asset_type"),
+                maturity=asset.get("maturity"),
+                reuse_count=asset.get("reuse_count"),
                 source_review_id=review_id,
+                source_type=asset.get("source_type"),
+                updated_at=asset.get("updated_at"),
                 capability=capability,
             )
             files[f"{ROOT}/Assets/{basename}.md"] = (

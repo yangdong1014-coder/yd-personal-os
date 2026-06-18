@@ -3,13 +3,16 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import asset_schemas
+
 _DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
 DB_PATH = os.environ.get("YD_OS_DB_PATH", _DEFAULT_DB_PATH)
 
 GOAL_TYPES = ("年度", "季度", "月度", "当前主线")
 TASK_STATUSES = ("待处理", "进行中", "完成")
 REVIEW_TYPES = ("每日", "每周", "项目", "事件")
-ASSET_TYPES = ("知识卡片", "SOP", "提示词", "工作流", "案例复盘", "方法论")
+ASSET_TYPES = asset_schemas.ASSET_TYPES
+MATURITY_LEVELS = asset_schemas.MATURITY_LEVELS
 CAPABILITY_MODULES = (
     "本质力",
     "建模力",
@@ -183,6 +186,7 @@ def init_db():
     )
     _migrate_tasks_table(conn)
     _migrate_inbox_tables(conn)
+    _migrate_assets_table(conn)
     _normalize_mainline_goals(conn)
     conn.commit()
     conn.close()
@@ -214,6 +218,80 @@ def _migrate_inbox_tables(conn):
         );
         """
     )
+
+
+def _migrate_assets_table(conn):
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(assets)").fetchall()}
+    additions = {
+        "summary": "TEXT NOT NULL DEFAULT ''",
+        "fields": "TEXT NOT NULL DEFAULT '{}'",
+        "reusable_scenario": "TEXT NOT NULL DEFAULT ''",
+        "maturity": "TEXT NOT NULL DEFAULT '草稿'",
+        "reuse_count": "INTEGER NOT NULL DEFAULT 0",
+        "source_type": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+
+    rows = conn.execute("SELECT * FROM assets").fetchall()
+    for row in rows:
+        data = dict(row)
+        fields = asset_schemas.parse_fields(data.get("fields"))
+        title = data.get("title") or ""
+        trigger = data.get("trigger_context") or ""
+        core = data.get("core_content") or ""
+        new_type = asset_schemas.normalize_asset_type(
+            data.get("asset_type"), title, core
+        )
+        if not fields:
+            fields = asset_schemas.build_fields_from_legacy(new_type, trigger, core)
+        summary = (data.get("summary") or "").strip()
+        if not summary:
+            summary = asset_schemas.extract_summary(fields, core)
+        reusable = (data.get("reusable_scenario") or "").strip()
+        if not reusable:
+            reusable = asset_schemas.extract_reusable_scenario(new_type, fields)
+        maturity = data.get("maturity") or "草稿"
+        if maturity not in MATURITY_LEVELS:
+            maturity = "可用" if (summary or core) else "草稿"
+        updated_at = (data.get("updated_at") or "").strip() or data.get("created_at")
+        source_type = data.get("source_type") or ""
+        if not source_type and data.get("source_review_id"):
+            source_type = "review"
+        legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(new_type, fields)
+        if not legacy_trigger:
+            legacy_trigger = trigger
+        if not legacy_core:
+            legacy_core = core
+        conn.execute(
+            """
+            UPDATE assets SET
+                asset_type = ?,
+                summary = ?,
+                fields = ?,
+                reusable_scenario = ?,
+                maturity = ?,
+                source_type = ?,
+                updated_at = ?,
+                trigger_context = ?,
+                core_content = ?
+            WHERE id = ?
+            """,
+            (
+                new_type,
+                summary,
+                asset_schemas.serialize_fields(fields),
+                reusable,
+                maturity,
+                source_type,
+                updated_at,
+                legacy_trigger,
+                legacy_core,
+                data["id"],
+            ),
+        )
 
 
 def _demote_other_mainline_goals(conn, keep_goal_id):
@@ -562,8 +640,41 @@ def _parse_tags(raw):
 
 def _asset_row(row):
     data = _row_to_dict(row)
-    if data:
-        data["capability_tags"] = _parse_tags(data.get("capability_tags"))
+    if not data:
+        return data
+    data["capability_tags"] = _parse_tags(data.get("capability_tags"))
+    title = data.get("title") or ""
+    core = data.get("core_content") or ""
+    data["asset_type"] = asset_schemas.normalize_asset_type(
+        data.get("asset_type"), title, core
+    )
+    fields = asset_schemas.parse_fields(data.get("fields"))
+    if not fields:
+        fields = asset_schemas.build_fields_from_legacy(
+            data["asset_type"],
+            data.get("trigger_context") or "",
+            core,
+        )
+    data["fields"] = fields
+    if not (data.get("summary") or "").strip():
+        data["summary"] = asset_schemas.extract_summary(fields, core)
+    if not (data.get("reusable_scenario") or "").strip():
+        data["reusable_scenario"] = asset_schemas.extract_reusable_scenario(
+            data["asset_type"], fields
+        )
+    if data.get("maturity") not in MATURITY_LEVELS:
+        data["maturity"] = "草稿"
+    data["reuse_count"] = int(data.get("reuse_count") or 0)
+    data["source_id"] = data.get("source_review_id")
+    if not data.get("source_type"):
+        data["source_type"] = "review" if data.get("source_review_id") else ""
+    if not (data.get("updated_at") or "").strip():
+        data["updated_at"] = data.get("created_at")
+    trigger, core_content = asset_schemas.sync_legacy_columns(data["asset_type"], fields)
+    if trigger:
+        data["trigger_context"] = trigger
+    if core_content:
+        data["core_content"] = core_content
     return data
 
 
@@ -616,19 +727,56 @@ def get_review(review_id):
 
 def create_asset(
     title,
-    trigger_context,
-    core_content,
     asset_type,
-    capability_tags,
+    capability_tags=None,
+    fields=None,
+    summary="",
+    reusable_scenario="",
+    maturity="草稿",
     source_review_id=None,
+    trigger_context=None,
+    core_content=None,
 ):
-    if asset_type not in ASSET_TYPES:
-        raise ValueError("无效的资产类型")
     title = (title or "").strip()
     if not title:
         raise ValueError("标题不能为空")
+    asset_type = asset_schemas.normalize_asset_type(
+        asset_type, title, core_content or ""
+    )
+    if asset_type not in ASSET_TYPES:
+        raise ValueError("无效的资产类型")
+    if maturity not in MATURITY_LEVELS:
+        maturity = "草稿"
+
+    parsed_fields = asset_schemas.parse_fields(fields)
+    if not parsed_fields:
+        parsed_fields = asset_schemas.build_fields_from_legacy(
+            asset_type,
+            trigger_context or "",
+            core_content or "",
+        )
+    if not asset_schemas.asset_content_valid(
+        asset_type, parsed_fields, core_content or ""
+    ):
+        raise ValueError("请填写资产内容字段")
+
+    legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(
+        asset_type, parsed_fields
+    )
+    if not legacy_trigger and trigger_context:
+        legacy_trigger = (trigger_context or "").strip()
+    if not legacy_core and core_content:
+        legacy_core = (core_content or "").strip()
+
+    summary = (summary or "").strip() or asset_schemas.extract_summary(
+        parsed_fields, legacy_core
+    )
+    reusable_scenario = (reusable_scenario or "").strip() or asset_schemas.extract_reusable_scenario(
+        asset_type, parsed_fields
+    )
 
     tags = _parse_tags(json.dumps(capability_tags or []))
+    source_type = ""
     if source_review_id is not None:
         conn = get_connection()
         review = conn.execute(
@@ -637,23 +785,34 @@ def create_asset(
         conn.close()
         if not review:
             raise ValueError("来源复盘不存在")
+        source_type = "review"
 
+    now = _now()
     conn = get_connection()
     cur = conn.execute(
         """
         INSERT INTO assets (
             title, trigger_context, core_content, asset_type,
-            capability_tags, source_review_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            capability_tags, source_review_id, created_at,
+            summary, fields, reusable_scenario, maturity, reuse_count,
+            source_type, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             title,
-            (trigger_context or "").strip(),
-            (core_content or "").strip(),
+            legacy_trigger,
+            legacy_core,
             asset_type,
             json.dumps(tags, ensure_ascii=False),
             source_review_id,
-            _now(),
+            now,
+            summary,
+            asset_schemas.serialize_fields(parsed_fields),
+            reusable_scenario,
+            maturity,
+            0,
+            source_type,
+            now,
         ),
     )
     conn.commit()
@@ -670,13 +829,18 @@ def get_asset(asset_id):
     return _asset_row(row)
 
 
-def list_assets(tag=None):
+def list_assets(tag=None, asset_type=None):
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM assets ORDER BY created_at DESC"
+        "SELECT * FROM assets ORDER BY updated_at DESC, created_at DESC"
     ).fetchall()
     conn.close()
     assets = [_asset_row(r) for r in rows]
+    if asset_type:
+        normalized = asset_schemas.normalize_asset_type(asset_type)
+        if normalized not in ASSET_TYPES:
+            raise ValueError("无效的资产类型")
+        assets = [a for a in assets if a["asset_type"] == normalized]
     if tag:
         if tag not in CAPABILITY_MODULES:
             raise ValueError("无效的能力标签")
@@ -684,44 +848,108 @@ def list_assets(tag=None):
     return assets
 
 
-def update_asset(
-    asset_id,
-    title,
-    trigger_context,
-    core_content,
-    asset_type=None,
-    capability_tags=None,
-):
+def update_asset(asset_id, **kwargs):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("资产不存在")
+    current = _asset_row(row)
+
+    title = kwargs.get("title", current["title"])
     title = (title or "").strip()
-    core_content = (core_content or "").strip()
     if not title:
+        conn.close()
         raise ValueError("标题不能为空")
-    if not core_content:
-        raise ValueError("核心内容不能为空")
-    if asset_type is not None and asset_type not in ASSET_TYPES:
+
+    asset_type = kwargs.get("asset_type", current["asset_type"])
+    asset_type = asset_schemas.normalize_asset_type(
+        asset_type, title, kwargs.get("core_content", current.get("core_content", ""))
+    )
+    if asset_type not in ASSET_TYPES:
+        conn.close()
         raise ValueError("无效的资产类型")
 
-    conn = get_connection()
-    existing = conn.execute("SELECT id FROM assets WHERE id = ?", (asset_id,)).fetchone()
-    if not existing:
+    parsed_fields = asset_schemas.parse_fields(
+        kwargs.get("fields", current.get("fields"))
+    )
+    if kwargs.get("trigger_context") is not None or kwargs.get("core_content") is not None:
+        legacy_fields = asset_schemas.build_fields_from_legacy(
+            asset_type,
+            kwargs.get("trigger_context", current.get("trigger_context", "")),
+            kwargs.get("core_content", current.get("core_content", "")),
+        )
+        for key, value in legacy_fields.items():
+            if value and not (parsed_fields.get(key) or "").strip():
+                parsed_fields[key] = value
+
+    if not asset_schemas.asset_content_valid(
+        asset_type,
+        parsed_fields,
+        kwargs.get("core_content", current.get("core_content", "")),
+    ):
         conn.close()
-        raise ValueError("知识卡片不存在")
+        raise ValueError("请填写资产内容字段")
 
-    fields = {
+    legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(
+        asset_type, parsed_fields
+    )
+    summary = kwargs.get("summary", current.get("summary", ""))
+    summary = (summary or "").strip() or asset_schemas.extract_summary(
+        parsed_fields, legacy_core
+    )
+    reusable_scenario = kwargs.get(
+        "reusable_scenario", current.get("reusable_scenario", "")
+    )
+    reusable_scenario = (reusable_scenario or "").strip() or asset_schemas.extract_reusable_scenario(
+        asset_type, parsed_fields
+    )
+    maturity = kwargs.get("maturity", current.get("maturity", "草稿"))
+    if maturity not in MATURITY_LEVELS:
+        maturity = current.get("maturity", "草稿")
+
+    capability_tags = kwargs.get("capability_tags", current.get("capability_tags"))
+    tags = _parse_tags(json.dumps(capability_tags or []))
+
+    updates = {
         "title": title,
-        "trigger_context": (trigger_context or "").strip(),
-        "core_content": core_content,
+        "asset_type": asset_type,
+        "trigger_context": legacy_trigger,
+        "core_content": legacy_core,
+        "summary": summary,
+        "fields": asset_schemas.serialize_fields(parsed_fields),
+        "reusable_scenario": reusable_scenario,
+        "maturity": maturity,
+        "capability_tags": json.dumps(tags, ensure_ascii=False),
+        "updated_at": _now(),
     }
-    if asset_type is not None:
-        fields["asset_type"] = asset_type
-    if capability_tags is not None:
-        tags = _parse_tags(json.dumps(capability_tags or []))
-        fields["capability_tags"] = json.dumps(tags, ensure_ascii=False)
+    if "reuse_count" in kwargs and kwargs["reuse_count"] is not None:
+        updates["reuse_count"] = max(0, int(kwargs["reuse_count"]))
 
-    set_clause = ", ".join(f"{key} = ?" for key in fields)
+    set_clause = ", ".join(f"{key} = ?" for key in updates)
     conn.execute(
         f"UPDATE assets SET {set_clause} WHERE id = ?",
-        (*fields.values(), asset_id),
+        (*updates.values(), asset_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    conn.close()
+    return _asset_row(row)
+
+
+def increment_asset_reuse(asset_id):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("资产不存在")
+    conn.execute(
+        """
+        UPDATE assets
+        SET reuse_count = reuse_count + 1, updated_at = ?
+        WHERE id = ?
+        """,
+        (_now(), asset_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
@@ -843,6 +1071,13 @@ _TABLE_FIELDS = {
         "capability_tags",
         "source_review_id",
         "created_at",
+        "summary",
+        "fields",
+        "reusable_scenario",
+        "maturity",
+        "reuse_count",
+        "source_type",
+        "updated_at",
     ),
     "capability_entries": (
         "id",
@@ -979,7 +1214,7 @@ def delete_review(review_id):
 
 
 def delete_asset(asset_id):
-    return _delete_entity("assets", asset_id, "知识卡片")
+    return _delete_entity("assets", asset_id, "资产")
 
 
 def delete_capability_entry(entry_id):
@@ -990,6 +1225,13 @@ _OPTIONAL_IMPORT_FIELDS = {
     "today_progress_date",
     "source_review_id",
     "source_project",
+    "summary",
+    "fields",
+    "reusable_scenario",
+    "maturity",
+    "reuse_count",
+    "source_type",
+    "updated_at",
 }
 
 
@@ -1020,6 +1262,39 @@ def _normalize_import_record(table, raw):
             )
         else:
             raise ValueError("capability_tags 格式无效")
+
+        record["asset_type"] = asset_schemas.normalize_asset_type(
+            record.get("asset_type"),
+            record.get("title", ""),
+            record.get("core_content", ""),
+        )
+        parsed_fields = asset_schemas.parse_fields(record.get("fields"))
+        if not parsed_fields:
+            parsed_fields = asset_schemas.build_fields_from_legacy(
+                record["asset_type"],
+                record.get("trigger_context") or "",
+                record.get("core_content") or "",
+            )
+        record["fields"] = asset_schemas.serialize_fields(parsed_fields)
+        legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(
+            record["asset_type"], parsed_fields
+        )
+        record["trigger_context"] = legacy_trigger or record.get("trigger_context") or ""
+        record["core_content"] = legacy_core or record.get("core_content") or ""
+        record["summary"] = (record.get("summary") or "").strip() or asset_schemas.extract_summary(
+            parsed_fields, record["core_content"]
+        )
+        record["reusable_scenario"] = (
+            (record.get("reusable_scenario") or "").strip()
+            or asset_schemas.extract_reusable_scenario(record["asset_type"], parsed_fields)
+        )
+        if record.get("maturity") not in MATURITY_LEVELS:
+            record["maturity"] = "可用"
+        record["reuse_count"] = int(record.get("reuse_count") or 0)
+        if not record.get("source_type") and record.get("source_review_id"):
+            record["source_type"] = "review"
+        if not record.get("updated_at"):
+            record["updated_at"] = record.get("created_at")
 
     if table == "goals" and record["type"] not in GOAL_TYPES:
         raise ValueError("无效的目标类型")
@@ -1706,9 +1981,18 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
 
     if target_type == "asset":
         asset_title = (payload.get("title") or title).strip()
-        core_content = (payload.get("core_content") or content).strip()
-        if not asset_title or not core_content:
-            return f"建议 #{sid}（知识卡片）：需要标题与核心内容"
+        asset_type = asset_schemas.normalize_asset_type(
+            payload.get("asset_type") or "通用资产", asset_title, content
+        )
+        fields = asset_schemas.parse_fields(payload.get("fields"))
+        if not fields:
+            fields = asset_schemas.build_fields_from_legacy(
+                asset_type,
+                payload.get("trigger_context") or "",
+                payload.get("core_content") or content,
+            )
+        if not asset_title or not asset_schemas.asset_content_valid(asset_type, fields, content):
+            return f"建议 #{sid}（资产）：需要标题与内容"
         return None
 
     if target_type == "capability_entry":
@@ -1806,32 +2090,59 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
 
     if target_type == "asset":
         asset_title = (payload.get("title") or title).strip()
-        core_content = (payload.get("core_content") or content).strip()
-        asset_type = payload.get("asset_type") or "知识卡片"
-        if asset_type not in ASSET_TYPES:
-            asset_type = "知识卡片"
-        if not asset_title or not core_content:
-            raise ValueError("知识卡片需要标题与核心内容")
+        asset_type = asset_schemas.normalize_asset_type(
+            payload.get("asset_type") or "通用资产", asset_title, content
+        )
+        parsed_fields = asset_schemas.parse_fields(payload.get("fields"))
+        if not parsed_fields:
+            parsed_fields = asset_schemas.build_fields_from_legacy(
+                asset_type,
+                payload.get("trigger_context") or "",
+                payload.get("core_content") or content,
+            )
+        if not asset_title or not asset_schemas.asset_content_valid(
+            asset_type, parsed_fields, content
+        ):
+            raise ValueError("资产需要标题与内容")
+        legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(
+            asset_type, parsed_fields
+        )
+        summary = asset_schemas.extract_summary(parsed_fields, legacy_core)
+        reusable = asset_schemas.extract_reusable_scenario(asset_type, parsed_fields)
+        maturity = payload.get("maturity") or "可用"
+        if maturity not in MATURITY_LEVELS:
+            maturity = "可用"
         tags = payload.get("capability_tags") or []
         if not isinstance(tags, list):
             tags = []
         tags = [t for t in tags if t in CAPABILITY_MODULES]
         source_review_id = payload.get("source_review_id")
+        source_type = "review" if source_review_id else ""
+        now = _now()
         cur = conn.execute(
             """
             INSERT INTO assets (
                 title, trigger_context, core_content, asset_type,
-                capability_tags, source_review_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                capability_tags, source_review_id, created_at,
+                summary, fields, reusable_scenario, maturity, reuse_count,
+                source_type, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_title,
-                (payload.get("trigger_context") or "").strip(),
-                core_content,
+                legacy_trigger,
+                legacy_core,
                 asset_type,
                 json.dumps(tags, ensure_ascii=False),
                 source_review_id,
-                _now(),
+                now,
+                summary,
+                asset_schemas.serialize_fields(parsed_fields),
+                reusable,
+                maturity,
+                0,
+                source_type,
+                now,
             ),
         )
         return "assets", cur.lastrowid

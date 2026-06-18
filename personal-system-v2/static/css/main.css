@@ -1488,7 +1488,7 @@ a {
   padding: 1.1rem;
   margin-bottom: 0.65rem;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.12);
   transition: border-color 0.2s var(--ease-out), background 0.2s var(--ease-out);
 }
@@ -1502,6 +1502,198 @@ a {
 .asset-card:hover {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.assets-page-header .page-subtitle {
+  max-width: 40rem;
+}
+
+.assets-panel-head {
+  margin-bottom: 0.75rem;
+}
+
+.asset-dynamic-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.filter-group {
+  margin-bottom: 0.85rem;
+}
+
+.filter-group:last-child {
+  margin-bottom: 0;
+}
+
+.filter-group-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.assets-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.assets-list-count {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.assets-entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.asset-card {
+  border-left: 3px solid var(--accent);
+}
+
+.asset-card--SOP { border-left-color: #6eb87a; }
+.asset-card--本质洞察 { border-left-color: #c86a42; }
+.asset-card--方法论 { border-left-color: #d4a84b; }
+.asset-card--模型 { border-left-color: #5b8fd4; }
+.asset-card--提示词 { border-left-color: #a78bda; }
+.asset-card--模板 { border-left-color: #7eb0e8; }
+.asset-card--案例复盘 { border-left-color: #4db8b8; }
+.asset-card--清单 { border-left-color: #8fbc8f; }
+.asset-card--原则规则 { border-left-color: #b8956a; }
+.asset-card--工具组件 { border-left-color: #9c8ec4; }
+.asset-card--通用资产 { border-left-color: #7a7a72; }
+
+.asset-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.asset-card-intro {
+  flex: 1;
+  min-width: 0;
+}
+
+.asset-card-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+.tag-cap {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-subtle);
+}
+
+.asset-maturity {
+  text-transform: none;
+}
+
+.maturity-draft {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-subtle);
+}
+
+.maturity-ready {
+  color: #7eb0e8;
+  background: rgba(91, 143, 212, 0.12);
+  border-color: rgba(91, 143, 212, 0.35);
+}
+
+.maturity-stable {
+  color: #6ee7a0;
+  background: rgba(110, 231, 160, 0.1);
+  border-color: rgba(110, 231, 160, 0.35);
+}
+
+.maturity-standard {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.asset-summary {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.asset-field-preview {
+  margin: 0.75rem 0 0;
+}
+
+.asset-field-preview > div {
+  margin-bottom: 0.5rem;
+}
+
+.asset-field-preview dt {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+}
+
+.asset-field-preview dd {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.asset-card-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.8rem;
+}
+
+.asset-card-meta-grid .meta-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  margin-bottom: 0.1rem;
+}
+
+.asset-card-meta-grid .meta-value {
+  color: var(--text);
+}
+
+.asset-card-meta-grid .meta-value.mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.asset-ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.asset-card-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.35rem;
+}
+
+@media (min-width: 900px) {
+  .asset-card-meta-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .review-fields {

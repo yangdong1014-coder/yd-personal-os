@@ -3,9 +3,9 @@
 {% block title %}资产 · 个人能力操作系统{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <h1 class="page-title">资产系统</h1>
-  <p class="page-subtitle">将执行与复盘转化为可复用知识资产，AI 辅助归类与模板化</p>
+<header class="page-header assets-page-header">
+  <h1 class="page-title">可复用资产库</h1>
+  <p class="page-subtitle">沉淀可降低重复思考、沟通、试错与执行成本的可复用作战资产</p>
   <span class="version-badge">{{ current_version }}</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
@@ -14,62 +14,82 @@
 
 <div class="assets-layout">
   <section class="section-card assets-form-panel">
-  <h2>新建知识卡片</h2>
-  <form id="asset-form" class="stacked-form">
-    <input type="hidden" id="asset-source-review">
-    <div class="form-row">
-      <label class="form-label" for="asset-title">标题</label>
-      <input type="text" id="asset-title" class="input full-width" placeholder="卡片标题" required>
+    <div class="assets-panel-head">
+      <h2>新建资产</h2>
+      <p class="form-hint section-hint">选择类型后填写对应字段，保存进入资产库</p>
     </div>
-    <div class="form-row">
-      <label class="form-label" for="asset-trigger">触发情境</label>
-      <textarea id="asset-trigger" class="textarea" rows="2" placeholder="这张卡片从什么事情来的"></textarea>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="asset-content">核心内容</label>
-      <textarea id="asset-content" class="textarea" rows="4" placeholder="可复用的核心知识"></textarea>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="asset-type">资产类型</label>
-      <select id="asset-type" class="select">
-        {% for t in asset_types %}
-        <option value="{{ t }}">{{ t }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-row">
-      <span class="form-label">关联能力模块（多选）</span>
-      <div class="tag-picker" id="capability-picker">
-        {% for m in capability_modules %}
-        <label class="tag-option">
-          <input type="checkbox" value="{{ m }}">
-          <span>{{ m }}</span>
-        </label>
-        {% endfor %}
+    <form id="asset-form" class="stacked-form">
+      <input type="hidden" id="asset-source-review">
+      <div class="form-row">
+        <label class="form-label" for="asset-type">资产类型</label>
+        <select id="asset-type" class="select full-width" required>
+          {% for t in asset_types %}
+          <option value="{{ t }}"{% if t == '本质洞察' %} selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
       </div>
-    </div>
-    <button type="submit" class="btn">保存卡片</button>
-  </form>
-  <p class="form-hint" id="asset-prefill-hint" style="display:none;">已从复盘记录预填内容，确认后保存</p>
-</section>
+      <div class="form-row">
+        <label class="form-label" for="asset-title">标题</label>
+        <input type="text" id="asset-title" class="input full-width" placeholder="资产标题" required>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="asset-maturity">成熟度</label>
+        <select id="asset-maturity" class="select full-width">
+          {% for m in maturity_levels %}
+          <option value="{{ m }}"{% if m == '草稿' %} selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="asset-dynamic-fields" class="asset-dynamic-fields"></div>
+      <div class="form-row">
+        <span class="form-label">关联能力模块（多选）</span>
+        <div class="tag-picker" id="capability-picker">
+          {% for m in capability_modules %}
+          <label class="tag-option">
+            <input type="checkbox" value="{{ m }}">
+            <span>{{ m }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <button type="submit" class="btn">保存资产</button>
+    </form>
+    <p class="form-hint" id="asset-prefill-hint" hidden>已从复盘记录预填内容，确认后保存</p>
+  </section>
 
   <div class="assets-main">
     <section class="section-card assets-filter-panel">
-      <h2>按能力标签筛选</h2>
-      <div class="filter-bar" id="tag-filter">
-        <button type="button" class="filter-chip active" data-tag="">全部</button>
-        {% for m in capability_modules %}
-        <button type="button" class="filter-chip" data-tag="{{ m }}">{{ m }}</button>
-        {% endfor %}
+      <h2>筛选</h2>
+      <p class="form-hint section-hint">按资产类型与能力模块浏览</p>
+      <div class="filter-group">
+        <span class="filter-group-label">资产类型</span>
+        <div class="filter-bar" id="type-filter">
+          <button type="button" class="filter-chip active" data-type="">全部</button>
+          {% for t in asset_types %}
+          <button type="button" class="filter-chip" data-type="{{ t }}">{{ t }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="filter-group">
+        <span class="filter-group-label">能力模块</span>
+        <div class="filter-bar" id="tag-filter">
+          <button type="button" class="filter-chip active" data-tag="">全部</button>
+          {% for m in capability_modules %}
+          <button type="button" class="filter-chip" data-tag="{{ m }}">{{ m }}</button>
+          {% endfor %}
+        </div>
       </div>
     </section>
 
     <section class="section-card assets-list-panel">
-      <h2>知识卡片列表</h2>
-      <div id="assets-list" class="entity-list">
-        <div class="empty-state">
-          <strong>添加第一张知识卡片</strong>
-          填写左侧表单或从复盘生成
+      <div class="assets-list-head">
+        <h2>资产列表</h2>
+        <span class="assets-list-count" id="assets-count"></span>
+      </div>
+      <div id="assets-list" class="entity-list assets-entity-list">
+        <div class="empty-state assets-empty-state">
+          <strong>添加第一条可复用资产</strong>
+          填写左侧表单，或从复盘 / 智能归档生成
         </div>
       </div>
     </section>
@@ -80,6 +100,8 @@
 {% block scripts %}
 <script>
   window.ASSET_TYPES = {{ asset_types | tojson }};
+  window.ASSET_FIELD_SCHEMAS = {{ asset_field_schemas | tojson }};
+  window.MATURITY_LEVELS = {{ maturity_levels | tojson }};
   window.CAPABILITY_MODULES = {{ capability_modules | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
