@@ -5,11 +5,35 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">任务系统</h1>
-  <p class="page-subtitle">日常执行，推进可见</p>
+  <p class="page-subtitle">在项目下新建任务，状态变更即时保存</p>
+  <span class="version-badge">v0.2</span>
 </header>
 
-<div class="empty-state">
-  <strong>添加第一个任务</strong>
-  任务列表、状态变更、今日推进标记（v0.2 开放）
-</div>
+<section class="section-card">
+  <h2>新建任务</h2>
+  <form id="task-form" class="inline-form">
+    <select id="task-project" class="select" required>
+      <option value="">选择所属项目</option>
+    </select>
+    <input type="text" id="task-name" class="input" placeholder="任务名称" required>
+    <button type="submit" class="btn">添加任务</button>
+  </form>
+  <p class="form-hint" id="task-form-hint">请先在「目标」页创建目标与项目</p>
+</section>
+
+<section class="section-card">
+  <h2>任务列表</h2>
+  <div id="tasks-list" class="entity-list">
+    <div class="empty-state" id="tasks-empty">
+      <strong>添加第一个任务</strong>
+      选择项目并输入任务名称
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>window.TASK_STATUSES = {{ task_statuses | tojson }};</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/tasks.js') }}"></script>
 {% endblock %}

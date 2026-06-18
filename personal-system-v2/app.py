@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, jsonify, render_template, request
 
 import database
 
@@ -14,6 +14,10 @@ NAV_ITEMS = [
 ]
 
 
+def _error(message, status=400):
+    return jsonify({"ok": False, "error": message}), status
+
+
 @app.route("/")
 def index():
     return render_template("index.html", active_page="index", nav_items=NAV_ITEMS)
@@ -21,12 +25,22 @@ def index():
 
 @app.route("/goals")
 def goals():
-    return render_template("goals.html", active_page="goals", nav_items=NAV_ITEMS)
+    return render_template(
+        "goals.html",
+        active_page="goals",
+        nav_items=NAV_ITEMS,
+        goal_types=database.GOAL_TYPES,
+    )
 
 
 @app.route("/tasks")
 def tasks():
-    return render_template("tasks.html", active_page="tasks", nav_items=NAV_ITEMS)
+    return render_template(
+        "tasks.html",
+        active_page="tasks",
+        nav_items=NAV_ITEMS,
+        task_statuses=database.TASK_STATUSES,
+    )
 
 
 @app.route("/reviews")
@@ -44,6 +58,64 @@ def capabilities():
     return render_template(
         "capabilities.html", active_page="capabilities", nav_items=NAV_ITEMS
     )
+
+
+@app.route("/api/goals", methods=["GET"])
+def api_list_goals():
+    return jsonify({"ok": True, "data": database.list_goals()})
+
+
+@app.route("/api/goals", methods=["POST"])
+def api_create_goal():
+    payload = request.get_json(silent=True) or {}
+    try:
+        goal = database.create_goal(payload.get("name", ""), payload.get("type", ""))
+        return jsonify({"ok": True, "data": goal})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/projects", methods=["GET"])
+def api_list_projects():
+    goal_id = request.args.get("goal_id", type=int)
+    return jsonify({"ok": True, "data": database.list_projects(goal_id)})
+
+
+@app.route("/api/projects", methods=["POST"])
+def api_create_project():
+    payload = request.get_json(silent=True) or {}
+    try:
+        project = database.create_project(
+            payload.get("goal_id"), payload.get("name", "")
+        )
+        return jsonify({"ok": True, "data": project})
+    except (ValueError, TypeError) as exc:
+        return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/tasks", methods=["GET"])
+def api_list_tasks():
+    return jsonify({"ok": True, "data": database.list_tasks()})
+
+
+@app.route("/api/tasks", methods=["POST"])
+def api_create_task():
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = database.create_task(payload.get("project_id"), payload.get("name", ""))
+        return jsonify({"ok": True, "data": task})
+    except (ValueError, TypeError) as exc:
+        return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/tasks/<int:task_id>/status", methods=["PATCH"])
+def api_update_task_status(task_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = database.update_task_status(task_id, payload.get("status", ""))
+        return jsonify({"ok": True, "data": task})
+    except ValueError as exc:
+        return _error(str(exc))
 
 
 if __name__ == "__main__":

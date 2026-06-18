@@ -5,11 +5,35 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">目标系统</h1>
-  <p class="page-subtitle">目标牵引，项目拆解，任务落地</p>
+  <p class="page-subtitle">目标牵引，项目拆解 — 项目嵌套在目标下管理</p>
+  <span class="version-badge">v0.2</span>
 </header>
 
-<div class="empty-state">
-  <strong>添加第一个目标</strong>
-  目标 → 项目 → 任务，形成执行闭环（v0.2 开放）
-</div>
+<section class="section-card">
+  <h2>新建目标</h2>
+  <form id="goal-form" class="inline-form">
+    <input type="text" id="goal-name" class="input" placeholder="目标名称" required>
+    <select id="goal-type" class="select">
+      {% for t in goal_types %}
+      <option value="{{ t }}">{{ t }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn">添加目标</button>
+  </form>
+</section>
+
+<section class="section-card">
+  <h2>目标列表</h2>
+  <div id="goals-list" class="entity-list">
+    <div class="empty-state" id="goals-empty">
+      <strong>添加第一个目标</strong>
+      输入名称与类型后即时保存
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/goals.js') }}"></script>
 {% endblock %}
