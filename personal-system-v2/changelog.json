@@ -11,7 +11,10 @@
         "toast 最多同时显示 3 条，超出移除最旧",
         "导入结果拆分 created / updated，保留 imported 兼容字段",
         "README 版本号改为以 changelog.current 为准",
-        "补充导入计数 created/updated/skipped 回归测试"
+        "补充导入计数 created/updated/skipped 回归测试",
+        "导入失败响应增加 rolled_back 语义，created/updated/imported 归零",
+        "前端导入失败提示明确「已回滚，数据未改变」",
+        "测试覆盖导入失败回滚响应字段"
       ]
     },
     {

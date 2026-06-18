@@ -67,8 +67,10 @@ python app.py
 - **不会自动清空**现有数据；误导入错误备份可能覆盖同 id 记录
 - **建议导入前先导出当前备份**
 - 导入失败时事务回滚，不破坏已有数据
+- 失败响应含 `rolled_back: true` 表示数据库未被修改；此时 `created` / `updated` / `imported` 均为 0
 - 预览返回 `{ will_import, will_update, will_skip, will_fail, errors }`
-- 导入返回 `{ created, updated, skipped, failed, errors, imported }`（`imported = created + updated`），并在结果面板中展示
+- 成功导入返回 `{ created, updated, skipped, failed, errors, imported }`（`imported = created + updated`），并在结果面板中展示
+- 失败导入返回 `{ created: 0, updated: 0, skipped: 0, failed, errors, imported: 0, rolled_back: true, message }`
 
 ## 操作反馈（Toast）
 

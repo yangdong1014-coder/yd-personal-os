@@ -1028,9 +1028,31 @@ def _new_import_stats():
     }
 
 
+IMPORT_ROLLBACK_MESSAGE = "导入失败，所有变更已回滚，数据库未被修改"
+
+
 def _finalize_import_stats(stats):
     stats["imported"] = stats["created"] + stats["updated"]
     return stats
+
+
+def _import_failure_stats(stats=None, errors=None):
+    err_list = list(stats.get("errors", [])) if stats else []
+    if errors:
+        err_list = list(errors)
+    failed = stats.get("failed", 0) if stats else 0
+    if failed <= 0:
+        failed = max(len(err_list), 1) if err_list else 1
+    return {
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "failed": failed,
+        "errors": err_list,
+        "imported": 0,
+        "rolled_back": True,
+        "message": IMPORT_ROLLBACK_MESSAGE,
+    }
 
 
 def _import_row(conn, table, raw, stats):
@@ -1137,7 +1159,13 @@ def preview_import_data(payload):
 
 
 def import_all_data(payload):
-    _validate_import_payload(payload)
+    try:
+        _validate_import_payload(payload)
+    except DataImportError as exc:
+        raise DataImportError(
+            str(exc),
+            exc.stats or _import_failure_stats(errors=[str(exc)]),
+        ) from exc
 
     stats = _new_import_stats()
     conn = get_connection()
@@ -1156,12 +1184,12 @@ def import_all_data(payload):
 
         if stats["failed"] > 0:
             conn.rollback()
-            _finalize_import_stats(stats)
+            failure = _import_failure_stats(stats)
             summary = (
-                f"导入失败：{stats['failed']} 条记录有误，"
+                f"导入失败：{failure['failed']} 条记录有误，"
                 "已回滚，原有数据未改动"
             )
-            raise DataImportError(summary, stats)
+            raise DataImportError(summary, failure)
 
         _refresh_sqlite_sequences(conn)
         conn.commit()
@@ -1170,7 +1198,10 @@ def import_all_data(payload):
         raise
     except sqlite3.Error as exc:
         conn.rollback()
-        raise DataImportError("数据库导入失败，已回滚") from exc
+        raise DataImportError(
+            "数据库导入失败，已回滚",
+            _import_failure_stats(errors=[str(exc)]),
+        ) from exc
     finally:
         conn.close()
 

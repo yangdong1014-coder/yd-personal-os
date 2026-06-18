@@ -194,7 +194,13 @@ def test_import_foreign_key_failure_rolls_back(client):
     assert response.status_code == 400
     payload = response.get_json()
     assert payload["ok"] is False
-    assert payload["data"]["failed"] >= 1
+    data = payload["data"]
+    assert data["rolled_back"] is True
+    assert data["created"] == 0
+    assert data["updated"] == 0
+    assert data["imported"] == 0
+    assert data["failed"] >= 1
+    assert data["message"]
 
     after_goals = client.get("/api/goals").get_json()["data"]
     assert len(after_goals) == len(before_goals)
@@ -213,6 +219,14 @@ def test_import_invalid_structure_rolls_back(client):
         json={"meta": {"version": "1.0"}, "goals": "not-a-list"},
     )
     assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["ok"] is False
+    data = payload["data"]
+    assert data["rolled_back"] is True
+    assert data["created"] == 0
+    assert data["updated"] == 0
+    assert data["imported"] == 0
+    assert data["message"]
     assert len(client.get("/api/goals").get_json()["data"]) == before_count
 
 

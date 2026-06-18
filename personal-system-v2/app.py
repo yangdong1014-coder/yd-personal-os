@@ -273,13 +273,9 @@ def api_import():
         return jsonify({"ok": True, "data": stats})
     except database.DataImportError as exc:
         body = {"ok": False, "error": str(exc)}
-        if exc.stats:
-            body["data"] = {
-                "imported": exc.stats.get("imported", 0),
-                "skipped": exc.stats.get("skipped", 0),
-                "failed": exc.stats.get("failed", 0),
-                "errors": exc.stats.get("errors", []),
-            }
+        body["data"] = exc.stats or database._import_failure_stats(
+            errors=[str(exc)]
+        )
         return jsonify(body), 400
 
 

@@ -53,6 +53,14 @@ def test_import_updates_changed_records(client):
     assert saved["name"] == "新名称"
 
 
+def test_import_success_has_no_rolled_back(client):
+    backup = _goal_backup(5002)
+    stats = client.post("/api/import", json=backup).get_json()["data"]
+    assert stats.get("rolled_back") is not True
+    assert stats["created"] >= 1
+    assert stats["imported"] == stats["created"] + stats["updated"]
+
+
 def test_import_skips_unchanged_records(client):
     goal = client.post(
         "/api/goals",

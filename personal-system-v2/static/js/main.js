@@ -118,14 +118,20 @@ function closeImportPreview() {
 
 function showImportResult(stats, isError) {
   const overlay = document.getElementById("import-result-overlay");
+  const titleEl = document.getElementById("import-result-title");
   const statsEl = document.getElementById("import-result-stats");
   const noteEl = document.getElementById("import-result-note");
   const errorsEl = document.getElementById("import-result-errors");
 
-  const created = stats.created ?? 0;
-  const updated = stats.updated ?? 0;
-  const skipped = stats.skipped ?? 0;
+  const rolledBack = Boolean(stats.rolled_back);
+  const created = rolledBack ? 0 : (stats.created ?? 0);
+  const updated = rolledBack ? 0 : (stats.updated ?? 0);
+  const skipped = rolledBack ? 0 : (stats.skipped ?? 0);
   const failed = stats.failed ?? 0;
+
+  if (titleEl) {
+    titleEl.textContent = rolledBack ? "导入失败" : "导入结果";
+  }
 
   renderImportStats(statsEl, [
     { label: "新增", value: created },
@@ -136,7 +142,12 @@ function showImportResult(stats, isError) {
   renderErrorList(errorsEl, stats.errors);
 
   if (noteEl) {
-    if (skipped > 0) {
+    if (rolledBack) {
+      noteEl.hidden = false;
+      noteEl.textContent =
+        stats.message ||
+        "导入失败，所有变更已回滚，数据库未被修改。";
+    } else if (skipped > 0) {
       noteEl.hidden = false;
       noteEl.textContent = `${skipped} 条记录因内容相同已跳过合并。`;
     } else {
@@ -146,8 +157,8 @@ function showImportResult(stats, isError) {
 
   if (overlay) overlay.hidden = false;
 
-  if (isError && created === 0 && updated === 0) {
-    showToast("导入失败", "error");
+  if (rolledBack || (isError && created === 0 && updated === 0)) {
+    showToast("导入失败，已回滚，数据未改变", "error");
   } else if (failed > 0) {
     showToast(
       `导入部分完成：新增 ${created}，更新 ${updated}，失败 ${failed}`,
@@ -246,8 +257,11 @@ async function executeImport() {
           created: 0,
           updated: 0,
           skipped: 0,
-          failed: result.data?.failed ?? 1,
-          errors: result.data?.errors || [result.error || "导入失败"],
+          imported: 0,
+          failed: 1,
+          errors: [result.error || "导入失败"],
+          rolled_back: true,
+          message: "导入失败，所有变更已回滚，数据库未被修改",
         },
         true
       );
