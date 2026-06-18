@@ -1,6 +1,20 @@
 {
-  "current": "v1.10",
+  "current": "v1.10.1",
   "entries": [
+    {
+      "version": "v1.10.1",
+      "date": "2026-06-18",
+      "title": "Obsidian 导出收口",
+      "type": "fix",
+      "items": [
+        "Obsidian zip 根目录增加 README.md 导出说明",
+        "增加 00-Index.md MOC 与各模块 Index 索引页",
+        "文件名与内部链接统一映射，重复名称自动加 -2/-3 后缀",
+        "空标题与非法字符文件名安全兜底（Untitled <Type> <id>）",
+        "frontmatter 增加 export_version: v1.10.1 与关联字段补强",
+        "pytest 覆盖 README、Index、命名一致性与空库导出"
+      ]
+    },
     {
       "version": "v1.10",
       "date": "2026-06-18",
