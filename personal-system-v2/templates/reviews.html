@@ -12,7 +12,8 @@
   {% endif %}
 </header>
 
-<section class="section-card">
+<div class="page-split page-split-wide">
+  <section class="section-card page-split-side">
   <h2>新建复盘</h2>
   <form id="review-form" class="stacked-form">
     <div class="form-row">
@@ -50,7 +51,7 @@
   </form>
 </section>
 
-<section class="section-card">
+  <section class="section-card page-split-main">
   <div class="section-header-row">
     <div>
       <h2>复盘历史</h2>
@@ -65,6 +66,7 @@
     </div>
   </div>
 </section>
+</div>
 {% endblock %}
 
 {% block scripts %}

@@ -12,31 +12,35 @@
   {% endif %}
 </header>
 
-<section class="section-card">
-  <h2>新建任务</h2>
-  <form id="task-form" class="inline-form">
-    <select id="task-project" class="select" required>
-      <option value="">选择所属项目</option>
-    </select>
-    <input type="text" id="task-name" class="input" placeholder="任务名称" required>
-    <button type="submit" class="btn">添加任务</button>
-    <button type="button" id="ai-decompose-btn" class="btn btn-sm btn-ai" disabled>AI拆任务</button>
-  </form>
-  <p class="form-hint" id="task-form-hint">请先在「目标」页创建目标与项目</p>
-</section>
+<div class="page-split">
+  <section class="section-card page-split-side">
+    <h2>新建任务</h2>
+    <form id="task-form" class="stacked-form inline-form-stacked">
+      <select id="task-project" class="select full-width" required>
+        <option value="">选择所属项目</option>
+      </select>
+      <input type="text" id="task-name" class="input full-width" placeholder="任务名称" required>
+      <div class="form-actions-row">
+        <button type="submit" class="btn">添加任务</button>
+        <button type="button" id="ai-decompose-btn" class="btn btn-sm btn-ai" disabled>AI拆任务</button>
+      </div>
+    </form>
+    <p class="form-hint" id="task-form-hint">请先在「目标」页创建目标与项目</p>
+  </section>
 
-<section class="section-card">
-  <div class="section-header-row">
-    <h2>任务列表</h2>
-    <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
-  </div>
-  <div id="tasks-list" class="entity-list">
-    <div class="empty-state" id="tasks-empty">
-      <strong>添加第一个任务</strong>
-      选择项目并输入任务名称
+  <section class="section-card page-split-main">
+    <div class="section-header-row">
+      <h2>任务列表</h2>
+      <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
     </div>
-  </div>
-</section>
+    <div id="tasks-list" class="entity-list">
+      <div class="empty-state" id="tasks-empty">
+        <strong>添加第一个任务</strong>
+        选择项目并输入任务名称
+      </div>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}

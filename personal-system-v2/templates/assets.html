@@ -12,7 +12,8 @@
   {% endif %}
 </header>
 
-<section class="section-card">
+<div class="assets-layout">
+  <section class="section-card assets-form-panel">
   <h2>新建知识卡片</h2>
   <form id="asset-form" class="stacked-form">
     <input type="hidden" id="asset-source-review">
@@ -52,25 +53,28 @@
   <p class="form-hint" id="asset-prefill-hint" style="display:none;">已从复盘记录预填内容，确认后保存</p>
 </section>
 
-<section class="section-card">
-  <h2>按能力标签筛选</h2>
-  <div class="filter-bar" id="tag-filter">
-    <button type="button" class="filter-chip active" data-tag="">全部</button>
-    {% for m in capability_modules %}
-    <button type="button" class="filter-chip" data-tag="{{ m }}">{{ m }}</button>
-    {% endfor %}
-  </div>
-</section>
+  <div class="assets-main">
+    <section class="section-card assets-filter-panel">
+      <h2>按能力标签筛选</h2>
+      <div class="filter-bar" id="tag-filter">
+        <button type="button" class="filter-chip active" data-tag="">全部</button>
+        {% for m in capability_modules %}
+        <button type="button" class="filter-chip" data-tag="{{ m }}">{{ m }}</button>
+        {% endfor %}
+      </div>
+    </section>
 
-<section class="section-card">
-  <h2>知识卡片列表</h2>
-  <div id="assets-list" class="entity-list">
-    <div class="empty-state">
-      <strong>添加第一张知识卡片</strong>
-      填写上方表单或从复盘生成
-    </div>
+    <section class="section-card assets-list-panel">
+      <h2>知识卡片列表</h2>
+      <div id="assets-list" class="entity-list">
+        <div class="empty-state">
+          <strong>添加第一张知识卡片</strong>
+          填写左侧表单或从复盘生成
+        </div>
+      </div>
+    </section>
   </div>
-</section>
+</div>
 {% endblock %}
 
 {% block scripts %}

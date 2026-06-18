@@ -12,38 +12,41 @@
   {% endif %}
 </header>
 
-<section class="section-card model-settings-card" id="model-settings">
-  <h2>AI 模型</h2>
-  <div class="model-settings-row">
-    <label class="form-label" for="model-select">当前模型</label>
-    <select id="model-select" class="select model-select" disabled>
-      <option value="">加载中…</option>
-    </select>
-    <button type="button" class="btn btn-sm" id="save-model-btn" disabled>保存</button>
-  </div>
-  <p id="model-hint" class="form-hint model-hint" aria-live="polite"></p>
-</section>
+<div class="prompts-layout">
+  <div class="prompts-toolbar">
+    <section class="section-card model-settings-card" id="model-settings">
+      <h2>AI 模型</h2>
+      <div class="model-settings-row">
+        <label class="form-label" for="model-select">当前模型</label>
+        <select id="model-select" class="select model-select" disabled>
+          <option value="">加载中…</option>
+        </select>
+        <button type="button" class="btn btn-sm" id="save-model-btn" disabled>保存</button>
+      </div>
+      <p id="model-hint" class="form-hint model-hint" aria-live="polite"></p>
+    </section>
 
-<section class="section-card">
-  <h2>模块</h2>
-  <div class="filter-bar" id="module-filter">
-    {% set module_labels = {
-      'dashboard': '首页',
-      'goals': '目标',
-      'tasks': '任务',
-      'reviews': '复盘',
-      'assets': '资产',
-      'capabilities': '能力'
-    } %}
-    {% for m in prompt_modules %}
-    <button type="button" class="filter-chip{% if loop.first %} active{% endif %}" data-module="{{ m }}">
-      {{ module_labels.get(m, m) }}
-    </button>
-    {% endfor %}
+    <section class="section-card prompts-module-card">
+      <h2>业务模块</h2>
+      <div class="filter-bar" id="module-filter">
+        {% set module_labels = {
+          'dashboard': '首页',
+          'goals': '目标',
+          'tasks': '任务',
+          'reviews': '复盘',
+          'assets': '资产',
+          'capabilities': '能力'
+        } %}
+        {% for m in prompt_modules %}
+        <button type="button" class="filter-chip{% if loop.first %} active{% endif %}" data-module="{{ m }}">
+          {{ module_labels.get(m, m) }}
+        </button>
+        {% endfor %}
+      </div>
+    </section>
   </div>
-</section>
 
-<section class="section-card prompt-workspace">
+  <section class="section-card prompt-workspace prompts-workspace-card">
   <aside class="prompt-scene-list" id="scene-list">
     <p class="prompt-list-hint">选择场景</p>
   </aside>
@@ -53,9 +56,10 @@
       编辑系统提示词与用户上下文模板
     </div>
   </div>
-</section>
+  </section>
 
-<p id="prompt-status" class="form-hint prompt-status" aria-live="polite"></p>
+  <p id="prompt-status" class="form-hint prompt-status" aria-live="polite"></p>
+</div>
 {% endblock %}
 
 {% block scripts %}

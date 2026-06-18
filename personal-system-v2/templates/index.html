@@ -20,20 +20,24 @@
   {% endif %}
 </header>
 
-<section class="section-card" id="dashboard-goal">
-  <h2>当前主线目标</h2>
-  <div id="dashboard-goal-content"></div>
-</section>
+<div class="dashboard-layout">
+  <section class="section-card dashboard-span-full" id="dashboard-goal">
+    <h2>当前主线目标</h2>
+    <div id="dashboard-goal-content"></div>
+  </section>
 
-<section class="section-card" id="dashboard-projects">
-  <h2>本周进行中的项目</h2>
-  <div id="dashboard-projects-content"></div>
-</section>
+  <div class="dashboard-grid">
+    <section class="section-card" id="dashboard-projects">
+      <h2>本周进行中的项目</h2>
+      <div id="dashboard-projects-content"></div>
+    </section>
 
-<section class="section-card" id="dashboard-tasks">
-  <h2>今日必须推进的任务</h2>
-  <div id="dashboard-tasks-content"></div>
-</section>
+    <section class="section-card" id="dashboard-tasks">
+      <h2>今日必须推进的任务</h2>
+      <div id="dashboard-tasks-content"></div>
+    </section>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

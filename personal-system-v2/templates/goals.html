@@ -12,28 +12,30 @@
   {% endif %}
 </header>
 
-<section class="section-card">
-  <h2>新建目标</h2>
-  <form id="goal-form" class="inline-form">
-    <input type="text" id="goal-name" class="input" placeholder="目标名称" required>
-    <select id="goal-type" class="select">
-      {% for t in goal_types %}
-      <option value="{{ t }}"{% if t == '年度' %} selected{% endif %}>{{ t }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn">添加目标</button>
-  </form>
-</section>
+<div class="page-split">
+  <section class="section-card page-split-side">
+    <h2>新建目标</h2>
+    <form id="goal-form" class="stacked-form inline-form-stacked">
+      <input type="text" id="goal-name" class="input full-width" placeholder="目标名称" required>
+      <select id="goal-type" class="select full-width">
+        {% for t in goal_types %}
+        <option value="{{ t }}"{% if t == '年度' %} selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn">添加目标</button>
+    </form>
+  </section>
 
-<section class="section-card">
-  <h2>目标列表</h2>
-  <div id="goals-list" class="entity-list">
-    <div class="empty-state" id="goals-empty">
-      <strong>添加第一个目标</strong>
-      输入名称与类型后即时保存
+  <section class="section-card page-split-main">
+    <h2>目标列表</h2>
+    <div id="goals-list" class="entity-list">
+      <div class="empty-state" id="goals-empty">
+        <strong>添加第一个目标</strong>
+        输入名称与类型后即时保存
+      </div>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}

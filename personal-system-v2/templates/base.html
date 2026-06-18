@@ -7,45 +7,54 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
 <body>
-  <nav class="top-nav">
-    <a href="{{ url_for('index') }}" class="nav-brand">个人能力<span>OS</span></a>
-    <div class="nav-links">
-      {% for item in nav_items %}
-      <a href="{{ item.path }}"
-         class="nav-link{% if active_page == item.endpoint %} active{% endif %}">
-        {{ item.label }}
-      </a>
-      {% endfor %}
-    </div>
-    <button
-      type="button"
-      id="export-data-btn"
-      class="nav-export-btn"
-      title="导出全部数据"
-      aria-label="导出全部数据"
-    >
-      <svg
-        class="nav-export-icon"
-        viewBox="0 0 24 24"
-        width="20"
-        height="20"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M12 4v10"/>
-        <path d="m8.5 10.5 3.5 3.5 3.5-3.5"/>
-        <path d="M5 20h14"/>
-      </svg>
-    </button>
-  </nav>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="sidebar-head">
+        <a href="{{ url_for('index') }}" class="nav-brand">个人能力<span>OS</span></a>
+      </div>
+      <nav class="nav-links" aria-label="主导航">
+        {% for item in nav_items %}
+        <a href="{{ item.path }}"
+           class="nav-link{% if active_page == item.endpoint %} active{% endif %}">
+          {{ item.label }}
+        </a>
+        {% endfor %}
+      </nav>
+      <div class="sidebar-foot">
+        <button
+          type="button"
+          id="export-data-btn"
+          class="nav-export-btn"
+          title="导出全部数据"
+          aria-label="导出全部数据"
+        >
+          <svg
+            class="nav-export-icon"
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 4v10"/>
+            <path d="m8.5 10.5 3.5 3.5 3.5-3.5"/>
+            <path d="M5 20h14"/>
+          </svg>
+          <span class="nav-export-label">导出备份</span>
+        </button>
+      </div>
+    </aside>
 
-  <main class="main-content">
-    {% block content %}{% endblock %}
-  </main>
+    <main class="main-content">
+      <div class="page-container">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
 
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   {% block scripts %}{% endblock %}
