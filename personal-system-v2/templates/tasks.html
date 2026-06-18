@@ -5,8 +5,11 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">任务系统</h1>
-  <p class="page-subtitle">在项目下新建任务，状态变更即时保存</p>
-  <span class="version-badge">v0.5</span>
+  <p class="page-subtitle">在项目下新建任务，AI 辅助拆解与今日推荐</p>
+  <span class="version-badge">v1.2-ai</span>
+  {% if not ai_enabled %}
+  <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
+  {% endif %}
 </header>
 
 <section class="section-card">
@@ -17,12 +20,16 @@
     </select>
     <input type="text" id="task-name" class="input" placeholder="任务名称" required>
     <button type="submit" class="btn">添加任务</button>
+    <button type="button" id="ai-decompose-btn" class="btn btn-sm btn-ai" disabled>AI拆任务</button>
   </form>
   <p class="form-hint" id="task-form-hint">请先在「目标」页创建目标与项目</p>
 </section>
 
 <section class="section-card">
-  <h2>任务列表</h2>
+  <div class="section-header-row">
+    <h2>任务列表</h2>
+    <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
+  </div>
   <div id="tasks-list" class="entity-list">
     <div class="empty-state" id="tasks-empty">
       <strong>添加第一个任务</strong>
@@ -35,5 +42,6 @@
 {% block scripts %}
 <script>window.TASK_STATUSES = {{ task_statuses | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/tasks.js') }}"></script>
 {% endblock %}

@@ -112,6 +112,31 @@ a {
   gap: 1rem;
 }
 
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.section-header-row h2 {
+  margin: 0;
+}
+
+.form-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recommend-name {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
 .page-title {
   margin: 0 0 0.35rem;
   font-size: 1.5rem;
@@ -856,6 +881,11 @@ a {
   }
 
   .page-header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-header-row {
     flex-direction: column;
     align-items: stretch;
   }

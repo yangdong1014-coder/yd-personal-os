@@ -3,6 +3,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const tasksList = document.getElementById("tasks-list");
   const projectSelect = document.getElementById("task-project");
   const formHint = document.getElementById("task-form-hint");
+  const decomposeBtn = document.getElementById("ai-decompose-btn");
+  const recommendBtn = document.getElementById("ai-recommend-btn");
 
   if (!taskForm || !tasksList) return;
 
@@ -20,11 +22,93 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (current) projectSelect.value = current;
     formHint.style.display = projects.length === 0 ? "block" : "none";
+    if (decomposeBtn) {
+      decomposeBtn.disabled = !projectSelect.value;
+    }
   }
 
   function isTodayProgress(task) {
     const today = new Date().toISOString().slice(0, 10);
     return task.today_progress === 1 && task.today_progress_date === today;
+  }
+
+  async function handleAIDecompose(button) {
+    const projectId = parseInt(projectSelect.value, 10);
+    if (!projectId) return;
+
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "拆解中…";
+
+    try {
+      const result = await apiRequest("/api/ai/decompose-project", {
+        method: "POST",
+        body: JSON.stringify({ project_id: projectId }),
+      });
+
+      showAIModal({
+        title: `AI 任务拆解 — ${result.project_name}`,
+        bodyHtml: buildTasksDraftHtml(result.tasks),
+        confirmLabel: "确认创建",
+        loadingLabel: "创建中…",
+        onConfirm: async () => {
+          const names = readSelectedTaskNames();
+          if (names.length === 0) {
+            throw new Error("请至少选择一个任务");
+          }
+          for (const name of names) {
+            await apiRequest("/api/tasks", {
+              method: "POST",
+              body: JSON.stringify({ project_id: projectId, name }),
+            });
+          }
+          await loadTasks();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 拆解失败");
+    } finally {
+      button.disabled = !projectSelect.value;
+      button.textContent = prevText;
+    }
+  }
+
+  async function handleAIRecommend(button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "推荐中…";
+
+    try {
+      const result = await apiRequest("/api/ai/recommend-today-tasks", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+
+      showAIModal({
+        title: "AI 今日推进推荐",
+        bodyHtml: buildTodayRecommendHtml(result.recommendations),
+        confirmLabel: "标记今日推进",
+        loadingLabel: "标记中…",
+        onConfirm: async () => {
+          const taskIds = readSelectedRecommendTaskIds();
+          if (taskIds.length === 0) {
+            throw new Error("请至少选择一个任务");
+          }
+          for (const taskId of taskIds) {
+            await apiRequest(`/api/tasks/${taskId}/today-progress`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: true }),
+            });
+          }
+          await loadTasks();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 推荐失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
   }
 
   async function loadTasks() {
@@ -102,6 +186,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
       tasksList.appendChild(row);
     });
+  }
+
+  if (projectSelect && decomposeBtn) {
+    projectSelect.addEventListener("change", () => {
+      decomposeBtn.disabled = !projectSelect.value;
+    });
+    decomposeBtn.addEventListener("click", () => handleAIDecompose(decomposeBtn));
+  }
+
+  if (recommendBtn) {
+    recommendBtn.addEventListener("click", () => handleAIRecommend(recommendBtn));
   }
 
   taskForm.addEventListener("submit", async (e) => {

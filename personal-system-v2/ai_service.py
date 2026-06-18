@@ -241,3 +241,169 @@ def decompose_goal_projects(goal_id):
         "goal_name": goal["name"],
         "projects": result,
     }
+
+
+def decompose_project_tasks(project_id):
+    project = database.get_project(project_id)
+    if not project:
+        raise AIServiceError("项目不存在")
+
+    existing = database.list_tasks(project_id)
+    existing_names = [t["name"] for t in existing]
+
+    system_prompt = """你是任务拆解助手。将项目拆解为可执行的具体任务（不是子项目）。
+每个任务应是今天或本周可推进的动作，名称简洁（2-20字）。
+可建议优先级：高 / 中 / 低（仅作参考，不写入系统）。
+避免与已有任务重复。
+只输出 JSON，字段：
+- tasks: 对象数组，每项含 name（任务名）、priority（高/中/低）、reason（一句话说明）"""
+
+    user_prompt = f"""项目名称：{project['name']}
+所属目标：{project['goal_name']}（{project['goal_type']}）
+已有任务：{', '.join(existing_names) if existing_names else '无'}"""
+
+    data = _chat_json(system_prompt, user_prompt)
+
+    tasks = data.get("tasks") or []
+    if not isinstance(tasks, list) or not tasks:
+        raise AIServiceError("AI 未能生成有效任务建议，请重试")
+
+    result = []
+    existing_lower = {n.lower() for n in existing_names}
+    for item in tasks[:8]:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if not name or name.lower() in existing_lower:
+            continue
+        priority = (item.get("priority") or "").strip()
+        if priority not in ("高", "中", "低"):
+            priority = "中"
+        result.append({
+            "name": name,
+            "priority": priority,
+            "reason": (item.get("reason") or "").strip(),
+        })
+
+    if not result:
+        raise AIServiceError("AI 建议的任务均已存在或无效，请重试")
+
+    return {
+        "project_id": project_id,
+        "project_name": project["name"],
+        "goal_name": project["goal_name"],
+        "tasks": result,
+    }
+
+
+def recommend_today_tasks():
+    dashboard = database.get_dashboard()
+    open_tasks = [t for t in database.list_tasks() if t.get("status") != "完成"]
+    if not open_tasks:
+        raise AIServiceError("暂无未完成任务可推荐")
+
+    lines = []
+    goal = dashboard.get("mainline_goal")
+    if goal:
+        lines.append(f"当前主线目标：{goal['name']}")
+    else:
+        lines.append("当前主线目标：无")
+
+    lines.append("未完成任务列表：")
+    task_map = {}
+    for t in open_tasks[:30]:
+        task_map[t["id"]] = t
+        lines.append(
+            f"- id={t['id']} | {t['name']} | {t['status']} | "
+            f"{t['goal_name']}/{t['project_name']}"
+        )
+
+    system_prompt = """你是个人任务优先级助手。从给定的未完成任务中，推荐今日最应推进的 1-3 项。
+优先：与主线目标相关、状态为进行中、阻塞后续工作的任务。
+只输出 JSON，字段：
+- recommendations: 对象数组，每项含 task_id（整数，必须来自列表中的 id）、reason（一句话推荐理由）"""
+
+    data = _chat_json(system_prompt, "\n".join(lines))
+
+    recommendations = data.get("recommendations") or []
+    if not isinstance(recommendations, list):
+        recommendations = []
+
+    name_map = {t["name"].lower(): t for t in task_map.values()}
+    result = []
+    seen_ids = set()
+
+    for item in recommendations[:3]:
+        if not isinstance(item, dict):
+            continue
+
+        task = None
+        task_id = item.get("task_id")
+        try:
+            task_id = int(task_id)
+            task = task_map.get(task_id)
+        except (TypeError, ValueError):
+            task_id = None
+
+        if not task:
+            task_name = (item.get("task_name") or item.get("name") or "").strip().lower()
+            if task_name:
+                task = name_map.get(task_name)
+
+        if not task or task["id"] in seen_ids:
+            continue
+
+        seen_ids.add(task["id"])
+        result.append({
+            "task_id": task["id"],
+            "name": task["name"],
+            "status": task["status"],
+            "goal_name": task["goal_name"],
+            "project_name": task["project_name"],
+            "reason": (item.get("reason") or "").strip(),
+        })
+
+    if not result and len(open_tasks) == 1:
+        task = open_tasks[0]
+        result.append({
+            "task_id": task["id"],
+            "name": task["name"],
+            "status": task["status"],
+            "goal_name": task["goal_name"],
+            "project_name": task["project_name"],
+            "reason": "当前唯一未完成任务，建议今日推进",
+        })
+
+    if not result:
+        raise AIServiceError("AI 推荐的任务无效，请重试")
+
+    return {"recommendations": result}
+
+
+def complete_review_fields(what_done, review_type="每日"):
+    what_done = (what_done or "").strip()
+    if not what_done:
+        raise AIServiceError("请先填写「今天做了什么」")
+
+    system_prompt = """你是复盘补全助手。根据用户描述的今日事项，合理补全复盘字段。
+语气具体、可执行，避免空话。可合理推断卡点，但不要编造未提及的重大事件。
+只输出 JSON，字段：
+- stuck: 字符串，可能的卡点与原因
+- next_adjust: 字符串，下一步调整建议
+- depositable: 字符串，可沉淀为知识资产的内容（无则空字符串）"""
+
+    user_prompt = f"""复盘类型：{review_type or '每日'}
+今天做了什么：{what_done}"""
+
+    data = _chat_json(system_prompt, user_prompt)
+
+    stuck = (data.get("stuck") or "").strip()
+    next_adjust = (data.get("next_adjust") or "").strip()
+    if not stuck and not next_adjust:
+        raise AIServiceError("AI 未能生成有效补全内容，请重试")
+
+    return {
+        "stuck": stuck,
+        "next_adjust": next_adjust,
+        "depositable": (data.get("depositable") or "").strip(),
+    }

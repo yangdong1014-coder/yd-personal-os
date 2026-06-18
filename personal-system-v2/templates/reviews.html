@@ -6,7 +6,7 @@
 <header class="page-header">
   <h1 class="page-title">复盘系统</h1>
   <p class="page-subtitle">识别偏差，提炼经验，AI 辅助沉淀为知识卡片</p>
-  <span class="version-badge">v0.6</span>
+  <span class="version-badge">v1.2-ai</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
@@ -43,7 +43,10 @@
       <label class="form-label" for="review-depositable">可沉淀内容</label>
       <textarea id="review-depositable" class="textarea" rows="3" placeholder="可转化为知识资产的内容"></textarea>
     </div>
-    <button type="submit" class="btn">保存复盘</button>
+    <div class="form-actions-row">
+      <button type="button" id="ai-complete-btn" class="btn btn-sm btn-ai">AI补全</button>
+      <button type="submit" class="btn">保存复盘</button>
+    </div>
   </form>
 </section>
 

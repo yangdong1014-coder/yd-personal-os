@@ -239,6 +239,21 @@ def create_project(goal_id, name):
     return _row_to_dict(row)
 
 
+def get_project(project_id):
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT p.*, g.name AS goal_name, g.type AS goal_type
+        FROM projects p
+        JOIN goals g ON g.id = p.goal_id
+        WHERE p.id = ?
+        """,
+        (project_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
 def list_projects(goal_id=None):
     conn = get_connection()
     if goal_id is not None:
@@ -311,17 +326,30 @@ def _fetch_task(conn, task_id):
     ).fetchone()
 
 
-def list_tasks():
+def list_tasks(project_id=None):
     conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT t.*, p.name AS project_name, g.name AS goal_name
-        FROM tasks t
-        JOIN projects p ON p.id = t.project_id
-        JOIN goals g ON g.id = p.goal_id
-        ORDER BY t.created_at DESC
-        """
-    ).fetchall()
+    if project_id is not None:
+        rows = conn.execute(
+            """
+            SELECT t.*, p.name AS project_name, g.name AS goal_name
+            FROM tasks t
+            JOIN projects p ON p.id = t.project_id
+            JOIN goals g ON g.id = p.goal_id
+            WHERE t.project_id = ?
+            ORDER BY t.created_at DESC
+            """,
+            (project_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT t.*, p.name AS project_name, g.name AS goal_name
+            FROM tasks t
+            JOIN projects p ON p.id = t.project_id
+            JOIN goals g ON g.id = p.goal_id
+            ORDER BY t.created_at DESC
+            """
+        ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 

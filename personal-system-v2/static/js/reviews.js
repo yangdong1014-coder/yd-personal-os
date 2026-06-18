@@ -6,8 +6,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (!reviewForm || !reviewsList) return;
 
+  const completeBtn = document.getElementById("ai-complete-btn");
+
   if (dateInput) {
     dateInput.value = new Date().toISOString().slice(0, 10);
+  }
+
+  async function handleAIComplete(button) {
+    const whatDone = document.getElementById("review-what-done").value.trim();
+    if (!whatDone) {
+      alert("请先填写「今天做了什么」");
+      return;
+    }
+
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "补全中…";
+
+    try {
+      const draft = await apiRequest("/api/ai/complete-review", {
+        method: "POST",
+        body: JSON.stringify({
+          what_done: whatDone,
+          type: document.getElementById("review-type").value,
+        }),
+      });
+
+      showAIModal({
+        title: "AI 复盘补全",
+        bodyHtml: buildReviewCompleteHtml(draft),
+        confirmLabel: "填入表单",
+        loadingLabel: "填入中…",
+        onConfirm: async () => {
+          const data = readReviewCompleteForm();
+          document.getElementById("review-stuck").value = data.stuck;
+          document.getElementById("review-next").value = data.next_adjust;
+          document.getElementById("review-depositable").value = data.depositable;
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 补全失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
   }
 
   function renderEmpty() {
@@ -105,6 +147,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       reviewsList.appendChild(card);
     });
+  }
+
+  if (completeBtn) {
+    completeBtn.addEventListener("click", () => handleAIComplete(completeBtn));
   }
 
   reviewForm.addEventListener("submit", async (e) => {

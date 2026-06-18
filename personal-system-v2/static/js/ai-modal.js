@@ -124,6 +124,103 @@ function readSelectedProjectNames() {
   return names;
 }
 
+function buildTasksDraftHtml(tasks) {
+  return `
+    <div class="stacked-form project-draft-list">
+      ${tasks
+        .map(
+          (t, i) => `
+        <label class="project-draft-item">
+          <input type="checkbox" class="task-draft-check" data-idx="${i}" checked>
+          <div class="project-draft-fields">
+            <input type="text" class="input full-width task-draft-name" value="${escapeAttr(t.name)}">
+            ${
+              t.priority || t.reason
+                ? `<span class="form-hint">${escapeHtml(
+                    [t.priority ? `优先级：${t.priority}` : "", t.reason || ""]
+                      .filter(Boolean)
+                      .join(" · ")
+                  )}</span>`
+                : ""
+            }
+          </div>
+        </label>
+      `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function readSelectedTaskNames() {
+  const names = [];
+  document.querySelectorAll(".project-draft-item").forEach((item) => {
+    const checked = item.querySelector(".task-draft-check");
+    const input = item.querySelector(".task-draft-name");
+    if (checked?.checked && input?.value.trim()) {
+      names.push(input.value.trim());
+    }
+  });
+  return names;
+}
+
+function buildTodayRecommendHtml(recommendations) {
+  return `
+    <div class="stacked-form project-draft-list">
+      ${recommendations
+        .map(
+          (t) => `
+        <label class="project-draft-item">
+          <input type="checkbox" class="recommend-check" data-task-id="${t.task_id}" checked>
+          <div class="project-draft-fields">
+            <strong class="recommend-name">${escapeHtml(t.name)}</strong>
+            <span class="form-hint">${escapeHtml(t.goal_name)} / ${escapeHtml(t.project_name)} · ${escapeHtml(t.status)}</span>
+            ${t.reason ? `<span class="form-hint">${escapeHtml(t.reason)}</span>` : ""}
+          </div>
+        </label>
+      `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function readSelectedRecommendTaskIds() {
+  const ids = [];
+  document.querySelectorAll(".recommend-check:checked").forEach((el) => {
+    const id = parseInt(el.dataset.taskId, 10);
+    if (id) ids.push(id);
+  });
+  return ids;
+}
+
+function buildReviewCompleteHtml(draft) {
+  return `
+    <div class="stacked-form">
+      <div class="form-row">
+        <label class="form-label">卡住了什么</label>
+        <textarea id="complete-stuck" class="textarea" rows="3">${escapeHtml(draft.stuck || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">下一步调整</label>
+        <textarea id="complete-next" class="textarea" rows="3">${escapeHtml(draft.next_adjust || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">可沉淀内容</label>
+        <textarea id="complete-depositable" class="textarea" rows="3">${escapeHtml(draft.depositable || "")}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function readReviewCompleteForm() {
+  return {
+    stuck: document.getElementById("complete-stuck").value.trim(),
+    next_adjust: document.getElementById("complete-next").value.trim(),
+    depositable: document.getElementById("complete-depositable").value.trim(),
+  };
+}
+
 function buildDraftFormHtml(draft, capabilityModules) {
   const tagOptions = capabilityModules
     .map((m) => {

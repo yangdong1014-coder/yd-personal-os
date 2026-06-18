@@ -307,6 +307,41 @@ def api_ai_decompose_goal():
         return _error(str(exc))
 
 
+@app.route("/api/ai/decompose-project", methods=["POST"])
+def api_ai_decompose_project():
+    payload = request.get_json(silent=True) or {}
+    project_id = payload.get("project_id")
+    if not project_id:
+        return _error("缺少 project_id")
+    try:
+        result = ai_service.decompose_project_tasks(project_id)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/recommend-today-tasks", methods=["POST"])
+def api_ai_recommend_today_tasks():
+    try:
+        result = ai_service.recommend_today_tasks()
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/complete-review", methods=["POST"])
+def api_ai_complete_review():
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = ai_service.complete_review_fields(
+            payload.get("what_done", ""),
+            payload.get("type", "每日"),
+        )
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/capability-entries", methods=["GET"])
 def api_list_capability_entries():
     module = request.args.get("module") or None
