@@ -267,6 +267,115 @@ function readDraftForm() {
   };
 }
 
+function buildAssetClassifyHtml(draft, assetTypes, capabilityModules) {
+  const typeOptions = assetTypes
+    .map(
+      (t) =>
+        `<option value="${escapeHtml(t)}"${t === draft.asset_type ? " selected" : ""}>${escapeHtml(t)}</option>`
+    )
+    .join("");
+  const tagOptions = capabilityModules
+    .map((m) => {
+      const checked = (draft.capability_tags || []).includes(m) ? " checked" : "";
+      return `
+        <label class="tag-option">
+          <input type="checkbox" class="classify-tag" value="${escapeHtml(m)}"${checked}>
+          <span>${escapeHtml(m)}</span>
+        </label>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="stacked-form">
+      ${draft.reason ? `<p class="form-hint">${escapeHtml(draft.reason)}</p>` : ""}
+      <div class="form-row">
+        <label class="form-label">资产类型</label>
+        <select id="classify-type" class="select">${typeOptions}</select>
+      </div>
+      <div class="form-row">
+        <span class="form-label">关联能力模块</span>
+        <div class="tag-picker">${tagOptions}</div>
+      </div>
+    </div>
+  `;
+}
+
+function readAssetClassifyForm() {
+  return {
+    asset_type: document.getElementById("classify-type").value,
+    capability_tags: Array.from(
+      document.querySelectorAll(".classify-tag:checked")
+    ).map((el) => el.value),
+  };
+}
+
+function buildAssetEditHtml(draft) {
+  return `
+    <div class="stacked-form">
+      <div class="form-row">
+        <label class="form-label">标题</label>
+        <input type="text" id="draft-title" class="input full-width" value="${escapeAttr(draft.title || "")}">
+      </div>
+      <div class="form-row">
+        <label class="form-label">触发情境</label>
+        <textarea id="draft-trigger" class="textarea" rows="2">${escapeHtml(draft.trigger_context || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">核心内容</label>
+        <textarea id="draft-content" class="textarea" rows="8">${escapeHtml(draft.core_content || "")}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function readAssetEditForm() {
+  return {
+    title: document.getElementById("draft-title").value.trim(),
+    trigger_context: document.getElementById("draft-trigger").value.trim(),
+    core_content: document.getElementById("draft-content").value.trim(),
+  };
+}
+
+function buildCapabilityAttributeHtml(draft, levelTypes) {
+  const levelOptions = levelTypes
+    .map(
+      (l) =>
+        `<option value="${escapeHtml(l)}"${l === draft.level_type ? " selected" : ""}>${escapeHtml(l)}</option>`
+    )
+    .join("");
+
+  return `
+    <div class="stacked-form">
+      ${draft.reason ? `<p class="form-hint">${escapeHtml(draft.reason)}</p>` : ""}
+      <div class="form-row">
+        <label class="form-label">进展内容</label>
+        <textarea id="attr-content" class="textarea" rows="4">${escapeHtml(draft.content || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">层级判断</label>
+        <select id="attr-level" class="select">${levelOptions}</select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">来源项目</label>
+        <input type="text" id="attr-project" class="input full-width" value="${escapeAttr(draft.source_project || "")}">
+      </div>
+    </div>
+  `;
+}
+
+function readCapabilityAttributeForm() {
+  return {
+    content: document.getElementById("attr-content").value.trim(),
+    level_type: document.getElementById("attr-level").value,
+    source_project: document.getElementById("attr-project").value.trim(),
+  };
+}
+
+function formatMultiline(text) {
+  return escapeHtml(text || "").replace(/\n/g, "<br>");
+}
+
 function escapeAttr(text) {
   return String(text)
     .replace(/&/g, "&amp;")

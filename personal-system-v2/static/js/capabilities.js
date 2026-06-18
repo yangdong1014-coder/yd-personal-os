@@ -1,5 +1,8 @@
 document.addEventListener("DOMContentLoaded", () => {
   const panels = document.querySelectorAll(".module-panel");
+  const diagnoseBtn = document.getElementById("ai-diagnose-btn");
+  const levelTypes = window.LEVEL_TYPES || [];
+
   if (!panels.length) return;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -66,8 +69,102 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function handleAIDiagnose(button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "诊断中…";
+
+    try {
+      const result = await apiRequest("/api/ai/diagnose-capabilities", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+
+      const imbalancesHtml = (result.imbalances || [])
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+
+      showAIViewModal({
+        title: "AI 能力诊断",
+        bodyHtml: `
+          <div class="ai-briefing">
+            <p class="ai-briefing-text">${formatMultiline(result.summary)}</p>
+            ${
+              imbalancesHtml
+                ? `<h4 class="ai-briefing-subtitle">失衡提示</h4><ul class="ai-briefing-list">${imbalancesHtml}</ul>`
+                : ""
+            }
+            ${
+              result.focus_module
+                ? `<p class="ai-briefing-focus"><strong>关注模块：</strong>${escapeHtml(result.focus_module)}${result.focus_action ? ` — ${escapeHtml(result.focus_action)}` : ""}</p>`
+                : ""
+            }
+          </div>
+        `,
+      });
+    } catch (err) {
+      alert(err.message || "AI 诊断失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
+  async function handleAIAttribute(panel, button) {
+    const module = panel.dataset.module;
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "归因中…";
+
+    try {
+      const draft = await apiRequest("/api/ai/attribute-capability", {
+        method: "POST",
+        body: JSON.stringify({ module }),
+      });
+
+      showAIModal({
+        title: `AI 进展归因 · ${module}`,
+        bodyHtml: buildCapabilityAttributeHtml(draft, levelTypes),
+        confirmLabel: "确认保存",
+        onConfirm: async () => {
+          const data = readCapabilityAttributeForm();
+          if (!data.content) {
+            throw new Error("进展内容不能为空");
+          }
+          await apiRequest("/api/capability-entries", {
+            method: "POST",
+            body: JSON.stringify({
+              module,
+              entry_date: panel.querySelector(".entry-date").value || today,
+              content: data.content,
+              source_project: data.source_project,
+              level_type: data.level_type,
+            }),
+          });
+          panel.querySelector(".entry-content").value = "";
+          await loadAllEntries();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 归因失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
+  if (diagnoseBtn) {
+    diagnoseBtn.addEventListener("click", () => handleAIDiagnose(diagnoseBtn));
+  }
+
   panels.forEach((panel) => {
     const form = panel.querySelector(".entry-form");
+    const attrBtn = panel.querySelector(".btn-attribute");
+
+    if (attrBtn) {
+      attrBtn.addEventListener("click", () => handleAIAttribute(panel, attrBtn));
+    }
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const module = panel.dataset.module;

@@ -605,13 +605,22 @@ def list_assets(tag=None):
     return assets
 
 
-def update_asset(asset_id, title, trigger_context, core_content):
+def update_asset(
+    asset_id,
+    title,
+    trigger_context,
+    core_content,
+    asset_type=None,
+    capability_tags=None,
+):
     title = (title or "").strip()
     core_content = (core_content or "").strip()
     if not title:
         raise ValueError("标题不能为空")
     if not core_content:
         raise ValueError("核心内容不能为空")
+    if asset_type is not None and asset_type not in ASSET_TYPES:
+        raise ValueError("无效的资产类型")
 
     conn = get_connection()
     existing = conn.execute("SELECT id FROM assets WHERE id = ?", (asset_id,)).fetchone()
@@ -619,18 +628,21 @@ def update_asset(asset_id, title, trigger_context, core_content):
         conn.close()
         raise ValueError("知识卡片不存在")
 
+    fields = {
+        "title": title,
+        "trigger_context": (trigger_context or "").strip(),
+        "core_content": core_content,
+    }
+    if asset_type is not None:
+        fields["asset_type"] = asset_type
+    if capability_tags is not None:
+        tags = _parse_tags(json.dumps(capability_tags or []))
+        fields["capability_tags"] = json.dumps(tags, ensure_ascii=False)
+
+    set_clause = ", ".join(f"{key} = ?" for key in fields)
     conn.execute(
-        """
-        UPDATE assets
-        SET title = ?, trigger_context = ?, core_content = ?
-        WHERE id = ?
-        """,
-        (
-            title,
-            (trigger_context or "").strip(),
-            core_content,
-            asset_id,
-        ),
+        f"UPDATE assets SET {set_clause} WHERE id = ?",
+        (*fields.values(), asset_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()

@@ -407,3 +407,193 @@ def complete_review_fields(what_done, review_type="每日"):
         "next_adjust": next_adjust,
         "depositable": (data.get("depositable") or "").strip(),
     }
+
+
+def _format_capability_context():
+    lines = []
+
+    tasks = database.list_tasks()[:10]
+    if tasks:
+        lines.append("近期任务：")
+        for t in tasks:
+            lines.append(
+                f"- {t['name']}（{t['status']}）| {t['goal_name']}/{t['project_name']}"
+            )
+    else:
+        lines.append("近期任务：无")
+
+    reviews = database.list_reviews()[:5]
+    if reviews:
+        lines.append("近期复盘：")
+        for r in reviews:
+            lines.append(
+                f"- {r['review_date']} {r['type']}：{(r.get('what_done') or '')[:60]}"
+            )
+    else:
+        lines.append("近期复盘：无")
+
+    assets = database.list_assets()[:5]
+    if assets:
+        lines.append("近期资产：")
+        for a in assets:
+            lines.append(f"- {a['title']}（{a['asset_type']}）")
+    else:
+        lines.append("近期资产：无")
+
+    return "\n".join(lines)
+
+
+def classify_asset(asset_id):
+    asset = database.get_asset(asset_id)
+    if not asset:
+        raise AIServiceError("知识卡片不存在")
+
+    asset_types = "、".join(database.ASSET_TYPES)
+    system_prompt = f"""你是知识资产归类助手。根据卡片内容建议资产类型与能力标签。
+资产类型从以下选择：{asset_types}
+能力标签从以下选 1-3 个：{CAPABILITY_LIST}
+只输出 JSON，字段：
+- asset_type: 字符串
+- capability_tags: 字符串数组
+- reason: 一句话归类理由"""
+
+    user_prompt = f"""标题：{asset.get('title', '')}
+当前类型：{asset.get('asset_type', '')}
+当前标签：{', '.join(asset.get('capability_tags') or []) or '无'}
+触发情境：{asset.get('trigger_context', '')}
+核心内容：{asset.get('core_content', '')}"""
+
+    data = _chat_json(system_prompt, user_prompt)
+
+    asset_type = (data.get("asset_type") or "").strip()
+    if asset_type not in database.ASSET_TYPES:
+        asset_type = asset.get("asset_type") or "知识卡片"
+
+    return {
+        "asset_id": asset_id,
+        "asset_type": asset_type,
+        "capability_tags": _filter_capability_tags(data.get("capability_tags")),
+        "reason": (data.get("reason") or "").strip(),
+    }
+
+
+def template_asset(asset_id, target_type):
+    asset = database.get_asset(asset_id)
+    if not asset:
+        raise AIServiceError("知识卡片不存在")
+
+    allowed = ("SOP", "提示词")
+    target_type = (target_type or "").strip()
+    if target_type not in allowed:
+        raise AIServiceError("目标类型仅支持 SOP 或 提示词")
+
+    system_prompt = f"""你是知识资产模板化助手。将知识卡片改写为「{target_type}」格式。
+保持核心知识不丢失，按该类型最佳实践组织结构。
+只输出 JSON，字段：
+- title: 改写后标题
+- trigger_context: 适用情境/使用场景
+- core_content: 按{target_type}格式组织的正文"""
+
+    user_prompt = f"""原标题：{asset.get('title', '')}
+原类型：{asset.get('asset_type', '')}
+触发情境：{asset.get('trigger_context', '')}
+核心内容：{asset.get('core_content', '')}"""
+
+    data = _chat_json(system_prompt, user_prompt)
+
+    title = (data.get("title") or "").strip()
+    core_content = (data.get("core_content") or "").strip()
+    if not title or not core_content:
+        raise AIServiceError("AI 未能生成有效模板，请重试")
+
+    return {
+        "asset_id": asset_id,
+        "asset_type": target_type,
+        "title": title,
+        "trigger_context": (data.get("trigger_context") or "").strip(),
+        "core_content": core_content,
+    }
+
+
+def attribute_capability(module):
+    if module not in database.CAPABILITY_MODULES:
+        raise AIServiceError("无效的能力模块")
+
+    context = _format_capability_context()
+    system_prompt = f"""你是个人能力归因助手。根据用户近期任务、复盘与资产，为「{module}」模块建议一条进展记录。
+只输出 JSON，字段：
+- content: 进展记录内容（具体、可回溯）
+- level_type: 能力层 或 应用层
+- source_project: 来源项目建议（格式：目标名 / 项目名，无则空字符串）
+- reason: 一句话说明为何归入此模块"""
+
+    data = _chat_json(system_prompt, context)
+
+    content = (data.get("content") or "").strip()
+    level_type = (data.get("level_type") or "").strip()
+    if not content:
+        raise AIServiceError("AI 未能生成有效进展建议，请重试")
+    if level_type not in database.LEVEL_TYPES:
+        level_type = "应用层"
+
+    return {
+        "module": module,
+        "content": content,
+        "level_type": level_type,
+        "source_project": (data.get("source_project") or "").strip(),
+        "reason": (data.get("reason") or "").strip(),
+    }
+
+
+def diagnose_capabilities():
+    entries = database.list_capability_entries()
+    stats = {
+        m: {"能力层": 0, "应用层": 0, "total": 0}
+        for m in database.CAPABILITY_MODULES
+    }
+    for entry in entries:
+        module = entry.get("module")
+        level = entry.get("level_type")
+        if module not in stats:
+            continue
+        if level in stats[module]:
+            stats[module][level] += 1
+        stats[module]["total"] += 1
+
+    lines = ["八模块记录统计："]
+    for module in database.CAPABILITY_MODULES:
+        s = stats[module]
+        lines.append(
+            f"- {module}：共{s['total']}条，能力层{s['能力层']}，应用层{s['应用层']}"
+        )
+
+    system_prompt = """你是个人能力诊断助手。根据八模块历史记录统计，分析能力层与应用层的失衡。
+语气具体、可执行，避免空话。
+只输出 JSON，字段：
+- summary: 字符串，3-5句话总览诊断
+- imbalances: 字符串数组，1-3条失衡提示
+- focus_module: 字符串，本周最应关注的模块名
+- focus_action: 字符串，针对该模块的一句话行动建议"""
+
+    data = _chat_json(system_prompt, "\n".join(lines))
+
+    summary = (data.get("summary") or "").strip()
+    if not summary:
+        raise AIServiceError("AI 未能生成有效诊断，请重试")
+
+    imbalances = data.get("imbalances") or []
+    if not isinstance(imbalances, list):
+        imbalances = []
+    imbalances = [str(i).strip() for i in imbalances if str(i).strip()][:3]
+
+    focus_module = (data.get("focus_module") or "").strip()
+    if focus_module not in database.CAPABILITY_MODULES:
+        focus_module = ""
+
+    return {
+        "summary": summary,
+        "imbalances": imbalances,
+        "focus_module": focus_module,
+        "focus_action": (data.get("focus_action") or "").strip(),
+        "stats": stats,
+    }

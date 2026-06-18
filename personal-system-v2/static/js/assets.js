@@ -4,6 +4,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const tagFilter = document.getElementById("tag-filter");
   const prefillHint = document.getElementById("asset-prefill-hint");
   const sourceReviewInput = document.getElementById("asset-source-review");
+  const assetTypes = window.ASSET_TYPES || [];
+  const capabilityModules = window.CAPABILITY_MODULES || [];
 
   if (!assetForm || !assetsList) return;
 
@@ -21,6 +23,20 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function patchAsset(asset, data) {
+    await apiRequest(`/api/assets/${asset.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: data.title ?? asset.title,
+        trigger_context: data.trigger_context ?? asset.trigger_context ?? "",
+        core_content: data.core_content ?? asset.core_content,
+        asset_type: data.asset_type,
+        capability_tags: data.capability_tags,
+      }),
+    });
+    await loadAssets();
+  }
+
   async function handleAIOptimize(asset, button) {
     const prevText = button.textContent;
     button.disabled = true;
@@ -34,38 +50,76 @@ document.addEventListener("DOMContentLoaded", () => {
 
       showAIModal({
         title: "AI 优化结果",
-        bodyHtml: `
-          <div class="stacked-form">
-            <div class="form-row">
-              <label class="form-label">标题</label>
-              <input type="text" id="draft-title" class="input full-width" value="${escapeAttr(result.title || "")}">
-            </div>
-            <div class="form-row">
-              <label class="form-label">触发情境</label>
-              <textarea id="draft-trigger" class="textarea" rows="2">${escapeHtml(result.trigger_context || "")}</textarea>
-            </div>
-            <div class="form-row">
-              <label class="form-label">核心内容</label>
-              <textarea id="draft-content" class="textarea" rows="8">${escapeHtml(result.core_content || "")}</textarea>
-            </div>
-          </div>
-        `,
+        bodyHtml: buildAssetEditHtml(result),
         onConfirm: async () => {
-          const title = document.getElementById("draft-title").value.trim();
-          const trigger_context = document.getElementById("draft-trigger").value.trim();
-          const core_content = document.getElementById("draft-content").value.trim();
-          if (!title || !core_content) {
+          const data = readAssetEditForm();
+          if (!data.title || !data.core_content) {
             throw new Error("标题和核心内容不能为空");
           }
-          await apiRequest(`/api/assets/${asset.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ title, trigger_context, core_content }),
-          });
-          await loadAssets();
+          await patchAsset(asset, data);
         },
       });
     } catch (err) {
       alert(err.message || "AI 优化失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
+  async function handleAIClassify(asset, button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "归类中…";
+
+    try {
+      const result = await apiRequest("/api/ai/classify-asset", {
+        method: "POST",
+        body: JSON.stringify({ asset_id: asset.id }),
+      });
+
+      showAIModal({
+        title: "AI 归类建议",
+        bodyHtml: buildAssetClassifyHtml(result, assetTypes, capabilityModules),
+        confirmLabel: "确认更新",
+        onConfirm: async () => {
+          const data = readAssetClassifyForm();
+          await patchAsset(asset, data);
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 归类失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
+  async function handleAITemplate(asset, targetType, button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "生成中…";
+
+    try {
+      const result = await apiRequest("/api/ai/template-asset", {
+        method: "POST",
+        body: JSON.stringify({ asset_id: asset.id, target_type: targetType }),
+      });
+
+      showAIModal({
+        title: `AI 模板化 · ${targetType}`,
+        bodyHtml: buildAssetEditHtml(result),
+        confirmLabel: "确认更新",
+        onConfirm: async () => {
+          const data = readAssetEditForm();
+          if (!data.title || !data.core_content) {
+            throw new Error("标题和核心内容不能为空");
+          }
+          await patchAsset(asset, { ...data, asset_type: result.asset_type });
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 模板化失败");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -104,7 +158,12 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="tag tag-type">${escapeHtml(asset.asset_type)}</span>
             ${tagsHtml}
           </div>
-          <button type="button" class="btn btn-sm btn-ai">AI优化</button>
+          <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
+            <button type="button" class="btn btn-sm btn-ai btn-classify">AI归类</button>
+            <button type="button" class="btn btn-sm btn-ai btn-sop">转SOP</button>
+            <button type="button" class="btn btn-sm btn-ai btn-prompt">转提示词</button>
+          </div>
         </div>
         <dl class="review-fields">
           <div><dt>触发情境</dt><dd>${formatText(asset.trigger_context)}</dd></div>
@@ -113,8 +172,17 @@ document.addEventListener("DOMContentLoaded", () => {
         <p class="asset-meta">${escapeHtml(asset.created_at)}</p>
       `;
 
-      card.querySelector(".btn-ai").addEventListener("click", (e) => {
+      card.querySelector(".btn-optimize").addEventListener("click", (e) => {
         handleAIOptimize(asset, e.currentTarget);
+      });
+      card.querySelector(".btn-classify").addEventListener("click", (e) => {
+        handleAIClassify(asset, e.currentTarget);
+      });
+      card.querySelector(".btn-sop").addEventListener("click", (e) => {
+        handleAITemplate(asset, "SOP", e.currentTarget);
+      });
+      card.querySelector(".btn-prompt").addEventListener("click", (e) => {
+        handleAITemplate(asset, "提示词", e.currentTarget);
       });
 
       assetsList.appendChild(card);
@@ -194,13 +262,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   init.catch((err) => console.error(err));
 });
-
-function escapeAttr(text) {
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;");
-}
 
 function formatText(text) {
   if (!text || !text.trim()) {

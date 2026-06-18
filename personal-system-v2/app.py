@@ -253,6 +253,8 @@ def api_update_asset(asset_id):
             payload.get("title", ""),
             payload.get("trigger_context", ""),
             payload.get("core_content", ""),
+            payload.get("asset_type"),
+            payload.get("capability_tags"),
         )
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
@@ -337,6 +339,57 @@ def api_ai_complete_review():
             payload.get("what_done", ""),
             payload.get("type", "每日"),
         )
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/classify-asset", methods=["POST"])
+def api_ai_classify_asset():
+    payload = request.get_json(silent=True) or {}
+    asset_id = payload.get("asset_id")
+    if not asset_id:
+        return _error("缺少 asset_id")
+    try:
+        result = ai_service.classify_asset(asset_id)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/template-asset", methods=["POST"])
+def api_ai_template_asset():
+    payload = request.get_json(silent=True) or {}
+    asset_id = payload.get("asset_id")
+    target_type = payload.get("target_type")
+    if not asset_id:
+        return _error("缺少 asset_id")
+    if not target_type:
+        return _error("缺少 target_type")
+    try:
+        result = ai_service.template_asset(asset_id, target_type)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/attribute-capability", methods=["POST"])
+def api_ai_attribute_capability():
+    payload = request.get_json(silent=True) or {}
+    module = payload.get("module")
+    if not module:
+        return _error("缺少 module")
+    try:
+        result = ai_service.attribute_capability(module)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/diagnose-capabilities", methods=["POST"])
+def api_ai_diagnose_capabilities():
+    try:
+        result = ai_service.diagnose_capabilities()
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
