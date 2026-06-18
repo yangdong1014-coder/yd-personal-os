@@ -122,12 +122,14 @@ function showImportResult(stats, isError) {
   const noteEl = document.getElementById("import-result-note");
   const errorsEl = document.getElementById("import-result-errors");
 
-  const imported = stats.imported ?? 0;
+  const created = stats.created ?? 0;
+  const updated = stats.updated ?? 0;
   const skipped = stats.skipped ?? 0;
   const failed = stats.failed ?? 0;
 
   renderImportStats(statsEl, [
-    { label: "新增/更新", value: imported },
+    { label: "新增", value: created },
+    { label: "更新", value: updated },
     { label: "跳过", value: skipped },
     { label: "失败", value: failed },
   ]);
@@ -144,12 +146,17 @@ function showImportResult(stats, isError) {
 
   if (overlay) overlay.hidden = false;
 
-  if (isError || failed > 0) {
-    showToast("导入失败或部分失败，请查看结果面板", "error");
-  } else if (skipped > 0 && imported === 0) {
+  if (isError && created === 0 && updated === 0) {
+    showToast("导入失败", "error");
+  } else if (failed > 0) {
+    showToast(
+      `导入部分完成：新增 ${created}，更新 ${updated}，失败 ${failed}`,
+      "warning"
+    );
+  } else if (skipped > 0 && created === 0 && updated === 0) {
     showToast("导入完成，数据已是最新", "info");
   } else {
-    showToast("导入成功", "success");
+    showToast(`导入完成：新增 ${created}，更新 ${updated}`, "success");
   }
 }
 
@@ -236,7 +243,8 @@ async function executeImport() {
     if (!response.ok || !result.ok) {
       showImportResult(
         result.data || {
-          imported: 0,
+          created: 0,
+          updated: 0,
           skipped: 0,
           failed: result.data?.failed ?? 1,
           errors: result.data?.errors || [result.error || "导入失败"],

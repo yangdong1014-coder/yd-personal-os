@@ -2,7 +2,7 @@
 
 本地优先的个人操作系统。Flask + SQLite + 原生 HTML/CSS/JS，可选接入 DeepSeek API。
 
-**当前版本：v1.9**
+**当前版本以 `changelog.json` 的 `current` 字段与页面版本徽章为准**（无需在 README 手动维护具体版号）。
 
 ## 主要模块
 
@@ -68,11 +68,11 @@ python app.py
 - **建议导入前先导出当前备份**
 - 导入失败时事务回滚，不破坏已有数据
 - 预览返回 `{ will_import, will_update, will_skip, will_fail, errors }`
-- 导入返回 `{ imported, skipped, failed, errors }`，并在结果面板中展示
+- 导入返回 `{ created, updated, skipped, failed, errors, imported }`（`imported = created + updated`），并在结果面板中展示
 
 ## 操作反馈（Toast）
 
-全局轻量 toast 替代 `alert`，用于保存成功、删除失败、AI 错误、导入结果等提示。危险操作（删除、导入确认）仍使用 `confirm` 二次确认。
+全局轻量 toast 替代 `alert`，用于保存成功、删除失败、AI 错误、导入结果等提示。危险操作（删除、导入确认）仍使用 `confirm` 二次确认。最多同时显示 3 条 toast，超出时自动移除最旧的一条。
 
 ## 数据删除
 
@@ -87,7 +87,9 @@ python app.py
 
 外键约束由 `PRAGMA foreign_keys = ON` 保障，不会产生孤儿数据。
 
-## 测试
+## 测试与 CI
+
+本地运行：
 
 ```bash
 cd personal-system-v2
@@ -95,9 +97,11 @@ pip install -r requirements.txt
 pytest
 ```
 
-- 测试使用**临时 SQLite 数据库**，不依赖生产 `data/yd_os.db`
+- 测试使用**临时 SQLite 数据库**，不依赖生产 `data/yd_os.db`，无需 `DEEPSEEK_API_KEY`
 - pytest fixture 会覆盖 `database.DB_PATH`；也可通过环境变量 `YD_OS_DB_PATH` 指定数据库路径
-- 覆盖首页/changelog、列表、删除（含级联）、导入（去重/回滚）等基础回归
+- 覆盖首页/changelog、列表、删除（含级联）、导入（去重/回滚/计数拆分）等基础回归
+
+GitHub Actions（`.github/workflows/test.yml`）在 push / PR 到 `main` 时自动执行 `pytest`（Python 3.11）。
 
 ## 版本记录
 
@@ -105,7 +109,7 @@ pytest
 - `changelog.json` 中 `current` 字段为当前正式版号
 - 页面版本徽章统一读取 `changelog.current`
 
-版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ v1.8（布局与体验升级）→ v1.8.1（数据能力闭环收口）→ **v1.9**（toast 与导入体验优化）
+版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ v1.8（布局与体验升级）→ v1.8.1（数据能力闭环收口）→ v1.9（toast 与导入体验优化）→ **v1.9.1**（工程化收口）
 
 ## 项目文档
 

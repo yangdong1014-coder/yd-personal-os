@@ -1,6 +1,19 @@
 {
-  "current": "v1.9",
+  "current": "v1.9.1",
   "entries": [
+    {
+      "version": "v1.9.1",
+      "date": "2026-06-18",
+      "title": "工程化收口",
+      "type": "chore",
+      "items": [
+        "GitHub Actions CI 自动运行 pytest",
+        "toast 最多同时显示 3 条，超出移除最旧",
+        "导入结果拆分 created / updated，保留 imported 兼容字段",
+        "README 版本号改为以 changelog.current 为准",
+        "补充导入计数 created/updated/skipped 回归测试"
+      ]
+    },
     {
       "version": "v1.9",
       "date": "2026-06-18",

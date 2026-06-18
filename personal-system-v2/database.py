@@ -1017,6 +1017,22 @@ def _resolve_import_action(conn, table, raw, pending=None):
     return "insert", record
 
 
+def _new_import_stats():
+    return {
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+        "imported": 0,
+    }
+
+
+def _finalize_import_stats(stats):
+    stats["imported"] = stats["created"] + stats["updated"]
+    return stats
+
+
 def _import_row(conn, table, raw, stats):
     action, record = _resolve_import_action(conn, table, raw)
     row_id = record["id"]
@@ -1032,7 +1048,7 @@ def _import_row(conn, table, raw, stats):
             f"UPDATE {table} SET {set_clause} WHERE id = ?",
             (*values, row_id),
         )
-        stats["imported"] += 1
+        stats["updated"] += 1
         return
 
     fields = _TABLE_FIELDS[table]
@@ -1042,7 +1058,7 @@ def _import_row(conn, table, raw, stats):
         f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
         tuple(record[f] for f in fields),
     )
-    stats["imported"] += 1
+    stats["created"] += 1
 
 
 def _validate_import_payload(payload):
@@ -1123,7 +1139,7 @@ def preview_import_data(payload):
 def import_all_data(payload):
     _validate_import_payload(payload)
 
-    stats = {"imported": 0, "skipped": 0, "failed": 0, "errors": []}
+    stats = _new_import_stats()
     conn = get_connection()
     try:
         conn.execute("BEGIN")
@@ -1140,6 +1156,7 @@ def import_all_data(payload):
 
         if stats["failed"] > 0:
             conn.rollback()
+            _finalize_import_stats(stats)
             summary = (
                 f"导入失败：{stats['failed']} 条记录有误，"
                 "已回滚，原有数据未改动"
@@ -1148,7 +1165,7 @@ def import_all_data(payload):
 
         _refresh_sqlite_sequences(conn)
         conn.commit()
-        return stats
+        return _finalize_import_stats(stats)
     except DataImportError:
         raise
     except sqlite3.Error as exc:
