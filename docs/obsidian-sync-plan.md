@@ -67,6 +67,19 @@ Obsidian/
 - 存在时补充：`status`, `related_goal_id`, `related_project_id`, `source_review_id`, `capability`
 - 正文保留字段，并用 `[[Folder/name]]` 表达关联（链接指向最终文件名，含后缀）
 
+### v1.12.0+ 资产导出增强
+
+可复用资产库字段会进入 Obsidian 导出内容：
+
+| 输出位置 | 字段 |
+|----------|------|
+| frontmatter | `asset_type`, `maturity`, `reuse_count`, `source_type`, `updated_at`, `source_review_id`, `capability` |
+| 正文元信息 | 资产类型、成熟度、复用次数、能力标签、来源复盘、创建/更新时间 |
+| 正文章节 | `简要说明`（summary）、`复用场景`（reusable_scenario） |
+| 结构化字段 | `fields` JSON 中各键值以 `### 字段名` 小节可读化输出；无 fields 时回退为触发情境 / 核心内容 |
+
+导出版本号见 frontmatter `export_version`（当前 v1.12.0）。
+
 ## 使用方式
 
 1. 侧边栏点击「导出 Obsidian」

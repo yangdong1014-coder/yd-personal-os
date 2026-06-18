@@ -1,6 +1,20 @@
 {
-  "current": "v1.12.1",
+  "current": "v1.12.2",
   "entries": [
+    {
+      "version": "v1.12.2",
+      "date": "2026-06-18",
+      "title": "文档一致性补丁",
+      "type": "docs",
+      "items": [
+        "更新 docs/data-model.md：assets 表同步为 v1.12 可复用资产库模型",
+        "补充 summary、fields、reusable_scenario、maturity、reuse_count 等字段说明",
+        "补充资产类型与成熟度枚举、旧知识卡片迁移规则与幂等说明",
+        "更新 docs/architecture.md：补充资产系统在闭环中的位置与 v1.12 架构说明",
+        "补充 asset_schemas.py 职责与 Obsidian 导出新资产字段说明",
+        "更新 docs/obsidian-sync-plan.md：fields 可读化输出与 frontmatter 字段"
+      ]
+    },
     {
       "version": "v1.12.1",
       "date": "2026-06-18",

@@ -56,16 +56,57 @@ inbox_entries (1) ──< inbox_suggestions (N)
 | what_done, stuck, next_adjust, depositable | 复盘四段内容 |
 | created_at | 创建时间 |
 
-### assets
+### assets（可复用资产库，v1.12+）
+
+v1.12 起，资产从「知识卡片列表」升级为**可复用资产库**：按类型承载不同动态字段，支持成熟度、复用场景与复用次数统计。
 
 | 字段 | 说明 |
 |------|------|
 | id | 主键 |
-| title, trigger_context, core_content | 卡片内容 |
-| asset_type | 知识卡片 / SOP / 提示词等 |
-| capability_tags | JSON 数组 |
-| source_review_id | → reviews.id，`ON DELETE SET NULL` |
+| title | 资产标题 |
+| asset_type | 资产类型，见下方枚举 |
+| capability_tags | 关联能力模块标签（JSON 数组）；API 字段名 `capability_tags`，概念上亦称 ability_tags |
+| summary | 简要说明，列表卡片展示用；可由 fields 自动提取 |
+| fields | **JSON 对象**，承载不同资产类型的动态字段（如 SOP 的执行步骤、本质洞察的底层本质等） |
+| reusable_scenario | 复用场景描述 |
+| maturity | 成熟度：`草稿` / `可用` / `稳定` / `标准化` |
+| reuse_count | 复用次数，通过 `POST /api/assets/<id>/reuse` 递增 |
+| source_type | 来源类型（如 `review`、空字符串表示手动创建） |
+| source_review_id | → reviews.id，`ON DELETE SET NULL`；API 响应中同步暴露为 `source_id` |
 | created_at | 创建时间 |
+| updated_at | 更新时间 |
+
+**兼容字段（v1.12 保留，由 fields 同步生成）**：
+
+| 字段 | 说明 |
+|------|------|
+| trigger_context | 旧版触发情境；迁移后由 fields 回填，导入导出仍兼容 |
+| core_content | 旧版核心内容；迁移后由 fields 回填，导入导出仍兼容 |
+
+#### 资产类型（asset_type）
+
+`SOP` · `本质洞察` · `方法论` · `模型` · `模板` · `提示词` · `案例复盘` · `清单` · `原则规则` · `工具组件` · `通用资产`
+
+类型与动态字段定义见 `personal-system-v2/asset_schemas.py`（`TYPE_FIELD_DEFS` / `GENERIC_FIELD_DEFS`）。
+
+#### 成熟度（maturity）
+
+`草稿` · `可用` · `稳定` · `标准化`
+
+#### 旧数据迁移（`_migrate_assets_table`）
+
+`init_db()` 启动时自动执行，**幂等**（重复执行不重复污染 fields、不重置 reuse_count / created_at）：
+
+| 旧 asset_type | 迁移规则 |
+|---------------|----------|
+| SOP / 提示词 / 案例复盘 / 方法论 | 直接映射为新类型 |
+| 工作流 | 映射为 `SOP` |
+| 知识卡片 | 按标题与内容关键词推断为 `本质洞察` 或 `方法论` |
+| 其他 / 无法判断 | 归为 `通用资产` |
+
+- 旧 `trigger_context` / `core_content` 自动写入对应 `fields`
+- 自动补全 `summary`、`reusable_scenario`、`maturity`、`updated_at`、`source_type`
+- 逻辑实现：`database._migrate_assets_table()` + `asset_schemas.build_fields_from_legacy()`
 
 ### capability_entries
 
@@ -138,6 +179,6 @@ inbox_entries (1) ──< inbox_suggestions (N)
 
 ## 备份与导入
 
-- JSON 全量导出：`GET /api/export`
+- JSON 全量导出：`GET /api/export`（assets 含 summary、fields、maturity、reuse_count 等 v1.12 字段）
 - 合并导入：`POST /api/import`（按 id 插入/更新/跳过，失败回滚）
-- Obsidian 导出：`GET /api/export/obsidian.zip`（Markdown，非数据库回写）
+- Obsidian 导出：`GET /api/export/obsidian.zip`（Markdown，非数据库回写；资产含类型、成熟度、复用次数、fields 结构化章节，见 [obsidian-sync-plan.md](obsidian-sync-plan.md)）
