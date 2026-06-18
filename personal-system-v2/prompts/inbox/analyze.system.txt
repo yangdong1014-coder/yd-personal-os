@@ -58,8 +58,8 @@
 ## suggested_payload 字段提示
 
 - goal: name, type
-- project: name, goal_id（仅当文本能明确关联已有目标时填写，否则不填）
-- task: name, status（todo/doing/done 或 待处理/进行中/完成）, project_id（仅当能明确关联时填写）
+- project: name, goal_id（必须是已存在目标的**数字 ID**；无法确定时不要填 null 或名称，留空对象即可）
+- task: name, status（todo/doing/done 或 待处理/进行中/完成）, project_id（必须是已存在项目的**数字 ID**，不能填项目名称）
 - review: review_date, type, what_done, stuck, next_adjust, depositable
 - asset: title, core_content, asset_type, capability_tags, trigger_context
 - capability_entry: capability（模块名）, content, entry_date, level_type, source_project

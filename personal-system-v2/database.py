@@ -1501,6 +1501,93 @@ def _map_review_type(raw):
     return mapping.get((raw or "").lower(), "每日")
 
 
+def _coerce_positive_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _validate_suggestion_for_commit(conn, suggestion):
+    sid = suggestion["id"]
+    target_type = suggestion["target_type"]
+    title = suggestion.get("title") or ""
+    content = suggestion.get("content") or ""
+    payload = suggestion["suggested_payload"]
+
+    if target_type == "goal":
+        name = (payload.get("name") or title).strip()
+        if not name:
+            return f"建议 #{sid}（目标）：缺少名称"
+        return None
+
+    if target_type == "project":
+        name = (payload.get("name") or title).strip()
+        goal_id = _coerce_positive_int(payload.get("goal_id"))
+        if not name:
+            return f"建议 #{sid}（项目）：缺少名称"
+        if not goal_id:
+            return (
+                f"建议 #{sid}（项目「{name}」）：缺少有效 goal_id，"
+                "请先在目标模块创建目标后再归档项目"
+            )
+        if not conn.execute(
+            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+        ).fetchone():
+            return f"建议 #{sid}（项目）：关联目标 #{goal_id} 不存在"
+        return None
+
+    if target_type == "task":
+        name = (payload.get("name") or title).strip()
+        project_id = _coerce_positive_int(payload.get("project_id"))
+        if not name:
+            return f"建议 #{sid}（任务）：缺少名称"
+        if not project_id:
+            raw = payload.get("project_id")
+            if isinstance(raw, str) and raw.strip():
+                return (
+                    f"建议 #{sid}（任务「{name}」）：project_id 需为已存在项目的数字 ID，"
+                    f"不能是项目名称（当前：{raw}）"
+                )
+            return (
+                f"建议 #{sid}（任务「{name}」）：缺少有效 project_id，"
+                "请先在项目模块创建项目后再归档任务"
+            )
+        if not conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone():
+            return f"建议 #{sid}（任务）：关联项目 #{project_id} 不存在"
+        return None
+
+    if target_type == "review":
+        review_date = (payload.get("review_date") or _today_local()).strip()
+        what_done = (payload.get("what_done") or content or title).strip()
+        if not review_date:
+            return f"建议 #{sid}（复盘）：缺少复盘日期"
+        if not what_done:
+            return f"建议 #{sid}（复盘）：缺少复盘内容"
+        return None
+
+    if target_type == "asset":
+        asset_title = (payload.get("title") or title).strip()
+        core_content = (payload.get("core_content") or content).strip()
+        if not asset_title or not core_content:
+            return f"建议 #{sid}（知识卡片）：需要标题与核心内容"
+        return None
+
+    if target_type == "capability_entry":
+        entry_content = (payload.get("content") or content).strip()
+        if not entry_content:
+            return f"建议 #{sid}（能力记录）：缺少内容"
+        return None
+
+    return f"建议 #{sid} 类型为 {target_type}，不可入库"
+
+
 def _commit_suggestion_in_tx(conn, suggestion):
     target_type = suggestion["target_type"]
     title = suggestion["title"]
@@ -1522,7 +1609,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
 
     if target_type == "project":
         name = (payload.get("name") or title).strip()
-        goal_id = payload.get("goal_id")
+        goal_id = _coerce_positive_int(payload.get("goal_id"))
         if not name:
             raise ValueError("项目名称不能为空")
         if not goal_id:
@@ -1540,7 +1627,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
 
     if target_type == "task":
         name = (payload.get("name") or title).strip()
-        project_id = payload.get("project_id")
+        project_id = _coerce_positive_int(payload.get("project_id"))
         status = _map_task_status(payload.get("status"))
         if not name:
             raise ValueError("任务名称不能为空")
@@ -1672,48 +1759,61 @@ def commit_inbox_suggestions(suggestion_ids):
     errors = []
 
     conn = get_connection()
+    to_commit = []
     try:
-        conn.execute("BEGIN")
-        entry_ids = set()
         for suggestion_id in unique_ids:
             row = conn.execute(
                 "SELECT * FROM inbox_suggestions WHERE id = ?",
                 (suggestion_id,),
             ).fetchone()
             if not row:
-                raise ValueError(f"建议 #{suggestion_id} 不存在")
+                errors.append(f"建议 #{suggestion_id} 不存在")
+                continue
             suggestion = _suggestion_row(row)
             if suggestion["status"] == "committed":
                 skipped += 1
                 continue
             if suggestion["status"] != "pending":
-                raise ValueError(f"建议 #{suggestion_id} 已处理，无法提交")
+                errors.append(f"建议 #{suggestion_id} 已处理，无法提交")
+                continue
             if suggestion["target_type"] not in INBOX_COMMITTABLE_TYPES:
-                raise ValueError(
+                errors.append(
                     f"建议 #{suggestion_id} 类型为 {suggestion['target_type']}，不可入库"
                 )
+                continue
+            validation_error = _validate_suggestion_for_commit(conn, suggestion)
+            if validation_error:
+                errors.append(validation_error)
+                continue
+            to_commit.append(suggestion)
+
+        if not to_commit:
+            return {"created": created, "skipped": skipped, "errors": errors}
+
+        conn.execute("BEGIN")
+        entry_ids = set()
+        for suggestion in to_commit:
             table_key = _commit_suggestion_in_tx(conn, suggestion)
             created[table_key] += 1
             conn.execute(
                 "UPDATE inbox_suggestions SET status = 'committed' WHERE id = ?",
-                (suggestion_id,),
+                (suggestion["id"],),
             )
             entry_ids.add(suggestion["inbox_entry_id"])
 
-        if entry_ids:
-            for entry_id in entry_ids:
-                pending = conn.execute(
-                    """
-                    SELECT COUNT(*) AS cnt FROM inbox_suggestions
-                    WHERE inbox_entry_id = ? AND status = 'pending'
-                    """,
+        for entry_id in entry_ids:
+            pending = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM inbox_suggestions
+                WHERE inbox_entry_id = ? AND status = 'pending'
+                """,
+                (entry_id,),
+            ).fetchone()["cnt"]
+            if pending == 0:
+                conn.execute(
+                    "UPDATE inbox_entries SET status = 'committed' WHERE id = ?",
                     (entry_id,),
-                ).fetchone()["cnt"]
-                if pending == 0:
-                    conn.execute(
-                        "UPDATE inbox_entries SET status = 'committed' WHERE id = ?",
-                        (entry_id,),
-                    )
+                )
 
         conn.commit()
         return {"created": created, "skipped": skipped, "errors": errors}

@@ -178,13 +178,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderCommitResult(data) {
     const created = data.created || {};
+    const errors = data.errors || [];
     const parts = Object.entries(created)
       .filter(([, count]) => count > 0)
       .map(([key, count]) => `${key}: ${count}`);
+    const createdTotal = Object.values(created).reduce((sum, n) => sum + (n || 0), 0);
+    const title = createdTotal > 0 ? "归档完成" : "未能入库";
+    const errorHtml = errors.length
+      ? `<ul class="import-error-list">${errors
+          .map((err) => `<li>${escapeHtml(err)}</li>`)
+          .join("")}</ul>`
+      : "";
     commitResultEl.hidden = false;
     commitResultEl.innerHTML = `
-      <p><strong>归档完成</strong></p>
-      <p class="form-hint">${parts.length ? parts.join(" · ") : "无新记录创建"}${data.skipped ? ` · 跳过 ${data.skipped} 条` : ""}</p>`;
+      <p><strong>${title}</strong></p>
+      <p class="form-hint">${parts.length ? parts.join(" · ") : "无新记录创建"}${data.skipped ? ` · 跳过 ${data.skipped} 条` : ""}</p>
+      ${errorHtml}`;
   }
 
   async function commitSelected() {
@@ -208,7 +217,20 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       renderSuggestions();
       renderCommitResult(result);
-      showToast("归档成功", "success");
+      const createdTotal = Object.values(result.created || {}).reduce(
+        (sum, n) => sum + (n || 0),
+        0
+      );
+      if (createdTotal > 0) {
+        const msg = result.errors?.length
+          ? `已入库 ${createdTotal} 条，${result.errors.length} 条未通过校验`
+          : "归档成功";
+        showToast(msg, result.errors?.length ? "warning" : "success");
+      } else if (result.errors?.length) {
+        showToast("所选建议均未通过校验，请查看下方说明", "warning");
+      } else {
+        showToast("没有新记录入库", "info");
+      }
     } catch (error) {
       showToast(error.message || "归档失败", "error");
     } finally {

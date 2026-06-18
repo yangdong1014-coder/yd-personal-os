@@ -241,6 +241,45 @@ def test_inbox_page(client):
     assert "智能归档" in response.get_data(as_text=True)
 
 
+def test_inbox_commit_skips_invalid_foreign_keys(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "goal",
+                    "title": "可入库目标",
+                    "content": "目标内容",
+                    "confidence": 0.9,
+                    "reason": "方向",
+                    "suggested_payload": {"type": "季度"},
+                },
+                {
+                    "target_type": "project",
+                    "title": "缺 goal 的项目",
+                    "content": "项目内容",
+                    "confidence": 0.9,
+                    "reason": "项目",
+                    "suggested_payload": {"goal_id": None},
+                },
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "混合建议"},
+    ).get_json()["data"]
+    ids = [item["id"] for item in analyze["suggestions"]]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": ids})
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["goals"] == 1
+    assert len(data["errors"]) >= 1
+    assert any("goal_id" in err for err in data["errors"])
+
+
 def test_inbox_normalize_low_confidence_to_uncertain():
     items = inbox_service._normalize_ai_items(
         [
