@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const projectsEl = document.getElementById("dashboard-projects-content");
   const tasksEl = document.getElementById("dashboard-tasks-content");
   const briefingBtn = document.getElementById("ai-briefing-btn");
+  const dispatchBtn = document.getElementById("ai-dispatch-btn");
 
   if (!goalEl || !projectsEl || !tasksEl) return;
 
@@ -120,6 +121,55 @@ document.addEventListener("DOMContentLoaded", () => {
       } finally {
         briefingBtn.disabled = false;
         briefingBtn.textContent = prev;
+      }
+    });
+  }
+
+  if (dispatchBtn) {
+    dispatchBtn.addEventListener("click", async () => {
+      const prev = dispatchBtn.textContent;
+      dispatchBtn.disabled = true;
+      dispatchBtn.textContent = "分发中…";
+
+      try {
+        const result = await apiRequest("/api/ai/dispatch-actions", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+
+        showAIModal({
+          title: "AI 行动分发",
+          bodyHtml: buildDispatchActionsHtml(result),
+          confirmLabel: "确认执行",
+          loadingLabel: "执行中…",
+          onConfirm: async () => {
+            const { markToday, newTasks } = readSelectedDispatchActions();
+            if (markToday.length === 0 && newTasks.length === 0) {
+              throw new Error("请至少选择一项行动");
+            }
+            for (const taskId of markToday) {
+              await apiRequest(`/api/tasks/${taskId}/today-progress`, {
+                method: "PATCH",
+                body: JSON.stringify({ enabled: true }),
+              });
+            }
+            for (const item of newTasks) {
+              await apiRequest("/api/tasks", {
+                method: "POST",
+                body: JSON.stringify({
+                  project_id: item.project_id,
+                  name: item.name,
+                }),
+              });
+            }
+            await loadDashboard();
+          },
+        });
+      } catch (err) {
+        alert(err.message || "AI 行动分发失败");
+      } finally {
+        dispatchBtn.disabled = false;
+        dispatchBtn.textContent = prev;
       }
     });
   }

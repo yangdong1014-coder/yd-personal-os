@@ -7,6 +7,8 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!reviewForm || !reviewsList) return;
 
   const completeBtn = document.getElementById("ai-complete-btn");
+  const weeklyBtn = document.getElementById("ai-weekly-btn");
+  const selectedDailyIds = new Set();
 
   if (dateInput) {
     dateInput.value = new Date().toISOString().slice(0, 10);
@@ -49,6 +51,53 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       button.disabled = false;
       button.textContent = prevText;
+    }
+  }
+
+  function updateWeeklyButton() {
+    if (!weeklyBtn) return;
+    weeklyBtn.disabled = selectedDailyIds.size < 2;
+  }
+
+  async function handleAIWeekly(button) {
+    if (selectedDailyIds.size < 2) {
+      alert("请至少勾选两条「每日」复盘");
+      return;
+    }
+
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "聚合中…";
+
+    try {
+      const draft = await apiRequest("/api/ai/aggregate-weekly-reviews", {
+        method: "POST",
+        body: JSON.stringify({ review_ids: Array.from(selectedDailyIds) }),
+      });
+
+      showAIModal({
+        title: "AI 周复盘草稿",
+        bodyHtml: buildWeeklyReviewHtml(draft),
+        confirmLabel: "保存周复盘",
+        loadingLabel: "保存中…",
+        onConfirm: async () => {
+          const data = readWeeklyReviewForm();
+          if (!data.what_done) {
+            throw new Error("本周推进内容不能为空");
+          }
+          await apiRequest("/api/reviews", {
+            method: "POST",
+            body: JSON.stringify(data),
+          });
+          selectedDailyIds.clear();
+          await loadReviews();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 周复盘聚合失败");
+    } finally {
+      button.textContent = prevText;
+      updateWeeklyButton();
     }
   }
 
@@ -107,6 +156,8 @@ document.addEventListener("DOMContentLoaded", () => {
     reviewsList.innerHTML = "";
 
     if (reviews.length === 0) {
+      selectedDailyIds.clear();
+      updateWeeklyButton();
       renderEmpty();
       return;
     }
@@ -117,12 +168,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const hasDepositable = Boolean((review.depositable || "").trim());
       const assetUrl = `/assets?from_review=${review.id}`;
+      const isDaily = review.type === "每日";
+      const checked = selectedDailyIds.has(review.id) ? " checked" : "";
 
       card.innerHTML = `
         <div class="entity-header">
-          <div>
-            <h3 class="entity-title">${escapeHtml(review.review_date)}</h3>
-            <span class="tag">${escapeHtml(review.type)}</span>
+          <div class="review-title-row">
+            ${
+              isDaily
+                ? `<label class="review-select"><input type="checkbox" class="daily-review-check" data-review-id="${review.id}"${checked}><span class="sr-only">选择</span></label>`
+                : ""
+            }
+            <div>
+              <h3 class="entity-title">${escapeHtml(review.review_date)}</h3>
+              <span class="tag">${escapeHtml(review.type)}</span>
+            </div>
           </div>
           <div class="card-actions">
             <button type="button" class="btn btn-sm btn-ai">AI提炼</button>
@@ -145,12 +205,30 @@ document.addEventListener("DOMContentLoaded", () => {
         handleAIRefine(review, e.currentTarget);
       });
 
+      const dailyCheck = card.querySelector(".daily-review-check");
+      if (dailyCheck) {
+        dailyCheck.addEventListener("change", () => {
+          if (dailyCheck.checked) {
+            selectedDailyIds.add(review.id);
+          } else {
+            selectedDailyIds.delete(review.id);
+          }
+          updateWeeklyButton();
+        });
+      }
+
       reviewsList.appendChild(card);
     });
+
+    updateWeeklyButton();
   }
 
   if (completeBtn) {
     completeBtn.addEventListener("click", () => handleAIComplete(completeBtn));
+  }
+
+  if (weeklyBtn) {
+    weeklyBtn.addEventListener("click", () => handleAIWeekly(weeklyBtn));
   }
 
   reviewForm.addEventListener("submit", async (e) => {

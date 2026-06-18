@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from openai import APIConnectionError, APIStatusError, OpenAI
 
@@ -596,4 +597,153 @@ def diagnose_capabilities():
         "focus_module": focus_module,
         "focus_action": (data.get("focus_action") or "").strip(),
         "stats": stats,
+    }
+
+
+def aggregate_weekly_reviews(review_ids):
+    if not review_ids or not isinstance(review_ids, list):
+        raise AIServiceError("请选择至少两条日复盘")
+
+    reviews = []
+    for raw_id in review_ids[:14]:
+        try:
+            review_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        review = database.get_review(review_id)
+        if review and review.get("type") == "每日":
+            reviews.append(review)
+
+    if len(reviews) < 2:
+        raise AIServiceError("请至少选择两条「每日」复盘进行聚合")
+
+    reviews.sort(key=lambda r: r.get("review_date", ""))
+
+    lines = [f"共 {len(reviews)} 条日复盘，日期 {reviews[0]['review_date']} 至 {reviews[-1]['review_date']}："]
+    for review in reviews:
+        lines.append(f"\n【{review['review_date']}】")
+        lines.append(f"做了什么：{review.get('what_done', '')}")
+        lines.append(f"卡住了：{review.get('stuck', '')}")
+        lines.append(f"下一步：{review.get('next_adjust', '')}")
+        if review.get("depositable"):
+            lines.append(f"可沉淀：{review.get('depositable', '')}")
+
+    system_prompt = """你是周复盘聚合助手。将多条日复盘整合为一条「每周」复盘草稿。
+提炼共性进展、主要卡点、下周调整方向，合并可沉淀内容。
+语气具体、可执行，避免简单拼接。
+只输出 JSON，字段：
+- what_done: 字符串，本周主要推进事项
+- stuck: 字符串，本周主要卡点
+- next_adjust: 字符串，下周调整方向
+- depositable: 字符串，本周可沉淀内容（无则空字符串）"""
+
+    data = _chat_json(system_prompt, "\n".join(lines))
+
+    what_done = (data.get("what_done") or "").strip()
+    if not what_done:
+        raise AIServiceError("AI 未能生成有效周复盘，请重试")
+
+    return {
+        "review_date": datetime.now().strftime("%Y-%m-%d"),
+        "type": "每周",
+        "what_done": what_done,
+        "stuck": (data.get("stuck") or "").strip(),
+        "next_adjust": (data.get("next_adjust") or "").strip(),
+        "depositable": (data.get("depositable") or "").strip(),
+        "source_review_ids": [r["id"] for r in reviews],
+        "source_count": len(reviews),
+    }
+
+
+def dispatch_dashboard_actions():
+    context = _format_dashboard_context()
+    projects = database.list_projects()
+    open_tasks = [t for t in database.list_tasks() if t.get("status") != "完成"]
+
+    if not projects and not open_tasks:
+        raise AIServiceError("暂无项目或任务可分发行动")
+
+    lines = [context, ""]
+    project_map = {}
+    if projects:
+        lines.append("可用项目（新建任务时 project_id 必须来自此列表）：")
+        for project in projects[:20]:
+            project_map[project["id"]] = project
+            lines.append(
+                f"- id={project['id']} | {project['goal_name']}/{project['name']}"
+            )
+    else:
+        lines.append("可用项目：无")
+
+    task_map = {}
+    if open_tasks:
+        lines.append("未完成任务（标记今日推进时 task_id 必须来自此列表）：")
+        for task in open_tasks[:30]:
+            task_map[task["id"]] = task
+            lines.append(
+                f"- id={task['id']} | {task['name']} | {task['status']} | "
+                f"{task['goal_name']}/{task['project_name']}"
+            )
+    else:
+        lines.append("未完成任务：无")
+
+    system_prompt = """你是个人作战行动分发助手。根据指挥部状态，建议今日应执行的具体行动。
+分两类，每类 0-3 项，避免贪多：
+1. mark_today: 从未完成任务中选今日应推进的（task_id 整数，必须来自列表）
+2. new_tasks: 需新建的任务（project_id 整数必须来自项目列表，name 简洁 2-20字）
+只输出 JSON，字段：
+- mark_today: 对象数组，每项含 task_id、reason
+- new_tasks: 对象数组，每项含 project_id、name、reason"""
+
+    data = _chat_json(system_prompt, "\n".join(lines))
+
+    mark_today = []
+    seen_task_ids = set()
+    for item in (data.get("mark_today") or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            task_id = int(item.get("task_id"))
+        except (TypeError, ValueError):
+            continue
+        task = task_map.get(task_id)
+        if not task or task_id in seen_task_ids:
+            continue
+        seen_task_ids.add(task_id)
+        mark_today.append({
+            "task_id": task_id,
+            "name": task["name"],
+            "goal_name": task["goal_name"],
+            "project_name": task["project_name"],
+            "reason": (item.get("reason") or "").strip(),
+        })
+
+    new_tasks = []
+    seen_names = set()
+    for item in (data.get("new_tasks") or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            project_id = int(item.get("project_id"))
+        except (TypeError, ValueError):
+            continue
+        project = project_map.get(project_id)
+        name = (item.get("name") or "").strip()
+        if not project or not name or name.lower() in seen_names:
+            continue
+        seen_names.add(name.lower())
+        new_tasks.append({
+            "project_id": project_id,
+            "name": name,
+            "goal_name": project["goal_name"],
+            "project_name": project["name"],
+            "reason": (item.get("reason") or "").strip(),
+        })
+
+    if not mark_today and not new_tasks:
+        raise AIServiceError("AI 未能生成有效行动建议，请重试")
+
+    return {
+        "mark_today": mark_today,
+        "new_tasks": new_tasks,
     }

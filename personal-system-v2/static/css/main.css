@@ -137,6 +137,40 @@ a {
   margin-bottom: 0.25rem;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.section-hint {
+  margin: 0.25rem 0 0;
+}
+
+.review-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.review-select {
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 .page-title {
   margin: 0 0 0.35rem;
   font-size: 1.5rem;
@@ -888,6 +922,11 @@ a {
   .section-header-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .entity-header {

@@ -395,6 +395,28 @@ def api_ai_diagnose_capabilities():
         return _error(str(exc))
 
 
+@app.route("/api/ai/aggregate-weekly-reviews", methods=["POST"])
+def api_ai_aggregate_weekly_reviews():
+    payload = request.get_json(silent=True) or {}
+    review_ids = payload.get("review_ids")
+    if not review_ids:
+        return _error("缺少 review_ids")
+    try:
+        result = ai_service.aggregate_weekly_reviews(review_ids)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/dispatch-actions", methods=["POST"])
+def api_ai_dispatch_actions():
+    try:
+        result = ai_service.dispatch_dashboard_actions()
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/capability-entries", methods=["GET"])
 def api_list_capability_entries():
     module = request.args.get("module") or None

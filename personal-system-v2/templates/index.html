@@ -9,9 +9,12 @@
       <h1 class="page-title">指挥部总览</h1>
       <p class="page-subtitle">当前最重要的目标、项目与任务</p>
     </div>
-    <button type="button" id="ai-briefing-btn" class="btn btn-sm btn-ai">AI 今日简报</button>
+    <div class="header-actions">
+      <button type="button" id="ai-briefing-btn" class="btn btn-sm btn-ai">AI 今日简报</button>
+      <button type="button" id="ai-dispatch-btn" class="btn btn-sm btn-ai">AI 行动分发</button>
+    </div>
   </div>
-  <span class="version-badge">v1.1-ai</span>
+  <span class="version-badge">v1.4-ai</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}

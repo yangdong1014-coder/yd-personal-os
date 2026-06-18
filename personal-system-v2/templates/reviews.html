@@ -5,8 +5,8 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">复盘系统</h1>
-  <p class="page-subtitle">识别偏差，提炼经验，AI 辅助沉淀为知识卡片</p>
-  <span class="version-badge">v1.2-ai</span>
+  <p class="page-subtitle">识别偏差，提炼经验，AI 辅助周复盘聚合与沉淀</p>
+  <span class="version-badge">v1.4-ai</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
@@ -51,7 +51,13 @@
 </section>
 
 <section class="section-card">
-  <h2>复盘历史</h2>
+  <div class="section-header-row">
+    <div>
+      <h2>复盘历史</h2>
+      <p class="form-hint section-hint">勾选「每日」复盘后，可聚合为周复盘</p>
+    </div>
+    <button type="button" id="ai-weekly-btn" class="btn btn-sm btn-ai" disabled>AI周复盘</button>
+  </div>
   <div id="reviews-list" class="entity-list">
     <div class="empty-state">
       <strong>添加第一条复盘</strong>

@@ -376,6 +376,106 @@ function formatMultiline(text) {
   return escapeHtml(text || "").replace(/\n/g, "<br>");
 }
 
+function buildWeeklyReviewHtml(draft) {
+  return `
+    <div class="stacked-form">
+      <p class="form-hint">聚合 ${draft.source_count || 0} 条日复盘 → 每周复盘草稿</p>
+      <div class="form-row">
+        <label class="form-label">复盘日期</label>
+        <input type="date" id="weekly-date" class="input" value="${escapeAttr(draft.review_date || "")}">
+      </div>
+      <div class="form-row">
+        <label class="form-label">本周做了什么</label>
+        <textarea id="weekly-what-done" class="textarea" rows="4">${escapeHtml(draft.what_done || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">卡住了什么</label>
+        <textarea id="weekly-stuck" class="textarea" rows="3">${escapeHtml(draft.stuck || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">下一步调整</label>
+        <textarea id="weekly-next" class="textarea" rows="3">${escapeHtml(draft.next_adjust || "")}</textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label">可沉淀内容</label>
+        <textarea id="weekly-depositable" class="textarea" rows="3">${escapeHtml(draft.depositable || "")}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function readWeeklyReviewForm() {
+  return {
+    review_date: document.getElementById("weekly-date").value,
+    type: "每周",
+    what_done: document.getElementById("weekly-what-done").value.trim(),
+    stuck: document.getElementById("weekly-stuck").value.trim(),
+    next_adjust: document.getElementById("weekly-next").value.trim(),
+    depositable: document.getElementById("weekly-depositable").value.trim(),
+  };
+}
+
+function buildDispatchActionsHtml(data) {
+  const markHtml = (data.mark_today || [])
+    .map(
+      (item) => `
+    <label class="project-draft-item">
+      <input type="checkbox" class="dispatch-mark-check" data-task-id="${item.task_id}" checked>
+      <div class="project-draft-fields">
+        <strong class="recommend-name">标记今日推进 · ${escapeHtml(item.name)}</strong>
+        <span class="form-hint">${escapeHtml(item.goal_name)} / ${escapeHtml(item.project_name)}</span>
+        ${item.reason ? `<span class="form-hint">${escapeHtml(item.reason)}</span>` : ""}
+      </div>
+    </label>
+  `
+    )
+    .join("");
+
+  const newHtml = (data.new_tasks || [])
+    .map(
+      (item) => `
+    <label class="project-draft-item">
+      <input type="checkbox" class="dispatch-new-check" data-project-id="${item.project_id}" checked>
+      <div class="project-draft-fields">
+        <input type="text" class="input full-width dispatch-new-name" data-project-id="${item.project_id}" value="${escapeAttr(item.name)}">
+        <span class="form-hint">新建任务 · ${escapeHtml(item.goal_name)} / ${escapeHtml(item.project_name)}</span>
+        ${item.reason ? `<span class="form-hint">${escapeHtml(item.reason)}</span>` : ""}
+      </div>
+    </label>
+  `
+    )
+    .join("");
+
+  return `
+    <div class="stacked-form project-draft-list">
+      ${markHtml ? `<h4 class="ai-briefing-subtitle">标记今日推进</h4>${markHtml}` : ""}
+      ${newHtml ? `<h4 class="ai-briefing-subtitle">新建任务</h4>${newHtml}` : ""}
+    </div>
+  `;
+}
+
+function readSelectedDispatchActions() {
+  const markToday = [];
+  document.querySelectorAll(".dispatch-mark-check:checked").forEach((el) => {
+    const id = parseInt(el.dataset.taskId, 10);
+    if (id) markToday.push(id);
+  });
+
+  const newTasks = [];
+  document.querySelectorAll(".dispatch-new-check:checked").forEach((el) => {
+    const projectId = parseInt(el.dataset.projectId, 10);
+    const input = document.querySelector(
+      `.dispatch-new-name[data-project-id="${projectId}"]`
+    );
+    const name = input?.value.trim();
+    if (projectId && name) {
+      newTasks.push({ project_id: projectId, name });
+    }
+  });
+
+  return { markToday, newTasks };
+}
+
 function escapeAttr(text) {
   return String(text)
     .replace(/&/g, "&amp;")
