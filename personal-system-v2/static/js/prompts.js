@@ -87,7 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const scenes = groupByScene(items);
 
     if (scenes.length === 0) {
-      sceneList.innerHTML = '<p class="prompt-list-hint">该模块暂无提示词</p>';
+      sceneList.innerHTML = '<p class="prompt-list-hint">该模块暂无场景</p>';
       return;
     }
 
@@ -448,7 +448,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadModelSettings();
   loadCatalog(true).catch((err) => {
-    setStatus(err.message || "加载提示词列表失败", true);
+    setStatus(err.message || "加载场景列表失败", true);
   });
 });
 

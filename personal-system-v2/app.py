@@ -23,7 +23,7 @@ NAV_ITEMS = [
     {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
     {"endpoint": "assets", "label": "资产", "path": "/assets"},
     {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
-    {"endpoint": "prompts", "label": "提示词", "path": "/prompts"},
+    {"endpoint": "prompts", "label": "AI管理", "path": "/prompts"},
 ]
 
 
