@@ -1,6 +1,19 @@
 {
-  "current": "v1.8.1",
+  "current": "v1.9",
   "entries": [
+    {
+      "version": "v1.9",
+      "date": "2026-06-18",
+      "title": "交互体验优化",
+      "type": "feat",
+      "items": [
+        "全局 toast 替代 alert，支持 success/error/warning/info",
+        "导入流程增加 dry-run 预览（POST /api/import/preview）",
+        "导入结果面板化展示 imported/skipped/failed/errors",
+        "导入前预览预计新增、更新、跳过与失败数量",
+        "删除/保存/AI 错误等操作统一 toast 反馈"
+      ]
+    },
     {
       "version": "v1.8.1",
       "date": "2026-06-18",

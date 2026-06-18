@@ -117,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
           `,
         });
       } catch (err) {
-        alert(err.message || "AI 简报生成失败");
+        showToast(err.message || "AI 简报生成失败", "error");
       } finally {
         briefingBtn.disabled = false;
         briefingBtn.textContent = prev;
@@ -166,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
           },
         });
       } catch (err) {
-        alert(err.message || "AI 行动分发失败");
+        showToast(err.message || "AI 行动分发失败", "error");
       } finally {
         dispatchBtn.disabled = false;
         dispatchBtn.textContent = prev;

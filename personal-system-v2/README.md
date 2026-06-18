@@ -2,7 +2,7 @@
 
 本地优先的个人操作系统。Flask + SQLite + 原生 HTML/CSS/JS，可选接入 DeepSeek API。
 
-**当前版本：v1.8.1**
+**当前版本：v1.9**
 
 ## 主要模块
 
@@ -54,13 +54,25 @@ python app.py
 
 导航栏右侧「导出备份」按钮，或请求 `GET /api/export`，下载 JSON 备份。
 
-「导入恢复」按钮或 `POST /api/import`（请求体为导出 JSON）采用**合并导入**：
+「导入恢复」按钮采用**先预览、后导入**流程：
+
+1. 选择 JSON 备份文件
+2. 调用 `POST /api/import/preview` 进行 dry-run（不写库）
+3. 预览面板展示预计新增、更新、跳过、失败数量
+4. 确认后调用 `POST /api/import` 执行合并导入
+
+合并导入规则：
 
 - 按 `id` 判断：不存在则插入，存在且内容相同则跳过，存在且内容不同则更新
 - **不会自动清空**现有数据；误导入错误备份可能覆盖同 id 记录
 - **建议导入前先导出当前备份**
 - 导入失败时事务回滚，不破坏已有数据
-- 接口返回 `{ imported, skipped, failed, errors }`
+- 预览返回 `{ will_import, will_update, will_skip, will_fail, errors }`
+- 导入返回 `{ imported, skipped, failed, errors }`，并在结果面板中展示
+
+## 操作反馈（Toast）
+
+全局轻量 toast 替代 `alert`，用于保存成功、删除失败、AI 错误、导入结果等提示。危险操作（删除、导入确认）仍使用 `confirm` 二次确认。
 
 ## 数据删除
 
@@ -93,7 +105,7 @@ pytest
 - `changelog.json` 中 `current` 字段为当前正式版号
 - 页面版本徽章统一读取 `changelog.current`
 
-版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ v1.8（布局与体验升级）→ **v1.8.1**（数据能力闭环收口）
+版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ v1.8（布局与体验升级）→ v1.8.1（数据能力闭环收口）→ **v1.9**（toast 与导入体验优化）
 
 ## 项目文档
 

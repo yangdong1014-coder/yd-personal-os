@@ -251,6 +251,18 @@ def api_export():
         return _error(str(exc), 500)
 
 
+@app.route("/api/import/preview", methods=["POST"])
+def api_import_preview():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return _error("请求体必须是有效的 JSON")
+    try:
+        stats = database.preview_import_data(payload)
+        return jsonify({"ok": True, "data": stats})
+    except database.DataImportError as exc:
+        return _error(str(exc), 400)
+
+
 @app.route("/api/import", methods=["POST"])
 def api_import():
     payload = request.get_json(silent=True)

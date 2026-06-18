@@ -65,9 +65,10 @@ document.addEventListener("DOMContentLoaded", () => {
           await apiRequest(`/api/capability-entries/${entry.id}`, {
             method: "DELETE",
           });
+          showToast("能力记录已删除", "success");
           await loadAllEntries();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -124,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
         `,
       });
     } catch (err) {
-      alert(err.message || "AI 诊断失败");
+      showToast(err.message || "AI 诊断失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -167,7 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 归因失败");
+      showToast(err.message || "AI 归因失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -204,9 +205,10 @@ document.addEventListener("DOMContentLoaded", () => {
           body: JSON.stringify(payload),
         });
         panel.querySelector(".entry-content").value = "";
+        showToast("能力记录已保存", "success");
         await loadAllEntries();
       } catch (err) {
-        alert(err.message);
+        showToast(err.message, "error");
       }
     });
   });

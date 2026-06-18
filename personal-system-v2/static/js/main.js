@@ -17,9 +17,248 @@ document.addEventListener("DOMContentLoaded", () => {
   const importInput = document.getElementById("import-data-input");
   if (importBtn && importInput) {
     importBtn.addEventListener("click", () => importInput.click());
-    importInput.addEventListener("change", handleImport);
+    importInput.addEventListener("change", handleImportSelect);
   }
+
+  bindImportPanelEvents();
 });
+
+let pendingImportPayload = null;
+
+function bindImportPanelEvents() {
+  const previewOverlay = document.getElementById("import-preview-overlay");
+  const previewClose = document.getElementById("import-preview-close");
+  const previewCancel = document.getElementById("import-preview-cancel");
+  const previewConfirm = document.getElementById("import-preview-confirm");
+  const resultOverlay = document.getElementById("import-result-overlay");
+  const resultClose = document.getElementById("import-result-close");
+  const resultDone = document.getElementById("import-result-done");
+
+  if (previewClose) {
+    previewClose.addEventListener("click", () => closeImportPreview());
+  }
+  if (previewCancel) {
+    previewCancel.addEventListener("click", () => closeImportPreview());
+  }
+  if (previewConfirm) {
+    previewConfirm.addEventListener("click", () => executeImport());
+  }
+  if (previewOverlay) {
+    previewOverlay.addEventListener("click", (e) => {
+      if (e.target === previewOverlay) closeImportPreview();
+    });
+  }
+
+  if (resultClose) {
+    resultClose.addEventListener("click", () => closeImportResult());
+  }
+  if (resultDone) {
+    resultDone.addEventListener("click", () => closeImportResult());
+  }
+  if (resultOverlay) {
+    resultOverlay.addEventListener("click", (e) => {
+      if (e.target === resultOverlay) closeImportResult();
+    });
+  }
+}
+
+function renderImportStats(container, items) {
+  if (!container) return;
+  container.innerHTML = items
+    .map(
+      ({ label, value }) => `
+        <div class="import-stat">
+          <span class="import-stat-label">${label}</span>
+          <span class="import-stat-value">${value ?? 0}</span>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderErrorList(listEl, errors) {
+  if (!listEl) return;
+  if (!errors || errors.length === 0) {
+    listEl.hidden = true;
+    listEl.innerHTML = "";
+    return;
+  }
+  listEl.hidden = false;
+  listEl.innerHTML = errors.map((e) => `<li>${escapeHtml(String(e))}</li>`).join("");
+}
+
+function openImportPreview(stats) {
+  const overlay = document.getElementById("import-preview-overlay");
+  const statsEl = document.getElementById("import-preview-stats");
+  const errorsEl = document.getElementById("import-preview-errors");
+  const confirmBtn = document.getElementById("import-preview-confirm");
+
+  renderImportStats(statsEl, [
+    { label: "预计新增", value: stats.will_import },
+    { label: "预计更新", value: stats.will_update },
+    { label: "预计跳过", value: stats.will_skip },
+    { label: "预计失败", value: stats.will_fail },
+  ]);
+  renderErrorList(errorsEl, stats.errors);
+
+  if (confirmBtn) {
+    confirmBtn.disabled = stats.will_fail > 0;
+    confirmBtn.textContent =
+      stats.will_fail > 0 ? "存在错误，无法导入" : "确认导入";
+  }
+
+  if (overlay) overlay.hidden = false;
+}
+
+function closeImportPreview() {
+  const overlay = document.getElementById("import-preview-overlay");
+  if (overlay) overlay.hidden = true;
+  pendingImportPayload = null;
+}
+
+function showImportResult(stats, isError) {
+  const overlay = document.getElementById("import-result-overlay");
+  const statsEl = document.getElementById("import-result-stats");
+  const noteEl = document.getElementById("import-result-note");
+  const errorsEl = document.getElementById("import-result-errors");
+
+  const imported = stats.imported ?? 0;
+  const skipped = stats.skipped ?? 0;
+  const failed = stats.failed ?? 0;
+
+  renderImportStats(statsEl, [
+    { label: "新增/更新", value: imported },
+    { label: "跳过", value: skipped },
+    { label: "失败", value: failed },
+  ]);
+  renderErrorList(errorsEl, stats.errors);
+
+  if (noteEl) {
+    if (skipped > 0) {
+      noteEl.hidden = false;
+      noteEl.textContent = `${skipped} 条记录因内容相同已跳过合并。`;
+    } else {
+      noteEl.hidden = true;
+    }
+  }
+
+  if (overlay) overlay.hidden = false;
+
+  if (isError || failed > 0) {
+    showToast("导入失败或部分失败，请查看结果面板", "error");
+  } else if (skipped > 0 && imported === 0) {
+    showToast("导入完成，数据已是最新", "info");
+  } else {
+    showToast("导入成功", "success");
+  }
+}
+
+function closeImportResult() {
+  const overlay = document.getElementById("import-result-overlay");
+  if (overlay) overlay.hidden = true;
+}
+
+function setImportBusy(busy) {
+  const btn = document.getElementById("import-data-btn");
+  if (!btn) return;
+  btn.disabled = busy;
+  if (busy) {
+    btn.setAttribute("aria-busy", "true");
+    btn.title = "处理中…";
+  } else {
+    btn.removeAttribute("aria-busy");
+    btn.title = "从 JSON 备份恢复";
+  }
+}
+
+async function handleImportSelect(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+
+  setImportBusy(true);
+  try {
+    const text = await file.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (_) {
+      throw new Error("文件不是有效的 JSON 格式");
+    }
+
+    const response = await fetch("/api/import/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "导入预览失败");
+    }
+
+    pendingImportPayload = payload;
+    openImportPreview(result.data);
+
+    if (result.data.will_fail > 0) {
+      showToast("预览发现错误记录，请修正备份后重试", "warning");
+    } else {
+      showToast("预览完成，请确认后导入", "info");
+    }
+  } catch (err) {
+    showToast(err.message || "导入预览失败", "error");
+    pendingImportPayload = null;
+  } finally {
+    setImportBusy(false);
+  }
+}
+
+async function executeImport() {
+  if (!pendingImportPayload) return;
+
+  const confirmBtn = document.getElementById("import-preview-confirm");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "导入中…";
+  }
+  setImportBusy(true);
+
+  try {
+    const response = await fetch("/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pendingImportPayload),
+    });
+    const result = await response.json();
+
+    closeImportPreview();
+
+    if (!response.ok || !result.ok) {
+      showImportResult(
+        result.data || {
+          imported: 0,
+          skipped: 0,
+          failed: result.data?.failed ?? 1,
+          errors: result.data?.errors || [result.error || "导入失败"],
+        },
+        true
+      );
+      return;
+    }
+
+    showImportResult(result.data, false);
+  } catch (err) {
+    closeImportPreview();
+    showToast(err.message || "导入失败，请稍后重试", "error");
+  } finally {
+    pendingImportPayload = null;
+    setImportBusy(false);
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "确认导入";
+    }
+  }
+}
 
 async function handleExport() {
   const btn = document.getElementById("export-data-btn");
@@ -57,8 +296,9 @@ async function handleExport() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+    showToast("备份已导出", "success");
   } catch (err) {
-    alert(err.message || "导出失败，请稍后重试");
+    showToast(err.message || "导出失败，请稍后重试", "error");
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -69,64 +309,8 @@ async function handleExport() {
   }
 }
 
-async function handleImport(event) {
-  const input = event.target;
-  const file = input.files && input.files[0];
-  input.value = "";
-  if (!file) return;
-
-  if (
-    !window.confirm(
-      "当前为合并导入模式：\n" +
-        "· 按 id 更新或跳过记录，不会自动清空现有数据\n" +
-        "· 同 id 且内容不同的记录将被覆盖更新\n" +
-        "· 建议导入前先导出当前备份\n\n" +
-        "确定继续导入？"
-    )
-  ) {
-    return;
-  }
-
-  const btn = document.getElementById("import-data-btn");
-  if (btn) {
-    btn.disabled = true;
-    btn.setAttribute("aria-busy", "true");
-    btn.title = "导入中…";
-  }
-
-  try {
-    const text = await file.text();
-    let payload;
-    try {
-      payload = JSON.parse(text);
-    } catch (_) {
-      throw new Error("文件不是有效的 JSON 格式");
-    }
-
-    const response = await fetch("/api/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.ok) {
-      const detail = result.data
-        ? `\n导入 ${result.data.imported}，跳过 ${result.data.skipped}，失败 ${result.data.failed}`
-        : "";
-      throw new Error((result.error || "导入失败") + detail);
-    }
-
-    const stats = result.data;
-    const failed = stats.failed || 0;
-    const summary = `导入完成：新增/更新 ${stats.imported} 条，跳过 ${stats.skipped} 条`;
-    alert(failed > 0 ? `${summary}，失败 ${failed} 条` : summary);
-  } catch (err) {
-    alert(err.message || "导入失败，请稍后重试");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.removeAttribute("aria-busy");
-      btn.title = "从 JSON 备份恢复";
-    }
-  }
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }

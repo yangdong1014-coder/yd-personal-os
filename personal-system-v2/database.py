@@ -974,7 +974,29 @@ def _records_equal(table, existing_row, incoming):
     return True
 
 
-def _import_row(conn, table, raw, stats):
+def _validate_import_foreign_keys(table, record, conn, pending):
+    if table == "projects":
+        goal_id = record["goal_id"]
+        if goal_id not in pending["goals"] and not conn.execute(
+            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+        ).fetchone():
+            raise ValueError(f"目标 id={goal_id} 不存在")
+    elif table == "tasks":
+        project_id = record["project_id"]
+        if project_id not in pending["projects"] and not conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone():
+            raise ValueError(f"项目 id={project_id} 不存在")
+    elif table == "assets":
+        review_id = record.get("source_review_id")
+        if review_id is not None and review_id not in pending["reviews"]:
+            if not conn.execute(
+                "SELECT id FROM reviews WHERE id = ?", (review_id,)
+            ).fetchone():
+                raise ValueError(f"复盘 id={review_id} 不存在")
+
+
+def _resolve_import_action(conn, table, raw, pending=None):
     record = _normalize_import_record(table, raw)
     row_id = record["id"]
     if not isinstance(row_id, int):
@@ -986,8 +1008,23 @@ def _import_row(conn, table, raw, stats):
 
     if existing:
         if _records_equal(table, existing, record):
-            stats["skipped"] += 1
-            return
+            return "skip", record
+        return "update", record
+
+    if pending is not None:
+        _validate_import_foreign_keys(table, record, conn, pending)
+        pending[table].add(row_id)
+    return "insert", record
+
+
+def _import_row(conn, table, raw, stats):
+    action, record = _resolve_import_action(conn, table, raw)
+    row_id = record["id"]
+
+    if action == "skip":
+        stats["skipped"] += 1
+        return
+    if action == "update":
         fields = _TABLE_FIELDS[table]
         set_clause = ", ".join(f"{f} = ?" for f in fields if f != "id")
         values = [record[f] for f in fields if f != "id"]
@@ -1045,6 +1082,42 @@ def _refresh_sqlite_sequences(conn):
                 "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)",
                 (table, max_id),
             )
+
+
+def preview_import_data(payload):
+    _validate_import_payload(payload)
+
+    stats = {
+        "will_import": 0,
+        "will_update": 0,
+        "will_skip": 0,
+        "will_fail": 0,
+        "errors": [],
+    }
+    pending = {table: set() for table in IMPORT_TABLES}
+    conn = get_connection()
+    try:
+        for table in IMPORT_TABLES:
+            for index, raw in enumerate(payload[table]):
+                label = f"{table}[{index}]"
+                try:
+                    action, _record = _resolve_import_action(
+                        conn, table, raw, pending
+                    )
+                    if action == "skip":
+                        stats["will_skip"] += 1
+                    elif action == "insert":
+                        stats["will_import"] += 1
+                    elif action == "update":
+                        stats["will_update"] += 1
+                except (ValueError, TypeError) as exc:
+                    stats["will_fail"] += 1
+                    message = str(exc) or "记录无效"
+                    if len(stats["errors"]) < 20:
+                        stats["errors"].append(f"{label}: {message}")
+        return stats
+    finally:
+        conn.close()
 
 
 def import_all_data(payload):

@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 优化失败");
+      showToast(err.message || "AI 优化失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -88,7 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 归类失败");
+      showToast(err.message || "AI 归类失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -119,7 +119,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 模板化失败");
+      showToast(err.message || "AI 模板化失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -183,9 +183,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         try {
           await apiRequest(`/api/assets/${asset.id}`, { method: "DELETE" });
+          showToast("知识卡片已删除", "success");
           await loadAssets();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -250,9 +251,10 @@ document.addEventListener("DOMContentLoaded", () => {
       sourceReviewInput.value = "";
       prefillHint.style.display = "none";
       document.getElementById("asset-type").value = "知识卡片";
+      showToast("知识卡片已保存", "success");
       await loadAssets();
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, "error");
     }
   });
 

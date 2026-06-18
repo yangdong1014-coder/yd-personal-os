@@ -65,7 +65,7 @@ function showAIModal({
       await onConfirm();
       hideAIModal();
     } catch (err) {
-      alert(err.message || "操作失败");
+      showToast(err.message || "操作失败", "error");
     } finally {
       newConfirm.disabled = false;
       newConfirm.textContent = confirmLabel;

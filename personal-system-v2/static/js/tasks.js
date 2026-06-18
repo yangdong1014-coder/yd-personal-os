@@ -66,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 拆解失败");
+      showToast(err.message || "AI 拆解失败", "error");
     } finally {
       button.disabled = !projectSelect.value;
       button.textContent = prevText;
@@ -104,7 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 推荐失败");
+      showToast(err.message || "AI 推荐失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -166,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         } catch (err) {
           todayCheckbox.checked = !enabled;
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -181,9 +181,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         try {
           await apiRequest(`/api/tasks/${task.id}`, { method: "DELETE" });
+          showToast("任务已删除", "success");
           await loadTasks();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -198,7 +199,7 @@ document.addEventListener("DOMContentLoaded", () => {
           task.status = statusSelect.value;
         } catch (err) {
           statusSelect.value = prev;
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -231,9 +232,10 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ project_id: projectId, name }),
       });
       nameInput.value = "";
+      showToast("任务已保存", "success");
       await loadTasks();
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, "error");
     }
   });
 

@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function handleAIComplete(button) {
     const whatDone = document.getElementById("review-what-done").value.trim();
     if (!whatDone) {
-      alert("请先填写「今天做了什么」");
+      showToast("请先填写「今天做了什么」", "warning");
       return;
     }
 
@@ -47,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 补全失败");
+      showToast(err.message || "AI 补全失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -61,7 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleAIWeekly(button) {
     if (selectedDailyIds.size < 2) {
-      alert("请至少勾选两条「每日」复盘");
+      showToast("请至少勾选两条「每日」复盘", "warning");
       return;
     }
 
@@ -94,7 +94,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 周复盘聚合失败");
+      showToast(err.message || "AI 周复盘聚合失败", "error");
     } finally {
       button.textContent = prevText;
       updateWeeklyButton();
@@ -140,11 +140,11 @@ document.addEventListener("DOMContentLoaded", () => {
               source_review_id: review.id,
             }),
           });
-          alert("已保存到资产模块，可前往「资产」页查看");
+          showToast("已保存到资产模块，可前往「资产」页查看", "success");
         },
       });
     } catch (err) {
-      alert(err.message || "AI 提炼失败");
+      showToast(err.message || "AI 提炼失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -213,9 +213,10 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
           await apiRequest(`/api/reviews/${review.id}`, { method: "DELETE" });
           selectedDailyIds.delete(review.id);
+          showToast("复盘已删除", "success");
           await loadReviews();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -270,9 +271,10 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("review-stuck").value = "";
       document.getElementById("review-next").value = "";
       document.getElementById("review-depositable").value = "";
+      showToast("复盘已保存", "success");
       await loadReviews();
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, "error");
     }
   });
 

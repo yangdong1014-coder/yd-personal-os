@@ -50,7 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
       });
     } catch (err) {
-      alert(err.message || "AI 拆解失败");
+      showToast(err.message || "AI 拆解失败", "error");
     } finally {
       button.disabled = false;
       button.textContent = prevText;
@@ -153,9 +153,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         try {
           await apiRequest(`/api/goals/${goal.id}`, { method: "DELETE" });
+          showToast("目标已删除", "success");
           await loadGoals();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -175,9 +176,10 @@ document.addEventListener("DOMContentLoaded", () => {
             await apiRequest(`/api/projects/${projectId}`, {
               method: "DELETE",
             });
+            showToast("项目已删除", "success");
             await loadGoals();
           } catch (err) {
-            alert(err.message);
+            showToast(err.message, "error");
           }
         });
       });
@@ -203,7 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
           await loadGoals();
         } catch (err) {
           typeSelect.value = prev;
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -220,9 +222,10 @@ document.addEventListener("DOMContentLoaded", () => {
             body: JSON.stringify({ goal_id: goal.id, name }),
           });
           input.value = "";
+          showToast("项目已添加", "success");
           await loadGoals();
         } catch (err) {
-          alert(err.message);
+          showToast(err.message, "error");
         }
       });
 
@@ -264,9 +267,10 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       nameInput.value = "";
       typeSelect.value = "年度";
+      showToast("目标已保存", "success");
       await loadGoals();
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, "error");
     }
   });
 
