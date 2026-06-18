@@ -6,6 +6,7 @@ import ai_service
 import changelog
 import config
 import database
+import inbox_service
 import obsidian_export
 import prompt_specs
 import settings_store
@@ -28,6 +29,7 @@ NAV_ITEMS = [
     {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
     {"endpoint": "assets", "label": "资产", "path": "/assets"},
     {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
+    {"endpoint": "inbox", "label": "智能归档", "path": "/inbox"},
     {"endpoint": "prompts", "label": "AI管理", "path": "/prompts"},
     {"endpoint": "changelog", "label": "版本日志", "path": "/changelog"},
 ]
@@ -93,6 +95,15 @@ def capabilities():
         capability_modules=database.CAPABILITY_MODULES,
         capability_layers=database.CAPABILITY_LAYERS,
         level_types=database.LEVEL_TYPES,
+    )
+
+
+@app.route("/inbox")
+def inbox_page():
+    return render_template(
+        "inbox.html",
+        active_page="inbox",
+        nav_items=NAV_ITEMS,
     )
 
 
@@ -544,6 +555,57 @@ def api_ai_dispatch_actions():
         result = ai_service.dispatch_dashboard_actions()
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/inbox/analyze", methods=["POST"])
+def api_inbox_analyze():
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = inbox_service.analyze_text(
+            payload.get("text", ""),
+            ai_service.analyze_inbox_text,
+        )
+        return jsonify({
+            "ok": True,
+            "data": {
+                "inbox_entry_id": result["inbox_entry_id"],
+                "entry": result["entry"],
+                "suggestions": result["suggestions"],
+            },
+        })
+    except inbox_service.InboxServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/inbox/<int:entry_id>", methods=["GET"])
+def api_get_inbox(entry_id):
+    try:
+        result = inbox_service.get_inbox_detail(entry_id)
+        return jsonify({"ok": True, "data": result})
+    except inbox_service.InboxServiceError as exc:
+        return _error(str(exc), 404)
+
+
+@app.route("/api/inbox/commit", methods=["POST"])
+def api_inbox_commit():
+    payload = request.get_json(silent=True) or {}
+    suggestion_ids = payload.get("suggestion_ids") or []
+    if not isinstance(suggestion_ids, list):
+        return _error("suggestion_ids 必须为数组")
+    try:
+        result = inbox_service.commit_suggestions(suggestion_ids)
+        return jsonify({"ok": True, "data": result})
+    except inbox_service.InboxServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/inbox/suggestions/<int:suggestion_id>/reject", methods=["POST"])
+def api_inbox_reject_suggestion(suggestion_id):
+    try:
+        suggestion = inbox_service.reject_suggestion(suggestion_id)
+        return jsonify({"ok": True, "data": suggestion})
+    except inbox_service.InboxServiceError as exc:
         return _error(str(exc))
 
 

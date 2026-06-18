@@ -21,6 +21,26 @@ CAPABILITY_MODULES = (
     "AI驾驭力",
 )
 LEVEL_TYPES = ("能力层", "应用层")
+INBOX_ENTRY_STATUSES = ("draft", "analyzed", "committed", "archived", "failed")
+INBOX_SUGGESTION_STATUSES = ("pending", "accepted", "rejected", "committed")
+INBOX_TARGET_TYPES = (
+    "goal",
+    "project",
+    "task",
+    "review",
+    "asset",
+    "capability_entry",
+    "uncertain",
+    "ignored",
+)
+INBOX_COMMITTABLE_TYPES = (
+    "goal",
+    "project",
+    "task",
+    "review",
+    "asset",
+    "capability_entry",
+)
 CAPABILITY_LAYERS = {
     "本质力": "基础认知层",
     "建模力": "基础认知层",
@@ -134,9 +154,38 @@ def init_db():
         """
     )
     _migrate_tasks_table(conn)
+    _migrate_inbox_tables(conn)
     _normalize_mainline_goals(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_inbox_tables(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS inbox_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            raw_text TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS inbox_suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inbox_entry_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT '',
+            suggested_payload TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (inbox_entry_id) REFERENCES inbox_entries(id) ON DELETE CASCADE
+        );
+        """
+    )
 
 
 def _demote_other_mainline_goals(conn, keep_goal_id):
@@ -1238,3 +1287,445 @@ def export_all_data():
         ) from exc
     except Exception as exc:
         raise ExportError("导出数据时发生错误，请稍后重试") from exc
+
+
+class InboxError(Exception):
+    pass
+
+
+def _parse_suggested_payload(raw):
+    if isinstance(raw, dict):
+        return raw
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _suggestion_row(row):
+    data = _row_to_dict(row)
+    if data:
+        data["suggested_payload"] = _parse_suggested_payload(
+            data.get("suggested_payload")
+        )
+    return data
+
+
+def create_inbox_entry(raw_text, source_type="manual"):
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("输入文本不能为空")
+    if source_type not in ("manual",):
+        raise ValueError("无效的 source_type")
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO inbox_entries (raw_text, source_type, status, created_at)
+        VALUES (?, ?, 'draft', ?)
+        """,
+        (text, source_type, _now()),
+    )
+    conn.commit()
+    entry_id = cur.lastrowid
+    row = conn.execute(
+        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def update_inbox_entry_status(entry_id, status):
+    if status not in INBOX_ENTRY_STATUSES:
+        raise ValueError("无效的 inbox 状态")
+
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT id FROM inbox_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("inbox 记录不存在")
+
+    conn.execute(
+        "UPDATE inbox_entries SET status = ? WHERE id = ?",
+        (status, entry_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def get_inbox_entry(entry_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def create_inbox_suggestions(entry_id, items):
+    if not get_inbox_entry(entry_id):
+        raise ValueError("inbox 记录不存在")
+
+    conn = get_connection()
+    created = []
+    try:
+        for item in items:
+            target_type = item.get("target_type", "uncertain")
+            if target_type not in INBOX_TARGET_TYPES:
+                target_type = "uncertain"
+            title = (item.get("title") or "").strip() or "未命名条目"
+            content = (item.get("content") or "").strip()
+            confidence = float(item.get("confidence", 0) or 0)
+            confidence = max(0.0, min(1.0, confidence))
+            reason = (item.get("reason") or "").strip()
+            payload = item.get("suggested_payload") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+            cur = conn.execute(
+                """
+                INSERT INTO inbox_suggestions (
+                    inbox_entry_id, target_type, title, content,
+                    confidence, reason, suggested_payload, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    entry_id,
+                    target_type,
+                    title,
+                    content,
+                    confidence,
+                    reason,
+                    json.dumps(payload, ensure_ascii=False),
+                    _now(),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM inbox_suggestions WHERE id = ?",
+                (cur.lastrowid,),
+            ).fetchone()
+            created.append(_suggestion_row(row))
+        conn.commit()
+        return created
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_inbox_suggestions(entry_id):
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM inbox_suggestions
+        WHERE inbox_entry_id = ?
+        ORDER BY id ASC
+        """,
+        (entry_id,),
+    ).fetchall()
+    conn.close()
+    return [_suggestion_row(r) for r in rows]
+
+
+def get_inbox_suggestion(suggestion_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+    ).fetchone()
+    conn.close()
+    return _suggestion_row(row)
+
+
+def reject_inbox_suggestion(suggestion_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("建议不存在")
+    if row["status"] == "committed":
+        conn.close()
+        raise ValueError("已入库的建议无法拒绝")
+
+    conn.execute(
+        "UPDATE inbox_suggestions SET status = 'rejected' WHERE id = ?",
+        (suggestion_id,),
+    )
+    conn.commit()
+    updated = conn.execute(
+        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+    ).fetchone()
+    conn.close()
+    return _suggestion_row(updated)
+
+
+def _map_goal_type(raw):
+    if raw in GOAL_TYPES:
+        return raw
+    mapping = {
+        "personal": "季度",
+        "annual": "年度",
+        "yearly": "年度",
+        "quarterly": "季度",
+        "monthly": "月度",
+    }
+    return mapping.get((raw or "").lower(), "季度")
+
+
+def _map_task_status(raw):
+    if raw in TASK_STATUSES:
+        return raw
+    mapping = {
+        "todo": "待处理",
+        "pending": "待处理",
+        "doing": "进行中",
+        "in_progress": "进行中",
+        "done": "完成",
+        "completed": "完成",
+    }
+    return mapping.get((raw or "").lower(), "待处理")
+
+
+def _map_review_type(raw):
+    if raw in REVIEW_TYPES:
+        return raw
+    mapping = {"inbox": "事件", "daily": "每日", "weekly": "每周"}
+    return mapping.get((raw or "").lower(), "每日")
+
+
+def _commit_suggestion_in_tx(conn, suggestion):
+    target_type = suggestion["target_type"]
+    title = suggestion["title"]
+    content = suggestion["content"]
+    payload = suggestion["suggested_payload"]
+
+    if target_type == "goal":
+        name = (payload.get("name") or title).strip()
+        if not name:
+            raise ValueError("目标名称不能为空")
+        goal_type = _map_goal_type(payload.get("type"))
+        cur = conn.execute(
+            "INSERT INTO goals (name, type, created_at) VALUES (?, ?, ?)",
+            (name, goal_type, _now()),
+        )
+        if goal_type == "当前主线":
+            _demote_other_mainline_goals(conn, cur.lastrowid)
+        return "goals"
+
+    if target_type == "project":
+        name = (payload.get("name") or title).strip()
+        goal_id = payload.get("goal_id")
+        if not name:
+            raise ValueError("项目名称不能为空")
+        if not goal_id:
+            raise ValueError("项目归档需要关联目标 goal_id")
+        goal = conn.execute(
+            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+        ).fetchone()
+        if not goal:
+            raise ValueError("关联目标不存在")
+        conn.execute(
+            "INSERT INTO projects (goal_id, name, created_at) VALUES (?, ?, ?)",
+            (goal_id, name, _now()),
+        )
+        return "projects"
+
+    if target_type == "task":
+        name = (payload.get("name") or title).strip()
+        project_id = payload.get("project_id")
+        status = _map_task_status(payload.get("status"))
+        if not name:
+            raise ValueError("任务名称不能为空")
+        if not project_id:
+            raise ValueError("任务归档需要关联项目 project_id")
+        project = conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if not project:
+            raise ValueError("关联项目不存在")
+        conn.execute(
+            """
+            INSERT INTO tasks (project_id, name, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (project_id, name, status, _now()),
+        )
+        return "tasks"
+
+    if target_type == "review":
+        review_date = (payload.get("review_date") or _today_local()).strip()
+        review_type = _map_review_type(payload.get("type"))
+        what_done = (payload.get("what_done") or content or title).strip()
+        if not review_date:
+            raise ValueError("复盘日期不能为空")
+        conn.execute(
+            """
+            INSERT INTO reviews (
+                review_date, type, what_done, stuck, next_adjust, depositable, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                review_date,
+                review_type,
+                what_done,
+                (payload.get("stuck") or "").strip(),
+                (payload.get("next_adjust") or "").strip(),
+                (payload.get("depositable") or "").strip(),
+                _now(),
+            ),
+        )
+        return "reviews"
+
+    if target_type == "asset":
+        asset_title = (payload.get("title") or title).strip()
+        core_content = (payload.get("core_content") or content).strip()
+        asset_type = payload.get("asset_type") or "知识卡片"
+        if asset_type not in ASSET_TYPES:
+            asset_type = "知识卡片"
+        if not asset_title or not core_content:
+            raise ValueError("知识卡片需要标题与核心内容")
+        tags = payload.get("capability_tags") or []
+        if not isinstance(tags, list):
+            tags = []
+        tags = [t for t in tags if t in CAPABILITY_MODULES]
+        source_review_id = payload.get("source_review_id")
+        conn.execute(
+            """
+            INSERT INTO assets (
+                title, trigger_context, core_content, asset_type,
+                capability_tags, source_review_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_title,
+                (payload.get("trigger_context") or "").strip(),
+                core_content,
+                asset_type,
+                json.dumps(tags, ensure_ascii=False),
+                source_review_id,
+                _now(),
+            ),
+        )
+        return "assets"
+
+    if target_type == "capability_entry":
+        module = payload.get("capability") or payload.get("module") or "AI驾驭力"
+        if module not in CAPABILITY_MODULES:
+            module = "AI驾驭力"
+        entry_content = (payload.get("content") or content).strip()
+        entry_date = (payload.get("entry_date") or _today_local()).strip()
+        level_type = payload.get("level_type") or "能力层"
+        if level_type not in LEVEL_TYPES:
+            level_type = "能力层"
+        if not entry_content:
+            raise ValueError("能力记录内容不能为空")
+        conn.execute(
+            """
+            INSERT INTO capability_entries (
+                module, entry_date, content, source_project, level_type, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                module,
+                entry_date,
+                entry_content,
+                (payload.get("source_project") or "").strip(),
+                level_type,
+                _now(),
+            ),
+        )
+        return "capability_entries"
+
+    raise ValueError(f"类型 {target_type} 不可入库")
+
+
+def commit_inbox_suggestions(suggestion_ids):
+    if not suggestion_ids:
+        raise ValueError("未选择任何建议")
+
+    unique_ids = []
+    seen = set()
+    for raw_id in suggestion_ids:
+        sid = int(raw_id)
+        if sid in seen:
+            continue
+        seen.add(sid)
+        unique_ids.append(sid)
+
+    created = {
+        "goals": 0,
+        "projects": 0,
+        "tasks": 0,
+        "reviews": 0,
+        "assets": 0,
+        "capability_entries": 0,
+    }
+    skipped = 0
+    errors = []
+
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN")
+        entry_ids = set()
+        for suggestion_id in unique_ids:
+            row = conn.execute(
+                "SELECT * FROM inbox_suggestions WHERE id = ?",
+                (suggestion_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"建议 #{suggestion_id} 不存在")
+            suggestion = _suggestion_row(row)
+            if suggestion["status"] == "committed":
+                skipped += 1
+                continue
+            if suggestion["status"] != "pending":
+                raise ValueError(f"建议 #{suggestion_id} 已处理，无法提交")
+            if suggestion["target_type"] not in INBOX_COMMITTABLE_TYPES:
+                raise ValueError(
+                    f"建议 #{suggestion_id} 类型为 {suggestion['target_type']}，不可入库"
+                )
+            table_key = _commit_suggestion_in_tx(conn, suggestion)
+            created[table_key] += 1
+            conn.execute(
+                "UPDATE inbox_suggestions SET status = 'committed' WHERE id = ?",
+                (suggestion_id,),
+            )
+            entry_ids.add(suggestion["inbox_entry_id"])
+
+        if entry_ids:
+            for entry_id in entry_ids:
+                pending = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM inbox_suggestions
+                    WHERE inbox_entry_id = ? AND status = 'pending'
+                    """,
+                    (entry_id,),
+                ).fetchone()["cnt"]
+                if pending == 0:
+                    conn.execute(
+                        "UPDATE inbox_entries SET status = 'committed' WHERE id = ?",
+                        (entry_id,),
+                    )
+
+        conn.commit()
+        return {"created": created, "skipped": skipped, "errors": errors}
+    except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
+        conn.rollback()
+        message = str(exc) or "归档失败"
+        errors.append(message)
+        raise InboxError(message, {"created": created, "skipped": skipped, "errors": errors}) from exc
+    except sqlite3.Error as exc:
+        conn.rollback()
+        message = "数据库写入失败，已回滚"
+        errors.append(message)
+        raise InboxError(message, {"created": created, "skipped": skipped, "errors": errors}) from exc
+    finally:
+        conn.close()

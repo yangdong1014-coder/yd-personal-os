@@ -20,6 +20,7 @@ MODULES = (
     "reviews",
     "assets",
     "capabilities",
+    "inbox",
 )
 
 

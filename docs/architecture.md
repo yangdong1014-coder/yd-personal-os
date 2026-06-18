@@ -9,6 +9,7 @@ Flask (app.py) — 路由、模板、API
         ↓
 database.py — SQLite CRUD、导入导出
 ai_service.py — DeepSeek（可选）
+inbox_service.py — 智能归档解析与确认入库
 prompts/loader.py — 场景提示词加载
 changelog.py — 版本日志
 ```
@@ -18,7 +19,7 @@ changelog.py — 版本日志
 ## 后端（Flask）
 
 - 入口：`personal-system-v2/app.py`
-- 页面路由：首页、目标、任务、复盘、资产、能力、AI 管理、版本日志
+- 页面路由：首页、目标、任务、复盘、资产、能力、智能归档、AI 管理、版本日志
 - JSON API：CRUD、导入/导出、AI 代理、changelog
 - 全局注入：`current_version`（来自 changelog）、`ai_enabled`
 
@@ -59,3 +60,17 @@ changelog.py — 版本日志
 - `obsidian_export.py`：将核心数据生成 Obsidian 友好 Markdown 并打包 zip
 - API：`GET /api/export/obsidian.zip`
 - 仅一向导出，不写用户本地 vault
+
+## v1.11 新增：智能归档 Inbox
+
+```
+用户输入原文 → POST /api/inbox/analyze → AI 结构化建议
+        ↓
+inbox_entries（原文）+ inbox_suggestions（候选）
+        ↓ 用户预览勾选
+POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability_entries
+```
+
+- 解析层：`inbox_service.py` + `prompts/inbox/analyze.*`
+- 原则：AI 不静默入库；低置信度默认 uncertain；事务批量提交，失败回滚
+- 拒绝：`POST /api/inbox/suggestions/<id>/reject`

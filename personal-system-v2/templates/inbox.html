@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}智能归档 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">智能归档</h1>
+  <p class="page-subtitle">
+    输入一段文字，系统会自动拆解为目标、项目、任务、复盘、知识卡片和能力记录。确认后才会入库。
+  </p>
+  <span class="version-badge">{{ current_version }}</span>
+  {% if not ai_enabled %}
+  <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
+  {% endif %}
+</header>
+
+<div class="page-split page-split-wide">
+  <section class="section-card page-split-side">
+    <h2>输入原文</h2>
+    <p class="form-hint section-hint">支持粘贴长文本。原文会保留，AI 仅生成预览建议。</p>
+    <textarea
+      id="inbox-text"
+      class="textarea inbox-textarea"
+      rows="14"
+      placeholder="粘贴或输入需要归档的内容……"
+    ></textarea>
+    <div class="form-actions-row">
+      <button type="button" id="inbox-analyze-btn" class="btn btn-ai" {% if not ai_enabled %}disabled{% endif %}>
+        AI 解析
+      </button>
+      <button type="button" id="inbox-clear-btn" class="btn btn-ghost">清空</button>
+    </div>
+  </section>
+
+  <section class="section-card page-split-main">
+    <div class="section-header-row">
+      <div>
+        <h2>解析结果</h2>
+        <p class="form-hint section-hint" id="inbox-result-hint">解析后在此预览，勾选需要归档的条目</p>
+      </div>
+      <div class="inbox-bulk-actions" id="inbox-bulk-actions" hidden>
+        <button type="button" id="inbox-select-high-btn" class="btn btn-sm btn-ghost">全选高置信度</button>
+        <button type="button" id="inbox-deselect-btn" class="btn btn-sm btn-ghost">取消全选</button>
+        <button type="button" id="inbox-commit-btn" class="btn btn-sm">确认归档</button>
+      </div>
+    </div>
+    <div id="inbox-loading" class="inbox-loading" hidden>AI 解析中…</div>
+    <div id="inbox-suggestions" class="inbox-suggestions">
+      <div class="empty-state">
+        <strong>等待输入</strong>
+        在左侧输入文本后点击「AI 解析」
+      </div>
+    </div>
+    <div id="inbox-commit-result" class="inbox-commit-result" hidden></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inbox.js') }}"></script>
+{% endblock %}

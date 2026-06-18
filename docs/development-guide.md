@@ -37,6 +37,24 @@ pytest -v tests/test_obsidian_export.py   # 单文件
 - 使用临时数据库，**不要**指向生产 `data/yd_os.db`
 - 无需 `DEEPSEEK_API_KEY`
 
+### AI mock 测试（智能归档等）
+
+不调用真实 DeepSeek 时，在测试中 `monkeypatch` AI 入口：
+
+```python
+import ai_service
+
+def test_inbox_analyze(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {"items": [...]},
+    )
+    response = client.post("/api/inbox/analyze", json={"text": "测试"})
+```
+
+参考：`tests/test_inbox.py`
+
 ## 目录约定
 
 | 路径 | 职责 |
@@ -44,6 +62,7 @@ pytest -v tests/test_obsidian_export.py   # 单文件
 | `app.py` | 路由 |
 | `database.py` | 数据层 |
 | `obsidian_export.py` | Obsidian Markdown zip |
+| `inbox_service.py` | 智能归档解析与确认入库 |
 | `prompts/` | AI 提示词文件 |
 | `tests/` | pytest |
 | `data/` | 运行时 DB（git 忽略） |

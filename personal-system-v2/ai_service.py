@@ -783,3 +783,27 @@ def generate_prompt_draft(module, scene, kind, brief="", current=""):
         "module": module,
         "scene": scene,
     }
+
+
+def analyze_inbox_text(raw_text):
+    text = (raw_text or "").strip()
+    if not text:
+        raise AIServiceError("输入文本不能为空")
+
+    system_prompt = load_prompt(
+        "inbox",
+        "analyze",
+        capability_list=CAPABILITY_LIST,
+        goal_types="、".join(database.GOAL_TYPES),
+        review_types="、".join(database.REVIEW_TYPES),
+        asset_types=ASSET_TYPE_LIST,
+    )
+    user_prompt = load_prompt("inbox", "analyze", kind="user", raw_text=text)
+    data = _chat_json(system_prompt, user_prompt)
+
+    if not isinstance(data, dict) or "items" not in data:
+        raise AIServiceError("AI 返回格式异常，请重试")
+    if not isinstance(data["items"], list):
+        raise AIServiceError("AI 返回格式异常：items 必须为数组")
+
+    return data

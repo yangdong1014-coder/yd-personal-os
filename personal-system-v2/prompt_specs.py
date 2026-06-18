@@ -7,6 +7,7 @@ MODULE_LABELS = {
     "reviews": "复盘",
     "assets": "资产",
     "capabilities": "能力",
+    "inbox": "智能归档",
 }
 
 SCENE_SPECS = {
@@ -162,6 +163,22 @@ SCENE_SPECS = {
         "user_mode": "auto",
         "system_vars": [],
         "user_vars": [],
+    },
+    ("inbox", "analyze"): {
+        "label": "智能归档解析",
+        "purpose": "将非结构化输入拆解为目标、项目、任务、复盘、资产、能力记录等归档建议。",
+        "json_schema": (
+            "items: 对象数组，每项含 target_type、title、content、"
+            "confidence（0-1）、reason、suggested_payload（对象）"
+        ),
+        "user_mode": "template",
+        "system_vars": [
+            "capability_list",
+            "goal_types",
+            "review_types",
+            "asset_types",
+        ],
+        "user_vars": ["raw_text"],
     },
 }
 

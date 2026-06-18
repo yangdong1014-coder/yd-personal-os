@@ -1,6 +1,20 @@
 {
-  "current": "v1.10.1",
+  "current": "v1.11",
   "entries": [
+    {
+      "version": "v1.11",
+      "date": "2026-06-18",
+      "title": "智能归档 Inbox",
+      "type": "feat",
+      "items": [
+        "新增 /inbox 智能归档页面与导航入口",
+        "AI 非结构化文本解析，拆解为目标/项目/任务/复盘/资产/能力记录",
+        "解析预览 + 人工勾选确认后批量入库，不静默写入",
+        "新增 inbox_entries / inbox_suggestions 表保存原文与建议",
+        "支持单条建议拒绝与重复提交跳过",
+        "pytest 覆盖 analyze/commit/reject 与 AI mock"
+      ]
+    },
     {
       "version": "v1.10.1",
       "date": "2026-06-18",

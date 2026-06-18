@@ -10,6 +10,8 @@ goals (1) ──< projects (N) ──< tasks (N)
 reviews (1) ──< assets (N, optional source_review_id)
 
 capability_entries — 独立表，无外键
+
+inbox_entries (1) ──< inbox_suggestions (N)
 ```
 
 ## 表说明
@@ -77,6 +79,31 @@ capability_entries — 独立表，无外键
 | level_type | 能力层 / 应用层 |
 | created_at | 创建时间 |
 
+### inbox_entries
+
+| 字段 | 说明 |
+|------|------|
+| id | 主键 |
+| raw_text | 用户原始输入 |
+| source_type | 来源类型（如 manual） |
+| status | draft / analyzed / committed / archived / failed |
+| created_at | 创建时间 |
+
+### inbox_suggestions
+
+| 字段 | 说明 |
+|------|------|
+| id | 主键 |
+| inbox_entry_id | → inbox_entries.id，`ON DELETE CASCADE` |
+| target_type | goal / project / task / review / asset / capability_entry / uncertain / ignored |
+| title | 建议标题 |
+| content | 建议正文 |
+| confidence | 置信度 0-1 |
+| reason | 归档理由 |
+| suggested_payload | JSON 字符串，建议写入字段 |
+| status | pending / accepted / rejected / committed |
+| created_at | 创建时间 |
+
 ## 外键与级联
 
 | 删除对象 | 行为 |
@@ -84,6 +111,7 @@ capability_entries — 独立表，无外键
 | goal | 级联删除 projects、tasks |
 | project | 级联删除 tasks |
 | review | 关联 assets 的 `source_review_id` 置 NULL |
+| inbox_entry | 级联删除 inbox_suggestions |
 
 `PRAGMA foreign_keys = ON` 在每次 `get_connection()` 时启用。
 
