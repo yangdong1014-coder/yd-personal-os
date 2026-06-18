@@ -108,12 +108,21 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
           <div class="card-actions">
             <button type="button" class="btn btn-sm btn-ai">AI拆解</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-delete-goal">删除</button>
           </div>
         </div>
         <div class="nested-block">
           <h4 class="nested-title">项目（${goalProjects.length}）</h4>
           <ul class="nested-list">
-            ${goalProjects.map((p) => `<li>${escapeHtml(p.name)}</li>`).join("")}
+            ${goalProjects
+              .map(
+                (p) => `
+              <li class="nested-item">
+                <span>${escapeHtml(p.name)}</span>
+                <button type="button" class="btn btn-sm btn-ghost btn-delete-project" data-project-id="${p.id}">删除</button>
+              </li>`
+              )
+              .join("")}
             ${goalProjects.length === 0 ? '<li class="muted">暂无项目</li>' : ""}
           </ul>
           <form class="inline-form nested-form project-form">
@@ -126,6 +135,51 @@ document.addEventListener("DOMContentLoaded", () => {
       const aiBtn = card.querySelector(".btn-ai");
       aiBtn.addEventListener("click", (e) => {
         handleAIDecompose(goal, e.currentTarget);
+      });
+
+      const deleteGoalBtn = card.querySelector(".btn-delete-goal");
+      deleteGoalBtn.addEventListener("click", async () => {
+        const projectCount = goalProjects.length;
+        const taskHint =
+          projectCount > 0
+            ? `将同时删除其下 ${projectCount} 个项目及关联任务。`
+            : "";
+        if (
+          !window.confirm(
+            `确定删除目标「${goal.name}」？${taskHint}此操作不可撤销。`
+          )
+        ) {
+          return;
+        }
+        try {
+          await apiRequest(`/api/goals/${goal.id}`, { method: "DELETE" });
+          await loadGoals();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      card.querySelectorAll(".btn-delete-project").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const projectId = parseInt(btn.dataset.projectId, 10);
+          const project = goalProjects.find((p) => p.id === projectId);
+          if (!project) return;
+          if (
+            !window.confirm(
+              `确定删除项目「${project.name}」？将同时删除其下所有任务。此操作不可撤销。`
+            )
+          ) {
+            return;
+          }
+          try {
+            await apiRequest(`/api/projects/${projectId}`, {
+              method: "DELETE",
+            });
+            await loadGoals();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
       });
 
       const typeSelect = card.querySelector(".goal-type-select");

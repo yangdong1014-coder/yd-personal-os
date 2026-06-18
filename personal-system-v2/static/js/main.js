@@ -1,7 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const path = window.location.pathname;
   document.querySelectorAll(".nav-link").forEach((link) => {
-    if (link.id === "export-data-btn") return;
+    if (link.id === "export-data-btn" || link.id === "import-data-btn") return;
     const href = link.getAttribute("href");
     if (href === path || (path === "/" && href === "/")) {
       link.classList.add("active");
@@ -11,6 +11,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const exportBtn = document.getElementById("export-data-btn");
   if (exportBtn) {
     exportBtn.addEventListener("click", handleExport);
+  }
+
+  const importBtn = document.getElementById("import-data-btn");
+  const importInput = document.getElementById("import-data-input");
+  if (importBtn && importInput) {
+    importBtn.addEventListener("click", () => importInput.click());
+    importInput.addEventListener("change", handleImport);
   }
 });
 
@@ -58,6 +65,64 @@ async function handleExport() {
       btn.classList.remove("is-exporting");
       btn.removeAttribute("aria-busy");
       btn.title = "导出全部数据";
+    }
+  }
+}
+
+async function handleImport(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+
+  if (
+    !window.confirm(
+      "导入将合并备份数据（相同 id 更新，相同内容跳过）。确定继续？"
+    )
+  ) {
+    return;
+  }
+
+  const btn = document.getElementById("import-data-btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.title = "导入中…";
+  }
+
+  try {
+    const text = await file.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (_) {
+      throw new Error("文件不是有效的 JSON 格式");
+    }
+
+    const response = await fetch("/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      const detail = result.data
+        ? `\n导入 ${result.data.imported}，跳过 ${result.data.skipped}，失败 ${result.data.failed}`
+        : "";
+      throw new Error((result.error || "导入失败") + detail);
+    }
+
+    const stats = result.data;
+    alert(
+      `导入完成：新增/更新 ${stats.imported} 条，跳过 ${stats.skipped} 条`
+    );
+  } catch (err) {
+    alert(err.message || "导入失败，请稍后重试");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      btn.title = "从 JSON 备份恢复";
     }
   }
 }

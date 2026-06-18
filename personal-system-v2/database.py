@@ -3,7 +3,8 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
+_DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
+DB_PATH = os.environ.get("YD_OS_DB_PATH", _DEFAULT_DB_PATH)
 
 GOAL_TYPES = ("年度", "季度", "月度", "当前主线")
 TASK_STATUSES = ("待处理", "进行中", "完成")
@@ -710,8 +711,378 @@ def list_capability_entries(module=None):
     return [_row_to_dict(r) for r in rows]
 
 
+class DeleteError(Exception):
+    pass
+
+
+class DataImportError(Exception):
+    def __init__(self, message, stats=None):
+        super().__init__(message)
+        self.stats = stats
+
+
 class ExportError(Exception):
     pass
+
+
+SUPPORTED_IMPORT_VERSIONS = ("1.0",)
+IMPORT_TABLES = (
+    "goals",
+    "projects",
+    "tasks",
+    "reviews",
+    "assets",
+    "capability_entries",
+)
+
+_TABLE_FIELDS = {
+    "goals": ("id", "name", "type", "created_at"),
+    "projects": ("id", "goal_id", "name", "created_at"),
+    "tasks": (
+        "id",
+        "project_id",
+        "name",
+        "status",
+        "created_at",
+        "today_progress",
+        "today_progress_date",
+    ),
+    "reviews": (
+        "id",
+        "review_date",
+        "type",
+        "what_done",
+        "stuck",
+        "next_adjust",
+        "depositable",
+        "created_at",
+    ),
+    "assets": (
+        "id",
+        "title",
+        "trigger_context",
+        "core_content",
+        "asset_type",
+        "capability_tags",
+        "source_review_id",
+        "created_at",
+    ),
+    "capability_entries": (
+        "id",
+        "module",
+        "entry_date",
+        "content",
+        "source_project",
+        "level_type",
+        "created_at",
+    ),
+}
+
+
+def _delete_entity(table, entity_id, entity_label):
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            f"SELECT id FROM {table} WHERE id = ?", (entity_id,)
+        ).fetchone()
+        if not existing:
+            raise ValueError(f"{entity_label}不存在")
+
+        conn.execute(f"DELETE FROM {table} WHERE id = ?", (entity_id,))
+        conn.commit()
+        return {"id": entity_id, "deleted": True}
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DeleteError(
+            f"无法删除{entity_label}：存在关联数据，请先处理依赖记录"
+        ) from exc
+    finally:
+        conn.close()
+
+
+def delete_goal(goal_id):
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+        ).fetchone()
+        if not existing:
+            raise ValueError("目标不存在")
+
+        project_count = conn.execute(
+            "SELECT COUNT(*) FROM projects WHERE goal_id = ?", (goal_id,)
+        ).fetchone()[0]
+        task_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM tasks
+            WHERE project_id IN (
+                SELECT id FROM projects WHERE goal_id = ?
+            )
+            """,
+            (goal_id,),
+        ).fetchone()[0]
+
+        conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+        conn.commit()
+        return {
+            "id": goal_id,
+            "deleted": True,
+            "cascaded": {"projects": project_count, "tasks": task_count},
+        }
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DeleteError(
+            "无法删除目标：存在关联数据约束，请先处理依赖记录"
+        ) from exc
+    finally:
+        conn.close()
+
+
+def delete_project(project_id):
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if not existing:
+            raise ValueError("项目不存在")
+
+        task_count = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE project_id = ?", (project_id,)
+        ).fetchone()[0]
+
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        conn.commit()
+        return {
+            "id": project_id,
+            "deleted": True,
+            "cascaded": {"tasks": task_count},
+        }
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DeleteError(
+            "无法删除项目：存在关联数据约束，请先处理依赖记录"
+        ) from exc
+    finally:
+        conn.close()
+
+
+def delete_task(task_id):
+    return _delete_entity("tasks", task_id, "任务")
+
+
+def delete_review(review_id):
+    conn = get_connection()
+    try:
+        existing = conn.execute(
+            "SELECT id FROM reviews WHERE id = ?", (review_id,)
+        ).fetchone()
+        if not existing:
+            raise ValueError("复盘不存在")
+
+        asset_count = conn.execute(
+            "SELECT COUNT(*) FROM assets WHERE source_review_id = ?",
+            (review_id,),
+        ).fetchone()[0]
+
+        conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
+        conn.commit()
+        return {
+            "id": review_id,
+            "deleted": True,
+            "cleared_asset_links": asset_count,
+        }
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise DeleteError(
+            "无法删除复盘：存在关联数据约束，请先处理依赖记录"
+        ) from exc
+    finally:
+        conn.close()
+
+
+def delete_asset(asset_id):
+    return _delete_entity("assets", asset_id, "知识卡片")
+
+
+def delete_capability_entry(entry_id):
+    return _delete_entity("capability_entries", entry_id, "能力记录")
+
+
+_OPTIONAL_IMPORT_FIELDS = {
+    "today_progress_date",
+    "source_review_id",
+    "source_project",
+}
+
+
+def _normalize_import_record(table, raw):
+    if not isinstance(raw, dict):
+        raise ValueError("记录必须是对象")
+    fields = _TABLE_FIELDS[table]
+    record = {}
+    for key in fields:
+        if key not in raw:
+            if key == "today_progress":
+                record[key] = 0
+            elif key in _OPTIONAL_IMPORT_FIELDS:
+                record[key] = None
+            else:
+                raise ValueError(f"缺少字段 {key}")
+        else:
+            record[key] = raw[key]
+
+    if table == "assets":
+        tags = record["capability_tags"]
+        if isinstance(tags, list):
+            tags = _parse_tags(json.dumps(tags))
+            record["capability_tags"] = json.dumps(tags, ensure_ascii=False)
+        elif isinstance(tags, str):
+            record["capability_tags"] = json.dumps(
+                _parse_tags(tags), ensure_ascii=False
+            )
+        else:
+            raise ValueError("capability_tags 格式无效")
+
+    if table == "goals" and record["type"] not in GOAL_TYPES:
+        raise ValueError("无效的目标类型")
+    if table == "tasks" and record["status"] not in TASK_STATUSES:
+        raise ValueError("无效的任务状态")
+    if table == "reviews" and record["type"] not in REVIEW_TYPES:
+        raise ValueError("无效的复盘类型")
+    if table == "assets" and record["asset_type"] not in ASSET_TYPES:
+        raise ValueError("无效的资产类型")
+    if table == "capability_entries":
+        if record["module"] not in CAPABILITY_MODULES:
+            raise ValueError("无效的能力模块")
+        if record["level_type"] not in LEVEL_TYPES:
+            raise ValueError("无效的层级判断")
+
+    return record
+
+
+def _records_equal(table, existing_row, incoming):
+    fields = _TABLE_FIELDS[table]
+    for key in fields:
+        existing_val = existing_row[key]
+        incoming_val = incoming[key]
+        if key == "capability_tags" and table == "assets":
+            existing_val = _parse_tags(existing_val)
+            incoming_val = _parse_tags(incoming_val)
+        if existing_val != incoming_val:
+            return False
+    return True
+
+
+def _import_row(conn, table, raw, stats):
+    record = _normalize_import_record(table, raw)
+    row_id = record["id"]
+    if not isinstance(row_id, int):
+        raise ValueError("id 必须是整数")
+
+    existing = conn.execute(
+        f"SELECT * FROM {table} WHERE id = ?", (row_id,)
+    ).fetchone()
+
+    if existing:
+        if _records_equal(table, existing, record):
+            stats["skipped"] += 1
+            return
+        fields = _TABLE_FIELDS[table]
+        set_clause = ", ".join(f"{f} = ?" for f in fields if f != "id")
+        values = [record[f] for f in fields if f != "id"]
+        conn.execute(
+            f"UPDATE {table} SET {set_clause} WHERE id = ?",
+            (*values, row_id),
+        )
+        stats["imported"] += 1
+        return
+
+    fields = _TABLE_FIELDS[table]
+    columns = ", ".join(fields)
+    placeholders = ", ".join("?" for _ in fields)
+    conn.execute(
+        f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+        tuple(record[f] for f in fields),
+    )
+    stats["imported"] += 1
+
+
+def _validate_import_payload(payload):
+    if not isinstance(payload, dict):
+        raise DataImportError("导入数据必须是 JSON 对象")
+
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        raise DataImportError("缺少 meta 字段")
+    version = meta.get("version")
+    if version not in SUPPORTED_IMPORT_VERSIONS:
+        raise DataImportError(
+            f"不支持的备份版本：{version!r}，当前兼容 {', '.join(SUPPORTED_IMPORT_VERSIONS)}"
+        )
+
+    for table in IMPORT_TABLES:
+        if table not in payload:
+            raise DataImportError(f"缺少数据表：{table}")
+        if not isinstance(payload[table], list):
+            raise DataImportError(f"{table} 必须是数组")
+
+
+def _refresh_sqlite_sequences(conn):
+    for table in IMPORT_TABLES:
+        row = conn.execute(f"SELECT MAX(id) AS max_id FROM {table}").fetchone()
+        max_id = row["max_id"] if row and row["max_id"] is not None else 0
+        seq = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name = ?", (table,)
+        ).fetchone()
+        if seq:
+            conn.execute(
+                "UPDATE sqlite_sequence SET seq = ? WHERE name = ?",
+                (max_id, table),
+            )
+        elif max_id > 0:
+            conn.execute(
+                "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)",
+                (table, max_id),
+            )
+
+
+def import_all_data(payload):
+    _validate_import_payload(payload)
+
+    stats = {"imported": 0, "skipped": 0, "failed": 0, "errors": []}
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN")
+        for table in IMPORT_TABLES:
+            for index, raw in enumerate(payload[table]):
+                label = f"{table}[{index}]"
+                try:
+                    _import_row(conn, table, raw, stats)
+                except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
+                    stats["failed"] += 1
+                    message = str(exc) or "记录无效"
+                    if len(stats["errors"]) < 20:
+                        stats["errors"].append(f"{label}: {message}")
+
+        if stats["failed"] > 0:
+            conn.rollback()
+            summary = (
+                f"导入失败：{stats['failed']} 条记录有误，"
+                "已回滚，原有数据未改动"
+            )
+            raise DataImportError(summary, stats)
+
+        _refresh_sqlite_sequences(conn)
+        conn.commit()
+        return stats
+    except DataImportError:
+        raise
+    except sqlite3.Error as exc:
+        conn.rollback()
+        raise DataImportError("数据库导入失败，已回滚") from exc
+    finally:
+        conn.close()
 
 
 def backup_filename():

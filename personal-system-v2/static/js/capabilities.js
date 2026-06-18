@@ -29,29 +29,50 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderHistory(container, entries) {
+    container.innerHTML = "";
+
     if (!entries.length) {
       container.innerHTML = '<p class="history-empty">暂无记录</p>';
       return;
     }
 
-    container.innerHTML = entries
-      .map(
-        (e) => `
-        <article class="history-item">
-          <div class="history-item-head">
-            <span class="history-date">${escapeHtml(e.entry_date)}</span>
-            <span class="tag">${escapeHtml(e.level_type)}</span>
-          </div>
-          <p class="history-content">${formatText(e.content)}</p>
-          ${
-            e.source_project
-              ? `<p class="history-meta">来源：${escapeHtml(e.source_project)}</p>`
-              : ""
-          }
-        </article>
-      `
-      )
-      .join("");
+    entries.forEach((entry) => {
+      const item = document.createElement("article");
+      item.className = "history-item";
+      item.innerHTML = `
+        <div class="history-item-head">
+          <span class="history-date">${escapeHtml(entry.entry_date)}</span>
+          <span class="tag">${escapeHtml(entry.level_type)}</span>
+          <button type="button" class="btn btn-sm btn-ghost btn-delete-entry">删除</button>
+        </div>
+        <p class="history-content">${formatText(entry.content)}</p>
+        ${
+          entry.source_project
+            ? `<p class="history-meta">来源：${escapeHtml(entry.source_project)}</p>`
+            : ""
+        }
+      `;
+
+      item.querySelector(".btn-delete-entry").addEventListener("click", async () => {
+        if (
+          !window.confirm(
+            `确定删除 ${entry.entry_date} 的能力记录？此操作不可撤销。`
+          )
+        ) {
+          return;
+        }
+        try {
+          await apiRequest(`/api/capability-entries/${entry.id}`, {
+            method: "DELETE",
+          });
+          await loadAllEntries();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      container.appendChild(item);
+    });
   }
 
   async function loadAllEntries() {

@@ -46,6 +46,37 @@
           </svg>
           <span class="nav-export-label">导出备份</span>
         </button>
+        <button
+          type="button"
+          id="import-data-btn"
+          class="nav-export-btn"
+          title="从 JSON 备份恢复"
+          aria-label="从 JSON 备份恢复"
+        >
+          <svg
+            class="nav-export-icon"
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 20V10"/>
+            <path d="m8.5 13.5 3.5-3.5 3.5 3.5"/>
+            <path d="M5 4h14"/>
+          </svg>
+          <span class="nav-export-label">导入恢复</span>
+        </button>
+        <input
+          type="file"
+          id="import-data-input"
+          accept="application/json,.json"
+          hidden
+        >
       </div>
     </aside>
 

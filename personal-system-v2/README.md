@@ -50,11 +50,21 @@ python app.py
 | `prompts/` | AI 场景提示词（可经 AI管理页编辑） |
 | `changelog.json` | 版本日志数据源 |
 
-## 数据导出
+## 数据导出与导入
 
 导航栏右侧「导出备份」按钮，或请求 `GET /api/export`，下载 JSON 备份。
 
-当前**无导入恢复接口**，备份仅用于归档与手动迁移。
+「导入恢复」按钮或 `POST /api/import`（请求体为导出 JSON）可合并恢复数据：相同 id 且内容一致则跳过，内容不同则更新，不存在则插入。导入失败时事务回滚，不破坏已有数据。
+
+## 测试
+
+```bash
+cd personal-system-v2
+pip install -r requirements.txt
+pytest
+```
+
+测试使用临时 SQLite 数据库（`YD_OS_DB_PATH` / fixture 覆盖），不依赖生产 `data/yd_os.db`。
 
 ## 版本记录
 

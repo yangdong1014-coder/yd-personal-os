@@ -152,6 +152,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <span>今日推进</span>
           </label>
           <select class="select status-select">${statusOptions}</select>
+          <button type="button" class="btn btn-sm btn-ghost btn-delete-task">删除</button>
         </div>
       `;
 
@@ -165,6 +166,23 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         } catch (err) {
           todayCheckbox.checked = !enabled;
+          alert(err.message);
+        }
+      });
+
+      const deleteBtn = row.querySelector(".btn-delete-task");
+      deleteBtn.addEventListener("click", async () => {
+        if (
+          !window.confirm(
+            `确定删除任务「${task.name}」？此操作不可撤销。`
+          )
+        ) {
+          return;
+        }
+        try {
+          await apiRequest(`/api/tasks/${task.id}`, { method: "DELETE" });
+          await loadTasks();
+        } catch (err) {
           alert(err.message);
         }
       });

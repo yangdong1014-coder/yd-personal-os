@@ -185,6 +185,7 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>
           </div>
           <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ghost btn-delete-review">删除</button>
             <button type="button" class="btn btn-sm btn-ai">AI提炼</button>
             ${
               hasDepositable
@@ -200,6 +201,23 @@ document.addEventListener("DOMContentLoaded", () => {
           <div><dt>可沉淀内容</dt><dd>${formatText(review.depositable)}</dd></div>
         </dl>
       `;
+
+      card.querySelector(".btn-delete-review").addEventListener("click", async () => {
+        if (
+          !window.confirm(
+            `确定删除 ${review.review_date} 的复盘？关联资产的来源复盘将被清空。此操作不可撤销。`
+          )
+        ) {
+          return;
+        }
+        try {
+          await apiRequest(`/api/reviews/${review.id}`, { method: "DELETE" });
+          selectedDailyIds.delete(review.id);
+          await loadReviews();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
 
       card.querySelector(".btn-ai").addEventListener("click", (e) => {
         handleAIRefine(review, e.currentTarget);

@@ -141,6 +141,17 @@ def api_update_goal(goal_id):
         return _error(str(exc))
 
 
+@app.route("/api/goals/<int:goal_id>", methods=["DELETE"])
+def api_delete_goal(goal_id):
+    try:
+        result = database.delete_goal(goal_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
 @app.route("/api/projects", methods=["GET"])
 def api_list_projects():
     goal_id = request.args.get("goal_id", type=int)
@@ -157,6 +168,17 @@ def api_create_project():
         return jsonify({"ok": True, "data": project})
     except (ValueError, TypeError) as exc:
         return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/projects/<int:project_id>", methods=["DELETE"])
+def api_delete_project(project_id):
+    try:
+        result = database.delete_project(project_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
 
 
 @app.route("/api/tasks", methods=["GET"])
@@ -196,6 +218,17 @@ def api_update_task_today_progress(task_id):
         return _error(str(exc))
 
 
+@app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
+def api_delete_task(task_id):
+    try:
+        result = database.delete_task(task_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     return jsonify({"ok": True, "data": database.get_dashboard()})
@@ -216,6 +249,26 @@ def api_export():
         )
     except database.ExportError as exc:
         return _error(str(exc), 500)
+
+
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return _error("请求体必须是有效的 JSON")
+    try:
+        stats = database.import_all_data(payload)
+        return jsonify({"ok": True, "data": stats})
+    except database.DataImportError as exc:
+        body = {"ok": False, "error": str(exc)}
+        if exc.stats:
+            body["data"] = {
+                "imported": exc.stats.get("imported", 0),
+                "skipped": exc.stats.get("skipped", 0),
+                "failed": exc.stats.get("failed", 0),
+                "errors": exc.stats.get("errors", []),
+            }
+        return jsonify(body), 400
 
 
 @app.route("/api/reviews", methods=["GET"])
@@ -246,6 +299,17 @@ def api_get_review(review_id):
     if not review:
         return _error("复盘不存在", 404)
     return jsonify({"ok": True, "data": review})
+
+
+@app.route("/api/reviews/<int:review_id>", methods=["DELETE"])
+def api_delete_review(review_id):
+    try:
+        result = database.delete_review(review_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
 
 
 @app.route("/api/assets", methods=["GET"])
@@ -289,6 +353,17 @@ def api_update_asset(asset_id):
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/assets/<int:asset_id>", methods=["DELETE"])
+def api_delete_asset(asset_id):
+    try:
+        result = database.delete_asset(asset_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
 
 
 @app.route("/api/ai/refine-review", methods=["POST"])
@@ -582,6 +657,17 @@ def api_create_capability_entry():
         return jsonify({"ok": True, "data": entry})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/capability-entries/<int:entry_id>", methods=["DELETE"])
+def api_delete_capability_entry(entry_id):
+    try:
+        result = database.delete_capability_entry(entry_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
 
 
 if __name__ == "__main__":

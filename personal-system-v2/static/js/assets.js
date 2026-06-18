@@ -159,6 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ${tagsHtml}
           </div>
           <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ghost btn-delete-asset">删除</button>
             <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
             <button type="button" class="btn btn-sm btn-ai btn-classify">AI归类</button>
             <button type="button" class="btn btn-sm btn-ai btn-sop">转SOP</button>
@@ -171,6 +172,22 @@ document.addEventListener("DOMContentLoaded", () => {
         </dl>
         <p class="asset-meta">${escapeHtml(asset.created_at)}</p>
       `;
+
+      card.querySelector(".btn-delete-asset").addEventListener("click", async () => {
+        if (
+          !window.confirm(
+            `确定删除知识卡片「${asset.title}」？此操作不可撤销。`
+          )
+        ) {
+          return;
+        }
+        try {
+          await apiRequest(`/api/assets/${asset.id}`, { method: "DELETE" });
+          await loadAssets();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
 
       card.querySelector(".btn-optimize").addEventListener("click", (e) => {
         handleAIOptimize(asset, e.currentTarget);
