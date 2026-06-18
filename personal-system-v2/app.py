@@ -45,12 +45,23 @@ def tasks():
 
 @app.route("/reviews")
 def reviews():
-    return render_template("reviews.html", active_page="reviews", nav_items=NAV_ITEMS)
+    return render_template(
+        "reviews.html",
+        active_page="reviews",
+        nav_items=NAV_ITEMS,
+        review_types=database.REVIEW_TYPES,
+    )
 
 
 @app.route("/assets")
 def assets():
-    return render_template("assets.html", active_page="assets", nav_items=NAV_ITEMS)
+    return render_template(
+        "assets.html",
+        active_page="assets",
+        nav_items=NAV_ITEMS,
+        asset_types=database.ASSET_TYPES,
+        capability_modules=database.CAPABILITY_MODULES,
+    )
 
 
 @app.route("/capabilities")
@@ -116,6 +127,62 @@ def api_update_task_status(task_id):
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/reviews", methods=["GET"])
+def api_list_reviews():
+    return jsonify({"ok": True, "data": database.list_reviews()})
+
+
+@app.route("/api/reviews", methods=["POST"])
+def api_create_review():
+    payload = request.get_json(silent=True) or {}
+    try:
+        review = database.create_review(
+            payload.get("review_date", ""),
+            payload.get("type", ""),
+            payload.get("what_done", ""),
+            payload.get("stuck", ""),
+            payload.get("next_adjust", ""),
+            payload.get("depositable", ""),
+        )
+        return jsonify({"ok": True, "data": review})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/reviews/<int:review_id>", methods=["GET"])
+def api_get_review(review_id):
+    review = database.get_review(review_id)
+    if not review:
+        return _error("复盘不存在", 404)
+    return jsonify({"ok": True, "data": review})
+
+
+@app.route("/api/assets", methods=["GET"])
+def api_list_assets():
+    tag = request.args.get("tag") or None
+    try:
+        return jsonify({"ok": True, "data": database.list_assets(tag)})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/assets", methods=["POST"])
+def api_create_asset():
+    payload = request.get_json(silent=True) or {}
+    try:
+        asset = database.create_asset(
+            payload.get("title", ""),
+            payload.get("trigger_context", ""),
+            payload.get("core_content", ""),
+            payload.get("asset_type", ""),
+            payload.get("capability_tags", []),
+            payload.get("source_review_id"),
+        )
+        return jsonify({"ok": True, "data": asset})
+    except (ValueError, TypeError) as exc:
+        return _error(str(exc) if str(exc) else "参数无效")
 
 
 if __name__ == "__main__":

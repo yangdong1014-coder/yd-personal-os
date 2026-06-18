@@ -6,10 +6,71 @@
 <header class="page-header">
   <h1 class="page-title">资产系统</h1>
   <p class="page-subtitle">将执行与复盘转化为可复用知识资产</p>
+  <span class="version-badge">v0.3</span>
 </header>
 
-<div class="empty-state">
-  <strong>添加第一张知识卡片</strong>
-  知识卡片 / SOP / 提示词 / 工作流（v0.3 开放）
-</div>
+<section class="section-card">
+  <h2>新建知识卡片</h2>
+  <form id="asset-form" class="stacked-form">
+    <input type="hidden" id="asset-source-review">
+    <div class="form-row">
+      <label class="form-label" for="asset-title">标题</label>
+      <input type="text" id="asset-title" class="input full-width" placeholder="卡片标题" required>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="asset-trigger">触发情境</label>
+      <textarea id="asset-trigger" class="textarea" rows="2" placeholder="这张卡片从什么事情来的"></textarea>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="asset-content">核心内容</label>
+      <textarea id="asset-content" class="textarea" rows="4" placeholder="可复用的核心知识"></textarea>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="asset-type">资产类型</label>
+      <select id="asset-type" class="select">
+        {% for t in asset_types %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <span class="form-label">关联能力模块（多选）</span>
+      <div class="tag-picker" id="capability-picker">
+        {% for m in capability_modules %}
+        <label class="tag-option">
+          <input type="checkbox" value="{{ m }}">
+          <span>{{ m }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <button type="submit" class="btn">保存卡片</button>
+  </form>
+  <p class="form-hint" id="asset-prefill-hint" style="display:none;">已从复盘记录预填内容，确认后保存</p>
+</section>
+
+<section class="section-card">
+  <h2>按能力标签筛选</h2>
+  <div class="filter-bar" id="tag-filter">
+    <button type="button" class="filter-chip active" data-tag="">全部</button>
+    {% for m in capability_modules %}
+    <button type="button" class="filter-chip" data-tag="{{ m }}">{{ m }}</button>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section-card">
+  <h2>知识卡片列表</h2>
+  <div id="assets-list" class="entity-list">
+    <div class="empty-state">
+      <strong>添加第一张知识卡片</strong>
+      填写上方表单或从复盘生成
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/assets.js') }}"></script>
 {% endblock %}

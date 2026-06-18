@@ -5,11 +5,57 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">复盘系统</h1>
-  <p class="page-subtitle">识别偏差，提炼经验，驱动资产沉淀</p>
+  <p class="page-subtitle">识别偏差，提炼经验，可沉淀内容一键生成资产卡片</p>
+  <span class="version-badge">v0.3</span>
 </header>
 
-<div class="empty-state">
-  <strong>添加第一条复盘</strong>
-  每日 / 每周 / 项目 / 事件复盘记录（v0.3 开放）
-</div>
+<section class="section-card">
+  <h2>新建复盘</h2>
+  <form id="review-form" class="stacked-form">
+    <div class="form-row">
+      <label class="form-label" for="review-date">复盘日期</label>
+      <input type="date" id="review-date" class="input" required>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="review-type">复盘类型</label>
+      <select id="review-type" class="select">
+        {% for t in review_types %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="review-what-done">今天做了什么</label>
+      <textarea id="review-what-done" class="textarea" rows="3" placeholder="今日实际推进的事项"></textarea>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="review-stuck">卡住了什么</label>
+      <textarea id="review-stuck" class="textarea" rows="3" placeholder="阻碍、卡点及原因"></textarea>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="review-next">下一步调整</label>
+      <textarea id="review-next" class="textarea" rows="3" placeholder="接下来如何调整"></textarea>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="review-depositable">可沉淀内容</label>
+      <textarea id="review-depositable" class="textarea" rows="3" placeholder="可转化为知识资产的内容"></textarea>
+    </div>
+    <button type="submit" class="btn">保存复盘</button>
+  </form>
+</section>
+
+<section class="section-card">
+  <h2>复盘历史</h2>
+  <div id="reviews-list" class="entity-list">
+    <div class="empty-state">
+      <strong>添加第一条复盘</strong>
+      填写上方表单后即时保存
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/reviews.js') }}"></script>
 {% endblock %}

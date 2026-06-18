@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -6,6 +7,18 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
 
 GOAL_TYPES = ("年度", "季度", "月度", "当前主线")
 TASK_STATUSES = ("待处理", "进行中", "完成")
+REVIEW_TYPES = ("每日", "每周", "项目", "事件")
+ASSET_TYPES = ("知识卡片", "SOP", "提示词", "工作流", "案例复盘", "方法论")
+CAPABILITY_MODULES = (
+    "本质力",
+    "建模力",
+    "体系力",
+    "产品力",
+    "审美力",
+    "创造力",
+    "落地力",
+    "AI驾驭力",
+)
 
 
 def get_connection():
@@ -49,6 +62,29 @@ def init_db():
             status TEXT NOT NULL DEFAULT '待处理',
             created_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            what_done TEXT NOT NULL DEFAULT '',
+            stuck TEXT NOT NULL DEFAULT '',
+            next_adjust TEXT NOT NULL DEFAULT '',
+            depositable TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            trigger_context TEXT NOT NULL DEFAULT '',
+            core_content TEXT NOT NULL DEFAULT '',
+            asset_type TEXT NOT NULL,
+            capability_tags TEXT NOT NULL DEFAULT '[]',
+            source_review_id INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (source_review_id) REFERENCES reviews(id) ON DELETE SET NULL
         );
         """
     )
@@ -204,3 +240,130 @@ def update_task_status(task_id, status):
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
+
+
+def _parse_tags(raw):
+    try:
+        tags = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(tags, list):
+        return []
+    return [t for t in tags if t in CAPABILITY_MODULES]
+
+
+def _asset_row(row):
+    data = _row_to_dict(row)
+    if data:
+        data["capability_tags"] = _parse_tags(data.get("capability_tags"))
+    return data
+
+
+def create_review(review_date, review_type, what_done, stuck, next_adjust, depositable):
+    if review_type not in REVIEW_TYPES:
+        raise ValueError("无效的复盘类型")
+    review_date = (review_date or "").strip()
+    if not review_date:
+        raise ValueError("复盘日期不能为空")
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO reviews (
+            review_date, type, what_done, stuck, next_adjust, depositable, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            review_date,
+            review_type,
+            (what_done or "").strip(),
+            (stuck or "").strip(),
+            (next_adjust or "").strip(),
+            (depositable or "").strip(),
+            _now(),
+        ),
+    )
+    conn.commit()
+    review_id = cur.lastrowid
+    row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def list_reviews():
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM reviews ORDER BY review_date DESC, created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_review(review_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def create_asset(
+    title,
+    trigger_context,
+    core_content,
+    asset_type,
+    capability_tags,
+    source_review_id=None,
+):
+    if asset_type not in ASSET_TYPES:
+        raise ValueError("无效的资产类型")
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("标题不能为空")
+
+    tags = _parse_tags(json.dumps(capability_tags or []))
+    if source_review_id is not None:
+        conn = get_connection()
+        review = conn.execute(
+            "SELECT id FROM reviews WHERE id = ?", (source_review_id,)
+        ).fetchone()
+        conn.close()
+        if not review:
+            raise ValueError("来源复盘不存在")
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO assets (
+            title, trigger_context, core_content, asset_type,
+            capability_tags, source_review_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            title,
+            (trigger_context or "").strip(),
+            (core_content or "").strip(),
+            asset_type,
+            json.dumps(tags, ensure_ascii=False),
+            source_review_id,
+            _now(),
+        ),
+    )
+    conn.commit()
+    asset_id = cur.lastrowid
+    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    conn.close()
+    return _asset_row(row)
+
+
+def list_assets(tag=None):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM assets ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    assets = [_asset_row(r) for r in rows]
+    if tag:
+        if tag not in CAPABILITY_MODULES:
+            raise ValueError("无效的能力标签")
+        assets = [a for a in assets if tag in a["capability_tags"]]
+    return assets
