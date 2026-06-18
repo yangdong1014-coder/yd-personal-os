@@ -15,7 +15,10 @@ app = Flask(__name__)
 
 @app.context_processor
 def inject_globals():
-    return {"ai_enabled": config.is_ai_enabled()}
+    return {
+        "ai_enabled": config.is_ai_enabled(),
+        "current_version": changelog.get_current_version(),
+    }
 
 NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},

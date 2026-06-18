@@ -11,7 +11,7 @@
     </div>
     <button type="button" id="ai-diagnose-btn" class="btn btn-sm btn-ai">AI诊断</button>
   </div>
-  <span class="version-badge">v1.3-ai</span>
+  <span class="version-badge">{{ current_version }}</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}

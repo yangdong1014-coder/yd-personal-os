@@ -7,9 +7,11 @@
 修改 .txt 文件后重启 python app.py 即可生效。
 """
 
+import re
 from pathlib import Path
 
 PROMPTS_DIR = Path(__file__).parent
+_SCENE_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 MODULES = (
     "dashboard",
@@ -25,12 +27,25 @@ class PromptNotFoundError(FileNotFoundError):
     pass
 
 
+def _validate_scene(scene: str) -> str:
+    scene = (scene or "").strip()
+    if not scene or not _SCENE_PATTERN.match(scene):
+        raise ValueError(f"非法场景标识：{scene}")
+    return scene
+
+
 def _resolve_path(module: str, scene: str, kind: str) -> Path:
     if module not in MODULES:
         raise ValueError(f"未知提示词模块：{module}")
     if kind not in ("system", "user"):
         raise ValueError(f"未知提示词类型：{kind}")
-    return PROMPTS_DIR / module / f"{scene}.{kind}.txt"
+
+    scene = _validate_scene(scene)
+    module_dir = (PROMPTS_DIR / module).resolve()
+    path = (module_dir / f"{scene}.{kind}.txt").resolve()
+    if not path.is_relative_to(module_dir):
+        raise ValueError(f"场景路径越界：{scene}")
+    return path
 
 
 def load(module: str, scene: str, kind: str = "system", **variables) -> str:
