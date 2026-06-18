@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}能力 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">能力系统</h1>
+  <p class="page-subtitle">八个固定能力模块，成长可见、可记录、可回溯</p>
+</header>
+
+<div class="capability-grid">
+  <div class="capability-item"><div class="num">01</div>本质力</div>
+  <div class="capability-item"><div class="num">02</div>建模力</div>
+  <div class="capability-item"><div class="num">03</div>体系力</div>
+  <div class="capability-item"><div class="num">04</div>产品力</div>
+  <div class="capability-item"><div class="num">05</div>审美力</div>
+  <div class="capability-item"><div class="num">06</div>创造力</div>
+  <div class="capability-item"><div class="num">07</div>落地力</div>
+  <div class="capability-item"><div class="num">08</div>AI驾驭力</div>
+</div>
+
+<div class="empty-state" style="margin-top: 1.5rem;">
+  <strong>添加第一条进展记录</strong>
+  每模块可记录训练与应用（v0.4 开放）
+</div>
+{% endblock %}

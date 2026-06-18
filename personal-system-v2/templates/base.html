@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}个人能力操作系统{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <nav class="top-nav">
+    <a href="{{ url_for('index') }}" class="nav-brand">个人能力<span>OS</span></a>
+    <div class="nav-links">
+      {% for item in nav_items %}
+      <a href="{{ item.path }}"
+         class="nav-link{% if active_page == item.endpoint %} active{% endif %}">
+        {{ item.label }}
+      </a>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

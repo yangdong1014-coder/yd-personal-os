@@ -1,0 +1,5 @@
+data/yd_os.db
+__pycache__/
+*.pyc
+venv/
+.env
