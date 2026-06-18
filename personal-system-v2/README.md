@@ -28,6 +28,40 @@ python app.py
 
 浏览器访问 http://127.0.0.1:5000
 
+### 桌面快捷方式（Windows）
+
+**创建 / 重建快捷方式**（升级后若仍出现黑框，请重新执行一次）：
+
+```
+双击 scripts/create-desktop-shortcut.vbs
+```
+
+或在项目根目录执行：
+
+```bash
+python scripts/create_desktop_shortcut.py
+```
+
+桌面会出现「个人能力操作系统」快捷方式，指向 `scripts/start-server.vbs`。
+
+**启动行为**：
+
+| 方式 | 说明 |
+|------|------|
+| 桌面快捷方式 | 后台无黑框启动，自动打开浏览器；关闭任何窗口**不会**停止服务 |
+| `scripts/start-server.bat` | 开发调试模式，有黑框；**关闭黑框即停止服务** |
+| 开机自启 | 运行 `scripts/install-startup.vbs`，同样使用后台模式 |
+
+后台启动时设置 `PERSONAL_OS_BG=1`，Flask 关闭 debug 与热重载；服务仅监听 `127.0.0.1:5000`。
+
+**停止服务**：
+
+```
+双击 scripts/stop-server.bat
+```
+
+停止后 `http://127.0.0.1:5000` 不可访问。需要再次使用时，重新点击桌面快捷方式即可。
+
 ## 环境变量
 
 在项目根目录创建 `.env`（参考 `.env.example`）：

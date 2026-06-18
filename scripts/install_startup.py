@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BAT_PATH = PROJECT_ROOT / "scripts" / "start-server.bat"
+LAUNCHER_PATH = PROJECT_ROOT / "scripts" / "start-server.vbs"
 APP_DIR = PROJECT_ROOT / "personal-system-v2"
 SHORTCUT_NAME = "个人能力操作系统.lnk"
 
@@ -28,9 +28,9 @@ def create_shortcut(folder: Path) -> Path:
     ps = f"""
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut('{shortcut_path}')
-$link.TargetPath = '{BAT_PATH}'
+$link.TargetPath = '{LAUNCHER_PATH}'
 $link.WorkingDirectory = '{APP_DIR}'
-$link.Description = '开机自启 - 个人能力操作系统'
+$link.Description = '开机自启 - 个人能力操作系统 (后台运行)'
 $link.IconLocation = "$env:SystemRoot\\System32\\imageres.dll,109"
 $link.Save()
 Write-Host 'Created: {shortcut_path}'
@@ -55,8 +55,8 @@ Write-Host 'Created: {shortcut_path}'
 
 
 def main() -> int:
-    if not BAT_PATH.is_file():
-        print(f"[ERROR] Missing launcher: {BAT_PATH}", file=sys.stderr)
+    if not LAUNCHER_PATH.is_file():
+        print(f"[ERROR] Missing launcher: {LAUNCHER_PATH}", file=sys.stderr)
         return 1
     path = create_shortcut(startup_dir())
     print(f"已加入开机自启: {path}")

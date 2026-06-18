@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BAT_PATH = PROJECT_ROOT / "scripts" / "start-server.bat"
+LAUNCHER_PATH = PROJECT_ROOT / "scripts" / "start-server.vbs"
 APP_DIR = PROJECT_ROOT / "personal-system-v2"
 SHORTCUT_NAME = "个人能力操作系统.lnk"
 
@@ -17,11 +17,12 @@ def desktop_dir() -> Path:
 
 
 def remove_old_shortcuts(desktop: Path) -> None:
+    bat = PROJECT_ROOT / "scripts" / "start-server.bat"
     ps = f"""
-$bat = '{BAT_PATH}'
+$targets = @('{LAUNCHER_PATH}', '{bat}')
 Get-ChildItem '{desktop}' -Filter '*.lnk' | ForEach-Object {{
     $s = (New-Object -ComObject WScript.Shell).CreateShortcut($_.FullName)
-    if ($s.TargetPath -eq $bat) {{ Remove-Item $_.FullName -Force; Write-Host "Removed: $($_.Name)" }}
+    if ($targets -contains $s.TargetPath) {{ Remove-Item $_.FullName -Force; Write-Host "Removed: $($_.Name)" }}
 }}
 """
     _run_ps(ps)
@@ -32,9 +33,9 @@ def create_shortcut(desktop: Path) -> Path:
     ps = f"""
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut('{shortcut_path}')
-$link.TargetPath = '{BAT_PATH}'
+$link.TargetPath = '{LAUNCHER_PATH}'
 $link.WorkingDirectory = '{APP_DIR}'
-$link.Description = '启动个人能力操作系统 (http://127.0.0.1:5000)'
+$link.Description = '启动个人能力操作系统 (后台运行，关闭窗口不会停止服务)'
 $link.IconLocation = "$env:SystemRoot\\System32\\imageres.dll,109"
 $link.Save()
 Write-Host 'Created: {shortcut_path}'
@@ -63,8 +64,8 @@ def _run_ps(script: str) -> None:
 
 
 def main() -> int:
-    if not BAT_PATH.is_file():
-        print(f"[ERROR] Missing launcher: {BAT_PATH}", file=sys.stderr)
+    if not LAUNCHER_PATH.is_file():
+        print(f"[ERROR] Missing launcher: {LAUNCHER_PATH}", file=sys.stderr)
         return 1
     desktop = desktop_dir()
     remove_old_shortcuts(desktop)

@@ -1,4 +1,5 @@
 import json
+import os
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -793,4 +794,10 @@ def api_delete_capability_entry(entry_id):
 
 if __name__ == "__main__":
     database.init_db()
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    background = os.environ.get("PERSONAL_OS_BG") == "1"
+    app.run(
+        debug=not background,
+        host="127.0.0.1",
+        port=5000,
+        use_reloader=not background,
+    )
