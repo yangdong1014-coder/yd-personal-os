@@ -16,10 +16,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function handleExport() {
   const btn = document.getElementById("export-data-btn");
-  const prevText = btn ? btn.textContent : "";
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "导出中…";
+    btn.classList.add("is-exporting");
+    btn.setAttribute("aria-busy", "true");
+    btn.title = "导出中…";
   }
 
   try {
@@ -54,7 +55,9 @@ async function handleExport() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = prevText;
+      btn.classList.remove("is-exporting");
+      btn.removeAttribute("aria-busy");
+      btn.title = "导出全部数据";
     }
   }
 }
