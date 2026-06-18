@@ -16,6 +16,8 @@ python app.py
 
 浏览器访问 http://127.0.0.1:5000
 
+家庭服务器远程访问配置见 [home-server.md](home-server.md)。
+
 ## 环境变量（.env）
 
 | 变量 | 说明 |
@@ -25,6 +27,9 @@ python app.py
 | DEEPSEEK_MODEL | 锁定模型后 AI 管理页不可改 |
 | DEEPSEEK_TIMEOUT | 请求超时秒数 |
 | YD_OS_DB_PATH | 覆盖 SQLite 路径（测试常用） |
+| PERSONAL_OS_REMOTE | 设为 `1` 启用远程 token 鉴权 |
+| PERSONAL_OS_ACCESS_TOKEN | 远程访问令牌（REMOTE=1 必填） |
+| PERSONAL_OS_BIND_HOST | 显式绑定地址，默认 127.0.0.1 |
 
 ## 运行测试
 

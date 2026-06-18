@@ -9,6 +9,7 @@ Flask (app.py) — 路由、模板、API
         ↓
 database.py — SQLite CRUD、导入导出、资产迁移
 asset_schemas.py — 资产类型与动态字段 schema
+access_control.py — 家庭服务器远程 token 鉴权
 ai_service.py — DeepSeek（可选）
 inbox_service.py — 智能归档解析与确认入库
 obsidian_export.py — Obsidian Markdown zip 导出
@@ -130,3 +131,31 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 - `override_payload`：前端可补充 `goal_id` / `project_id`，后端仅允许覆盖这两个关联字段
 - 历史：`GET /api/inbox` 列表 + `/inbox/history` 详情
 - 拒绝：`POST /api/inbox/suggestions/<id>/reject`
+
+## v1.13 新增：家庭服务器远程访问 MVP
+
+**定位**：家里电脑常开 + 手机通过 Tailscale 安全访问，为后续移动端快速记录打基础。
+
+```
+手机 (Tailscale) → tailnet → 家里电脑 PSY-1
+                              ├── 127.0.0.1:5000 (默认)
+                              ├── Tailscale Serve (推荐)
+                              └── access_control token 鉴权
+```
+
+| 组件 | 职责 |
+|------|------|
+| `config.py` | `PERSONAL_OS_REMOTE` / `PERSONAL_OS_ACCESS_TOKEN` / `PERSONAL_OS_BIND_HOST` |
+| `access_control.py` | 本机免验；远程校验 token（URL / Header / Cookie） |
+| `static/js/access-token.js` | 解析 `?token=`，localStorage + API Header |
+| `GET /api/health` | 健康检查（公开） |
+| `scripts/backup-db.py` | SQLite 自动备份，保留 N 份 |
+| `scripts/check-health.bat` | 本地健康探测 |
+
+**安全默认值**：
+
+- 监听 `127.0.0.1`，不默认 `0.0.0.0`
+- 不推荐公网端口转发
+- `PERSONAL_OS_BIND_HOST` 非 localhost 时必须 `PERSONAL_OS_REMOTE=1`
+
+详见 [home-server.md](home-server.md)。

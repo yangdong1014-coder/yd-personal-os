@@ -1,3 +1,14 @@
+function authFetchOptions(options = {}) {
+  return {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      ...getAccessTokenHeaders(),
+      ...(options.headers || {}),
+    },
+  };
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const path = window.location.pathname;
   document.querySelectorAll(".nav-link").forEach((link) => {
@@ -216,11 +227,14 @@ async function handleImportSelect(event) {
       throw new Error("文件不是有效的 JSON 格式");
     }
 
-    const response = await fetch("/api/import/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const response = await fetch(
+      "/api/import/preview",
+      authFetchOptions({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    );
     const result = await response.json();
     if (!response.ok || !result.ok) {
       throw new Error(result.error || "导入预览失败");
@@ -253,11 +267,14 @@ async function executeImport() {
   setImportBusy(true);
 
   try {
-    const response = await fetch("/api/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(pendingImportPayload),
-    });
+    const response = await fetch(
+      "/api/import",
+      authFetchOptions({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pendingImportPayload),
+      })
+    );
     const result = await response.json();
 
     closeImportPreview();
@@ -302,7 +319,7 @@ async function handleObsidianExport() {
   }
 
   try {
-    const response = await fetch("/api/export/obsidian.zip");
+    const response = await fetch("/api/export/obsidian.zip", authFetchOptions());
     if (!response.ok) {
       let message = "Obsidian 导出失败，请稍后重试";
       try {
@@ -350,7 +367,7 @@ async function handleExport() {
   }
 
   try {
-    const response = await fetch("/api/export");
+    const response = await fetch("/api/export", authFetchOptions());
     if (!response.ok) {
       let message = "导出失败，请稍后重试";
       try {

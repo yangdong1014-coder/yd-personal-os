@@ -2,6 +2,7 @@ data/yd_os.db
 data/settings.json
 data/backup_*.json
 data/*backup*.json
+backups/
 scripts/
 __pycache__/
 *.pyc

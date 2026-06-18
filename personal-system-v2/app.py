@@ -1,8 +1,9 @@
 import json
 import os
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, render_template, request
 
+import access_control
 import ai_service
 import asset_schemas
 import changelog
@@ -39,6 +40,54 @@ NAV_ITEMS = [
 
 def _error(message, status=400):
     return jsonify({"ok": False, "error": message}), status
+
+
+@app.before_request
+def enforce_remote_access():
+    if access_control.is_public_path():
+        return None
+    if not access_control.auth_required():
+        return None
+    token = access_control.extract_token()
+    if access_control.validate_token(token):
+        g.access_granted = True
+        return None
+    if request.path.startswith("/api/") or request.accept_mimetypes.best_match(
+        ["application/json", "text/html"]
+    ) == "application/json":
+        return _error("需要有效的访问令牌", 403)
+    return render_template("access_denied.html"), 403
+
+
+@app.after_request
+def persist_access_token_cookie(response):
+    if not getattr(g, "access_granted", False):
+        return response
+    query_token = access_control.token_from_query()
+    if not query_token:
+        return response
+    response.set_cookie(
+        access_control.COOKIE_NAME,
+        query_token,
+        httponly=True,
+        samesite="Lax",
+        max_age=30 * 24 * 3600,
+    )
+    return response
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "status": "up",
+                "version": changelog.get_current_version(),
+                "remote_mode": config.is_remote_mode(),
+            },
+        }
+    )
 
 
 @app.route("/")
@@ -793,11 +842,13 @@ def api_delete_capability_entry(entry_id):
 
 
 if __name__ == "__main__":
+    config.validate_server_config()
     database.init_db()
     background = os.environ.get("PERSONAL_OS_BG") == "1"
+    host = config.get_bind_host()
     app.run(
         debug=not background,
-        host="127.0.0.1",
+        host=host,
         port=5000,
         use_reloader=not background,
     )

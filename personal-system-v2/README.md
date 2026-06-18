@@ -62,6 +62,35 @@ python scripts/create_desktop_shortcut.py
 
 停止后 `http://127.0.0.1:5000` 不可访问。需要再次使用时，重新点击桌面快捷方式即可。
 
+**健康检查**：`scripts/check-health.bat` 或访问 `GET /api/health`。
+
+### 家庭服务器与手机远程访问（v1.13+）
+
+将家里常开电脑作为 PSY-1 服务器，手机通过 **Tailscale** 访问（**不推荐公网端口转发**）。
+
+完整步骤见 [docs/home-server.md](../docs/home-server.md)。
+
+简要流程：
+
+1. 家里电脑与手机安装 Tailscale，登录同一账号。
+2. 在 `.env` 设置 `PERSONAL_OS_REMOTE=1` 与强随机 `PERSONAL_OS_ACCESS_TOKEN`。
+3. 桌面快捷方式或开机自启启动 PSY-1（默认仍监听 `127.0.0.1`）。
+4. 推荐 `tailscale serve --bg 5000` 将本机服务暴露给 tailnet。
+5. 手机访问 `http://Tailscale地址/?token=你的令牌`；验证后 token 自动保存。
+
+| 访问来源 | 需要 token |
+|----------|------------|
+| 本机 `127.0.0.1` | 否 |
+| Tailscale / 远程 | 是 |
+
+**数据库备份**：
+
+```bash
+python scripts/backup-db.py
+```
+
+备份至 `personal-system-v2/backups/`，默认保留 30 份。
+
 ## 环境变量
 
 在项目根目录创建 `.env`（参考 `.env.example`）：
@@ -72,8 +101,13 @@ python scripts/create_desktop_shortcut.py
 | `DEEPSEEK_BASE_URL` | 否 | API 地址，默认 `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | 否 | 锁定模型；设置后 AI管理页不可改 |
 | `DEEPSEEK_TIMEOUT` | 否 | 超时秒数，默认 60 |
+| `PERSONAL_OS_REMOTE` | 否 | 设为 `1` 启用家庭服务器远程鉴权 |
+| `PERSONAL_OS_ACCESS_TOKEN` | REMOTE=1 时必填 | 远程访问令牌；本机 127.0.0.1 免验 |
+| `PERSONAL_OS_BIND_HOST` | 否 | 显式绑定地址，默认 `127.0.0.1`；仅 REMOTE=1 时允许非 localhost |
 
 未配置 `DEEPSEEK_API_KEY` 时，CRUD 功能正常，AI 按钮不可用。
+
+> **安全提示**：开启 `PERSONAL_OS_REMOTE=1` 后务必使用强 token；不要将 5000 端口暴露到公网；优先 Tailscale 而非路由器端口转发。
 
 ## 数据文件
 

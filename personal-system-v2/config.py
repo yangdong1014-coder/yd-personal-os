@@ -62,3 +62,29 @@ def get_deepseek_model():
 
 def get_valid_model_ids():
     return {item["id"] for item in AVAILABLE_DEEPSEEK_MODELS}
+
+
+def is_remote_mode():
+    return os.environ.get("PERSONAL_OS_REMOTE", "").strip() == "1"
+
+
+def get_access_token():
+    return os.environ.get("PERSONAL_OS_ACCESS_TOKEN", "").strip()
+
+
+def get_bind_host():
+    explicit = os.environ.get("PERSONAL_OS_BIND_HOST", "").strip()
+    return explicit or "127.0.0.1"
+
+
+def validate_server_config():
+    """启动前校验家庭服务器相关配置。"""
+    if is_remote_mode() and not get_access_token():
+        raise SystemExit(
+            "PERSONAL_OS_REMOTE=1 时必须设置 PERSONAL_OS_ACCESS_TOKEN（强随机 token）"
+        )
+    bind = get_bind_host()
+    if bind != "127.0.0.1" and not is_remote_mode():
+        raise SystemExit(
+            f"PERSONAL_OS_BIND_HOST={bind} 仅在 PERSONAL_OS_REMOTE=1 时允许使用"
+        )

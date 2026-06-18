@@ -1,7 +1,13 @@
 async function apiRequest(url, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...getAccessTokenHeaders(),
+    ...(options.headers || {}),
+  };
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
+    credentials: "same-origin",
   });
   const raw = await response.text();
   let payload;

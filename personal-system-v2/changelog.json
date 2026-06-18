@@ -1,6 +1,22 @@
 {
-  "current": "v1.12.2",
+  "current": "v1.13.0",
   "entries": [
+    {
+      "version": "v1.13.0",
+      "date": "2026-06-18",
+      "title": "家庭服务器远程访问 MVP",
+      "type": "feat",
+      "items": [
+        "支持家庭服务器模式：家里电脑常开，手机通过 Tailscale 远程访问",
+        "新增 PERSONAL_OS_REMOTE / PERSONAL_OS_ACCESS_TOKEN 最小访问鉴权",
+        "本机 127.0.0.1 免 token；远程访问需 URL/Header/Cookie 携带令牌",
+        "前端 access-token.js 自动保存 token 并随 API 请求携带",
+        "默认仍监听 127.0.0.1，不推荐公网暴露；可选 PERSONAL_OS_BIND_HOST 显式绑定",
+        "新增 GET /api/health 健康检查与 scripts/check-health.bat",
+        "新增 scripts/backup-db.py 数据库自动备份（默认保留 30 份）",
+        "新增 docs/home-server.md：Tailscale、常开、备份恢复完整说明"
+      ]
+    },
     {
       "version": "v1.12.2",
       "date": "2026-06-18",
