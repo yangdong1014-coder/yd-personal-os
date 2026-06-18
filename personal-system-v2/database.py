@@ -660,3 +660,41 @@ def list_capability_entries(module=None):
         ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
+
+
+class ExportError(Exception):
+    pass
+
+
+def backup_filename():
+    return datetime.now().strftime("backup_%Y%m%d_%H%M%S.json")
+
+
+def export_all_data():
+    try:
+        return {
+            "meta": {
+                "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "version": "1.0",
+                "tables": [
+                    "goals",
+                    "projects",
+                    "tasks",
+                    "reviews",
+                    "assets",
+                    "capability_entries",
+                ],
+            },
+            "goals": list_goals(),
+            "projects": list_projects(),
+            "tasks": list_tasks(),
+            "reviews": list_reviews(),
+            "assets": list_assets(),
+            "capability_entries": list_capability_entries(),
+        }
+    except sqlite3.Error as exc:
+        raise ExportError(
+            "数据库读取失败，请关闭占用数据库的程序后重试"
+        ) from exc
+    except Exception as exc:
+        raise ExportError("导出数据时发生错误，请稍后重试") from exc

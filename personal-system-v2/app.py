@@ -1,4 +1,6 @@
-from flask import Flask, jsonify, render_template, request
+import json
+
+from flask import Flask, Response, jsonify, render_template, request
 
 import ai_service
 import config
@@ -167,6 +169,23 @@ def api_update_task_today_progress(task_id):
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
     return jsonify({"ok": True, "data": database.get_dashboard()})
+
+
+@app.route("/api/export", methods=["GET"])
+def api_export():
+    try:
+        payload = database.export_all_data()
+        filename = database.backup_filename()
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            body,
+            mimetype="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            },
+        )
+    except database.ExportError as exc:
+        return _error(str(exc), 500)
 
 
 @app.route("/api/reviews", methods=["GET"])
