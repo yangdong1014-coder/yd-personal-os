@@ -502,3 +502,46 @@ def test_inbox_normalize_low_confidence_to_uncertain():
         ]
     )
     assert items[0]["target_type"] == "uncertain"
+
+
+def test_inbox_commit_review_with_boolean_depositable(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "review",
+                    "title": "MVP 复盘",
+                    "content": "完成了个人成长飞轮 MVP 第一版",
+                    "confidence": 0.98,
+                    "reason": "复盘记录",
+                    "suggested_payload": {
+                        "type": "每日",
+                        "what_done": "完成 MVP 第一版",
+                        "stuck": False,
+                        "next_adjust": "补充移动端",
+                        "depositable": True,
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "今天完成了 MVP 第一版"},
+    ).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={"suggestion_ids": [suggestion_id]},
+    )
+    assert response.status_code == 200
+    created = response.get_json()["data"]["created"]
+    assert created["reviews"] == 1
+
+    reviews = client.get("/api/reviews").get_json()["data"]
+    review = next(item for item in reviews if item["what_done"] == "完成 MVP 第一版")
+    assert review["depositable"] == "完成了个人成长飞轮 MVP 第一版"
+    assert review["stuck"] == ""

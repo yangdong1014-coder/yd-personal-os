@@ -82,6 +82,25 @@ def _today_local():
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _as_text(value, default=""):
+    """将 AI/JSON 中的字段安全转为字符串（兼容 bool、数字、列表等）。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, str):
+        text = value.strip()
+        return text if text else default
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        parts = [_as_text(item, "") for item in value]
+        joined = ", ".join(part for part in parts if part)
+        return joined if joined else default
+    text = str(value).strip()
+    return text if text else default
+
+
 def _week_start_local():
     today = datetime.now().date()
     monday = today - timedelta(days=today.weekday())
@@ -1677,8 +1696,8 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
         return None
 
     if target_type == "review":
-        review_date = (payload.get("review_date") or _today_local()).strip()
-        what_done = (payload.get("what_done") or content or title).strip()
+        review_date = _as_text(payload.get("review_date"), _today_local())
+        what_done = _as_text(payload.get("what_done"), _as_text(content, _as_text(title)))
         if not review_date:
             return f"建议 #{sid}（复盘）：缺少复盘日期"
         if not what_done:
@@ -1762,9 +1781,9 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         return "tasks", cur.lastrowid
 
     if target_type == "review":
-        review_date = (payload.get("review_date") or _today_local()).strip()
+        review_date = _as_text(payload.get("review_date"), _today_local())
         review_type = _map_review_type(payload.get("type"))
-        what_done = (payload.get("what_done") or content or title).strip()
+        what_done = _as_text(payload.get("what_done"), _as_text(content, _as_text(title)))
         if not review_date:
             raise ValueError("复盘日期不能为空")
         cur = conn.execute(
@@ -1777,9 +1796,9 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
                 review_date,
                 review_type,
                 what_done,
-                (payload.get("stuck") or "").strip(),
-                (payload.get("next_adjust") or "").strip(),
-                (payload.get("depositable") or "").strip(),
+                _as_text(payload.get("stuck")),
+                _as_text(payload.get("next_adjust")),
+                _as_text(payload.get("depositable"), _as_text(content)),
                 _now(),
             ),
         )

@@ -1,6 +1,20 @@
 {
-  "current": "v1.11.1",
+  "current": "v1.11.2",
   "entries": [
+    {
+      "version": "v1.11.2",
+      "date": "2026-06-18",
+      "title": "智能归档修复与体验优化",
+      "type": "fix",
+      "items": [
+        "修复归档复盘时 AI 返回布尔 depositable 导致 commit 500 的问题",
+        "新增 _as_text 安全转换，兼容 AI 返回的 bool/数字/列表字段",
+        "API 返回 HTML 错误页时前端展示可读提示，不再显示 JSON 解析乱码",
+        "智能归档页面 UI 重构：流程指引、统计芯片、类型色条、置信度条、底栏操作",
+        "新增桌面启动脚本 scripts/start-server.bat 与快捷方式创建工具",
+        "pytest 覆盖布尔 depositable 归档场景"
+      ]
+    },
     {
       "version": "v1.11.1",
       "date": "2026-06-18",

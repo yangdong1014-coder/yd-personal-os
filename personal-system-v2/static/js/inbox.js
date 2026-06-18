@@ -4,12 +4,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const clearBtn = document.getElementById("inbox-clear-btn");
   const suggestionsEl = document.getElementById("inbox-suggestions");
   const loadingEl = document.getElementById("inbox-loading");
-  const bulkActions = document.getElementById("inbox-bulk-actions");
+  const bulkBar = document.getElementById("inbox-bulk-bar");
   const selectHighBtn = document.getElementById("inbox-select-high-btn");
   const deselectBtn = document.getElementById("inbox-deselect-btn");
   const commitBtn = document.getElementById("inbox-commit-btn");
   const commitResultEl = document.getElementById("inbox-commit-result");
   const resultHint = document.getElementById("inbox-result-hint");
+  const statsEl = document.getElementById("inbox-stats");
+  const charCountEl = document.getElementById("inbox-char-count");
+  const selectedCountEl = document.getElementById("inbox-selected-count");
+  const workflowSteps = document.querySelectorAll(".inbox-workflow-step");
 
   if (!textInput || !analyzeBtn || !suggestionsEl) return;
 
@@ -31,6 +35,56 @@ document.addEventListener("DOMContentLoaded", () => {
   let projects = [];
   const overridePayloads = {};
 
+  function updateCharCount() {
+    if (!charCountEl) return;
+    const len = textInput.value.length;
+    charCountEl.textContent = `${len} 字`;
+  }
+
+  function updateWorkflow(activeStep) {
+    const order = ["input", "analyze", "commit"];
+    const activeIndex = order.indexOf(activeStep);
+    workflowSteps.forEach((step) => {
+      const stepName = step.dataset.step;
+      const index = order.indexOf(stepName);
+      step.classList.toggle("is-active", stepName === activeStep);
+      step.classList.toggle("is-done", index >= 0 && index < activeIndex);
+    });
+  }
+
+  function countSelected() {
+    return suggestionsEl.querySelectorAll(".inbox-select:checked").length;
+  }
+
+  function updateSelectedCount() {
+    if (!selectedCountEl) return;
+    const count = countSelected();
+    selectedCountEl.textContent = `已选 ${count} 条`;
+    selectedCountEl.classList.toggle("has-selection", count > 0);
+  }
+
+  function updateStats() {
+    if (!statsEl) return;
+    if (!suggestions.length) {
+      statsEl.hidden = true;
+      statsEl.innerHTML = "";
+      return;
+    }
+    const pending = suggestions.filter((s) => s.status === "pending");
+    const committable = pending.filter((s) => isCommittable(s));
+    const committed = suggestions.filter((s) => s.status === "committed").length;
+    statsEl.hidden = false;
+    statsEl.innerHTML = `
+      <span class="inbox-stat-chip"><strong>${suggestions.length}</strong> 条建议</span>
+      <span class="inbox-stat-chip"><strong>${pending.length}</strong> 待处理</span>
+      <span class="inbox-stat-chip is-highlight"><strong>${committable.length}</strong> 可归档</span>
+      ${committed ? `<span class="inbox-stat-chip"><strong>${committed}</strong> 已入库</span>` : ""}`;
+  }
+
+  function setBulkBarVisible(visible) {
+    if (bulkBar) bulkBar.hidden = !visible;
+  }
+
   async function loadRelations() {
     try {
       goals = await apiRequest("/api/goals");
@@ -49,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .replace(/"/g, "&quot;");
   }
 
-  function summarize(text, maxLen = 160) {
+  function summarize(text, maxLen = 200) {
     const value = (text || "").trim();
     if (value.length <= maxLen) return value;
     return `${value.slice(0, maxLen)}…`;
@@ -102,6 +156,17 @@ document.addEventListener("DOMContentLoaded", () => {
   function defaultChecked(suggestion) {
     if (!isCommittable(suggestion)) return false;
     return Number(suggestion.confidence) >= CONFIDENCE_THRESHOLD;
+  }
+
+  function renderConfidenceBar(confidence) {
+    const pct = Math.round(Number(confidence) * 100);
+    return `
+      <div class="inbox-confidence-wrap">
+        <div class="inbox-confidence-bar" role="presentation">
+          <div class="inbox-confidence-fill" style="width: ${pct}%"></div>
+        </div>
+        <span class="inbox-confidence">${pct}%</span>
+      </div>`;
   }
 
   function renderGoalSelect(suggestion) {
@@ -164,71 +229,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return "";
   }
 
-  function renderSuggestions() {
-    if (!suggestions.length) {
-      suggestionsEl.innerHTML = `
-        <div class="empty-state">
-          <strong>无归档建议</strong>
-          AI 未从文本中识别出可归档内容
-        </div>`;
-      bulkActions.hidden = true;
-      return;
-    }
-
-    const pending = suggestions.filter((s) => s.status === "pending");
-    bulkActions.hidden = pending.length === 0;
-
-    suggestionsEl.innerHTML = suggestions
-      .map((suggestion) => {
-        const committable = isCommittable(suggestion);
-        const checked = defaultChecked(suggestion);
-        const disabled =
-          suggestion.status !== "pending" ||
-          suggestion.target_type === "uncertain" ||
-          suggestion.target_type === "ignored" ||
-          !committable;
-        const payload = suggestion.suggested_payload || {};
-        const payloadText = JSON.stringify(getEffectivePayload(suggestion), null, 2);
-        const statusTag =
-          suggestion.status === "committed"
-            ? '<span class="tag tag-success">已入库</span>'
-            : suggestion.status === "rejected"
-              ? '<span class="tag tag-muted">已拒绝</span>'
-              : !committable && suggestion.status === "pending"
-                ? '<span class="tag tag-muted">待补关联</span>'
-                : "";
-
-        return `
-          <article class="inbox-card entity-card" data-id="${suggestion.id}">
-            <div class="inbox-card-head">
-              <label class="inbox-card-check">
-                <input
-                  type="checkbox"
-                  class="inbox-select"
-                  data-id="${suggestion.id}"
-                  ${checked && !disabled ? "checked" : ""}
-                  ${disabled ? "disabled" : ""}
-                >
-              </label>
-              <div class="inbox-card-meta">
-                <span class="tag inbox-type-tag">${escapeHtml(TYPE_LABELS[suggestion.target_type] || suggestion.target_type)}</span>
-                <span class="inbox-confidence">置信度 ${(Number(suggestion.confidence) * 100).toFixed(0)}%</span>
-                ${statusTag}
-              </div>
-              ${suggestion.status === "pending" ? `<button type="button" class="btn btn-sm btn-ghost inbox-reject-btn" data-id="${suggestion.id}">拒绝</button>` : ""}
-            </div>
-            <h3 class="entity-title">${escapeHtml(suggestion.title)}</h3>
-            <p class="inbox-summary">${escapeHtml(summarize(suggestion.content))}</p>
-            <p class="form-hint"><strong>归档理由：</strong>${escapeHtml(suggestion.reason || "—")}</p>
-            ${renderRelationControls(suggestion)}
-            <details class="inbox-payload-details">
-              <summary>建议字段</summary>
-              <pre class="inbox-payload-pre">${escapeHtml(payloadText)}</pre>
-            </details>
-          </article>`;
-      })
-      .join("");
-
+  function bindSuggestionEvents() {
     suggestionsEl.querySelectorAll(".inbox-reject-btn").forEach((btn) => {
       btn.addEventListener("click", () => rejectSuggestion(Number(btn.dataset.id)));
     });
@@ -254,6 +255,106 @@ document.addEventListener("DOMContentLoaded", () => {
         renderSuggestions();
       });
     });
+
+    suggestionsEl.querySelectorAll(".inbox-select").forEach((input) => {
+      input.addEventListener("change", updateSelectedCount);
+    });
+  }
+
+  function renderEmptyWaiting() {
+    suggestionsEl.innerHTML = `
+      <div class="empty-state inbox-empty-state">
+        <div class="inbox-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <strong>等待输入</strong>
+        在左侧输入文本后点击「AI 解析」
+      </div>`;
+    setBulkBarVisible(false);
+    updateStats();
+    updateSelectedCount();
+    updateWorkflow("input");
+  }
+
+  function renderSuggestions() {
+    if (!suggestions.length) {
+      suggestionsEl.innerHTML = `
+        <div class="empty-state inbox-empty-state">
+          <strong>无归档建议</strong>
+          AI 未从文本中识别出可归档内容
+        </div>`;
+      setBulkBarVisible(false);
+      updateStats();
+      updateSelectedCount();
+      updateWorkflow("analyze");
+      return;
+    }
+
+    const pending = suggestions.filter((s) => s.status === "pending");
+    setBulkBarVisible(pending.length > 0);
+    updateWorkflow(pending.length > 0 ? "commit" : "analyze");
+
+    suggestionsEl.innerHTML = suggestions
+      .map((suggestion) => {
+        const committable = isCommittable(suggestion);
+        const checked = defaultChecked(suggestion);
+        const disabled =
+          suggestion.status !== "pending" ||
+          suggestion.target_type === "uncertain" ||
+          suggestion.target_type === "ignored" ||
+          !committable;
+        const payloadText = JSON.stringify(getEffectivePayload(suggestion), null, 2);
+        const typeClass = `inbox-card--${suggestion.target_type}`;
+        const statusTag =
+          suggestion.status === "committed"
+            ? '<span class="tag tag-success">已入库</span>'
+            : suggestion.status === "rejected"
+              ? '<span class="tag tag-muted">已拒绝</span>'
+              : !committable && suggestion.status === "pending"
+                ? '<span class="tag tag-muted">待补关联</span>'
+                : "";
+
+        return `
+          <article class="inbox-card entity-card ${typeClass}" data-id="${suggestion.id}">
+            <div class="inbox-card-head">
+              <label class="inbox-card-check">
+                <input
+                  type="checkbox"
+                  class="inbox-select"
+                  data-id="${suggestion.id}"
+                  aria-label="选择：${escapeHtml(suggestion.title)}"
+                  ${checked && !disabled ? "checked" : ""}
+                  ${disabled ? "disabled" : ""}
+                >
+              </label>
+              <div class="inbox-card-body">
+                <div class="inbox-card-meta">
+                  <span class="tag inbox-type-tag">${escapeHtml(TYPE_LABELS[suggestion.target_type] || suggestion.target_type)}</span>
+                  ${renderConfidenceBar(suggestion.confidence)}
+                  ${statusTag}
+                </div>
+                <h3 class="entity-title">${escapeHtml(suggestion.title)}</h3>
+                <p class="inbox-summary">${escapeHtml(summarize(suggestion.content))}</p>
+                <p class="inbox-reason"><strong>归档理由</strong> ${escapeHtml(suggestion.reason || "—")}</p>
+                ${renderRelationControls(suggestion)}
+                <details class="inbox-payload-details">
+                  <summary>查看建议字段</summary>
+                  <pre class="inbox-payload-pre">${escapeHtml(payloadText)}</pre>
+                </details>
+              </div>
+              ${suggestion.status === "pending"
+                ? `<div class="inbox-card-actions"><button type="button" class="btn btn-sm btn-ghost inbox-reject-btn" data-id="${suggestion.id}">拒绝</button></div>`
+                : ""}
+            </div>
+          </article>`;
+      })
+      .join("");
+
+    bindSuggestionEvents();
+    updateStats();
+    updateSelectedCount();
   }
 
   async function analyze() {
@@ -267,6 +368,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadingEl.hidden = false;
     commitResultEl.hidden = true;
     resultHint.textContent = "AI 正在分析，请稍候…";
+    updateWorkflow("analyze");
     Object.keys(overridePayloads).forEach((key) => delete overridePayloads[key]);
 
     try {
@@ -278,11 +380,12 @@ document.addEventListener("DOMContentLoaded", () => {
       currentEntryId = result.inbox_entry_id;
       suggestions = result.suggestions || [];
       renderSuggestions();
-      resultHint.textContent = `已生成 ${suggestions.length} 条建议；项目需选目标，任务可挂同批项目或选已有项目`;
+      resultHint.textContent = `已生成 ${suggestions.length} 条建议 · 项目需选目标 · 任务可挂同批或已有项目`;
       showToast("解析完成，请确认后归档", "success");
     } catch (error) {
       showToast(error.message || "解析失败", "error");
       resultHint.textContent = "解析失败，请重试";
+      updateWorkflow("input");
     } finally {
       analyzeBtn.disabled = false;
       loadingEl.hidden = true;
@@ -317,6 +420,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       input.checked = checked;
     });
+    updateSelectedCount();
   }
 
   function buildOverridePayload() {
@@ -333,9 +437,17 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderCommitResult(data) {
     const created = data.created || {};
     const errors = data.errors || [];
+    const labelMap = {
+      goals: "目标",
+      projects: "项目",
+      tasks: "任务",
+      reviews: "复盘",
+      assets: "知识卡片",
+      capability_entries: "能力记录",
+    };
     const parts = Object.entries(created)
       .filter(([, count]) => count > 0)
-      .map(([key, count]) => `${key}: ${count}`);
+      .map(([key, count]) => `${labelMap[key] || key} ${count}`);
     const createdTotal = Object.values(created).reduce((sum, n) => sum + (n || 0), 0);
     const title = createdTotal > 0 ? "归档完成" : "未能入库";
     const errorHtml = errors.length
@@ -396,21 +508,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  textInput.addEventListener("input", updateCharCount);
+  updateCharCount();
+  updateWorkflow("input");
   loadRelations();
   analyzeBtn.addEventListener("click", analyze);
   clearBtn.addEventListener("click", () => {
     textInput.value = "";
+    updateCharCount();
     suggestions = [];
     currentEntryId = null;
     Object.keys(overridePayloads).forEach((key) => delete overridePayloads[key]);
     commitResultEl.hidden = true;
-    bulkActions.hidden = true;
     resultHint.textContent = "解析后在此预览，勾选需要归档的条目";
-    suggestionsEl.innerHTML = `
-      <div class="empty-state">
-        <strong>等待输入</strong>
-        在左侧输入文本后点击「AI 解析」
-      </div>`;
+    renderEmptyWaiting();
   });
   selectHighBtn.addEventListener("click", () => setAllChecked(true, true));
   deselectBtn.addEventListener("click", () => setAllChecked(false));

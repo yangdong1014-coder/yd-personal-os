@@ -3,56 +3,121 @@
 {% block title %}智能归档 · 个人能力操作系统{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <h1 class="page-title">智能归档</h1>
-  <p class="page-subtitle">
-    输入一段文字，系统会自动拆解为目标、项目、任务、复盘、知识卡片和能力记录。确认后才会入库。
-  </p>
-  <span class="version-badge">{{ current_version }}</span>
-  <p class="form-hint"><a href="{{ url_for('inbox_history_page') }}">查看归档历史 →</a></p>
+<header class="page-header inbox-page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">智能归档</h1>
+      <p class="page-subtitle">粘贴一段文字，AI 拆解为结构化建议，确认后入库</p>
+      <span class="version-badge">{{ current_version }}</span>
+    </div>
+    <div class="header-actions">
+      <a href="{{ url_for('inbox_history_page') }}" class="btn btn-sm btn-ghost">归档历史</a>
+    </div>
+  </div>
   {% if not ai_enabled %}
-  <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
+  <p class="form-hint inbox-ai-warning">AI 功能未启用：请设置 DEEPSEEK_API_KEY 后重启服务</p>
   {% endif %}
+  <ol class="inbox-workflow" aria-label="归档流程">
+    <li class="inbox-workflow-step is-active" data-step="input">
+      <span class="inbox-workflow-num">1</span>
+      <span class="inbox-workflow-label">输入原文</span>
+    </li>
+    <li class="inbox-workflow-step" data-step="analyze">
+      <span class="inbox-workflow-num">2</span>
+      <span class="inbox-workflow-label">AI 解析</span>
+    </li>
+    <li class="inbox-workflow-step" data-step="commit">
+      <span class="inbox-workflow-num">3</span>
+      <span class="inbox-workflow-label">确认归档</span>
+    </li>
+  </ol>
 </header>
 
-<div class="page-split page-split-wide">
-  <section class="section-card page-split-side">
-    <h2>输入原文</h2>
-    <p class="form-hint section-hint">支持粘贴长文本。原文会保留，AI 仅生成预览建议。</p>
-    <textarea
-      id="inbox-text"
-      class="textarea inbox-textarea"
-      rows="14"
-      placeholder="粘贴或输入需要归档的内容……"
-    ></textarea>
-    <div class="form-actions-row">
-      <button type="button" id="inbox-analyze-btn" class="btn btn-ai" {% if not ai_enabled %}disabled{% endif %}>
+<div class="page-split page-split-wide inbox-layout">
+  <section class="section-card inbox-input-panel page-split-side">
+    <div class="inbox-panel-head">
+      <span class="inbox-panel-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"/>
+          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+        </svg>
+      </span>
+      <div>
+        <h2>输入原文</h2>
+        <p class="form-hint section-hint">支持长文本粘贴，原文保留，AI 仅生成预览</p>
+      </div>
+    </div>
+    <div class="inbox-textarea-wrap">
+      <textarea
+        id="inbox-text"
+        class="textarea inbox-textarea"
+        rows="12"
+        placeholder="粘贴会议纪要、日记、灵感碎片、项目进展……&#10;&#10;例如：今天完成了个人成长飞轮 MVP，明天要补充移动端同步。"
+      ></textarea>
+      <div class="inbox-textarea-foot">
+        <span id="inbox-char-count" class="inbox-char-count">0 字</span>
+      </div>
+    </div>
+    <div class="form-actions-row inbox-input-actions">
+      <button type="button" id="inbox-analyze-btn" class="btn btn-ai inbox-analyze-btn" {% if not ai_enabled %}disabled{% endif %}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3v3"/><path d="m8.5 7.5 2-2"/><path d="M12 21v-3"/><path d="m15.5 16.5 2 2"/><path d="M3 12h3"/><path d="m7.5 8.5-2-2"/><path d="M21 12h-3"/><path d="m16.5 15.5 2 2"/><circle cx="12" cy="12" r="4"/>
+        </svg>
         AI 解析
       </button>
       <button type="button" id="inbox-clear-btn" class="btn btn-ghost">清空</button>
     </div>
   </section>
 
-  <section class="section-card page-split-main">
-    <div class="section-header-row">
-      <div>
+  <section class="section-card inbox-results-panel page-split-main">
+    <div class="inbox-panel-head">
+      <span class="inbox-panel-icon inbox-panel-icon-results" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/>
+          <path d="M9 12h6"/><path d="M9 16h4"/>
+        </svg>
+      </span>
+      <div class="inbox-results-head">
         <h2>解析结果</h2>
         <p class="form-hint section-hint" id="inbox-result-hint">解析后在此预览，勾选需要归档的条目</p>
       </div>
-      <div class="inbox-bulk-actions" id="inbox-bulk-actions" hidden>
-        <button type="button" id="inbox-select-high-btn" class="btn btn-sm btn-ghost">全选高置信度</button>
-        <button type="button" id="inbox-deselect-btn" class="btn btn-sm btn-ghost">取消全选</button>
-        <button type="button" id="inbox-commit-btn" class="btn btn-sm">确认归档</button>
+    </div>
+
+    <div id="inbox-stats" class="inbox-stats" hidden></div>
+
+    <div id="inbox-loading" class="inbox-loading" hidden>
+      <div class="inbox-spinner" aria-hidden="true"></div>
+      <div class="inbox-loading-text">
+        <strong>AI 正在分析</strong>
+        <span>拆解目标、任务、复盘与知识卡片…</span>
       </div>
     </div>
-    <div id="inbox-loading" class="inbox-loading" hidden>AI 解析中…</div>
+
     <div id="inbox-suggestions" class="inbox-suggestions">
-      <div class="empty-state">
+      <div class="empty-state inbox-empty-state">
+        <div class="inbox-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
         <strong>等待输入</strong>
         在左侧输入文本后点击「AI 解析」
       </div>
     </div>
+
     <div id="inbox-commit-result" class="inbox-commit-result" hidden></div>
+
+    <div class="inbox-bulk-bar" id="inbox-bulk-bar" hidden>
+      <div class="inbox-bulk-actions" id="inbox-bulk-actions">
+        <span class="inbox-bulk-selected" id="inbox-selected-count">已选 0 条</span>
+        <div class="inbox-bulk-btns">
+          <button type="button" id="inbox-select-high-btn" class="btn btn-sm btn-ghost">全选高置信度</button>
+          <button type="button" id="inbox-deselect-btn" class="btn btn-sm btn-ghost">取消全选</button>
+          <button type="button" id="inbox-commit-btn" class="btn btn-sm btn-ai">确认归档</button>
+        </div>
+      </div>
+    </div>
   </section>
 </div>
 {% endblock %}
