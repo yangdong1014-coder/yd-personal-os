@@ -36,13 +36,21 @@ function hideAIModal() {
   if (modal) modal.classList.add("hidden");
 }
 
-function showAIModal({ title, bodyHtml, onConfirm }) {
+function showAIModal({
+  title,
+  bodyHtml,
+  onConfirm,
+  confirmLabel = "确认保存",
+  loadingLabel = "保存中…",
+}) {
   const modal = ensureAIModal();
   modal.querySelector("#ai-modal-title").textContent = title;
   modal.querySelector("#ai-modal-body").innerHTML = bodyHtml;
 
   const confirmBtn = modal.querySelector("#ai-modal-confirm");
   const cancelBtn = modal.querySelector("#ai-modal-cancel");
+  confirmBtn.style.display = "";
+  confirmBtn.textContent = confirmLabel;
 
   const newConfirm = confirmBtn.cloneNode(true);
   const newCancel = cancelBtn.cloneNode(true);
@@ -52,19 +60,68 @@ function showAIModal({ title, bodyHtml, onConfirm }) {
   newCancel.addEventListener("click", hideAIModal);
   newConfirm.addEventListener("click", async () => {
     newConfirm.disabled = true;
-    newConfirm.textContent = "保存中…";
+    newConfirm.textContent = loadingLabel;
     try {
       await onConfirm();
       hideAIModal();
     } catch (err) {
-      alert(err.message || "保存失败");
+      alert(err.message || "操作失败");
     } finally {
       newConfirm.disabled = false;
-      newConfirm.textContent = "确认保存";
+      newConfirm.textContent = confirmLabel;
     }
   });
 
   modal.classList.remove("hidden");
+}
+
+function showAIViewModal({ title, bodyHtml, closeLabel = "知道了" }) {
+  const modal = ensureAIModal();
+  modal.querySelector("#ai-modal-title").textContent = title;
+  modal.querySelector("#ai-modal-body").innerHTML = bodyHtml;
+
+  const confirmBtn = modal.querySelector("#ai-modal-confirm");
+  const cancelBtn = modal.querySelector("#ai-modal-cancel");
+  confirmBtn.style.display = "none";
+
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.replaceWith(newCancel);
+  newCancel.textContent = closeLabel;
+  newCancel.addEventListener("click", hideAIModal);
+
+  modal.classList.remove("hidden");
+}
+
+function buildProjectsDraftHtml(projects) {
+  return `
+    <div class="stacked-form project-draft-list">
+      ${projects
+        .map(
+          (p, i) => `
+        <label class="project-draft-item">
+          <input type="checkbox" class="project-draft-check" data-idx="${i}" checked>
+          <div class="project-draft-fields">
+            <input type="text" class="input full-width project-draft-name" value="${escapeAttr(p.name)}">
+            ${p.reason ? `<span class="form-hint">${escapeHtml(p.reason)}</span>` : ""}
+          </div>
+        </label>
+      `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function readSelectedProjectNames() {
+  const names = [];
+  document.querySelectorAll(".project-draft-item").forEach((item) => {
+    const checked = item.querySelector(".project-draft-check");
+    const input = item.querySelector(".project-draft-name");
+    if (checked?.checked && input?.value.trim()) {
+      names.push(input.value.trim());
+    }
+  });
+  return names;
 }
 
 function buildDraftFormHtml(draft, capabilityModules) {

@@ -105,6 +105,13 @@ a {
   margin-bottom: 2rem;
 }
 
+.page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .page-title {
   margin: 0 0 0.35rem;
   font-size: 1.5rem;
@@ -410,6 +417,55 @@ a {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.ai-briefing-text {
+  margin: 0 0 1rem;
+  line-height: 1.6;
+}
+
+.ai-briefing-subtitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.ai-briefing-list {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  line-height: 1.6;
+}
+
+.ai-briefing-focus {
+  margin: 0;
+  padding: 0.75rem;
+  background: rgba(192, 96, 58, 0.08);
+  border-left: 3px solid var(--accent);
+  font-size: 0.875rem;
+}
+
+.project-draft-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.project-draft-item:hover {
+  border-color: rgba(192, 96, 58, 0.3);
+}
+
+.project-draft-check {
+  margin-top: 0.5rem;
+  flex-shrink: 0;
+}
+
+.project-draft-fields {
+  flex: 1;
+  min-width: 0;
 }
 
 .form-hint {
@@ -797,6 +853,11 @@ a {
   .filter-chip {
     font-size: 0.75rem;
     padding: 0.25rem 0.5rem;
+  }
+
+  .page-header-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .entity-header {

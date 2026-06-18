@@ -285,6 +285,28 @@ def api_ai_optimize_asset():
         return _error(str(exc))
 
 
+@app.route("/api/ai/dashboard-briefing", methods=["POST"])
+def api_ai_dashboard_briefing():
+    try:
+        result = ai_service.dashboard_briefing()
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/decompose-goal", methods=["POST"])
+def api_ai_decompose_goal():
+    payload = request.get_json(silent=True) or {}
+    goal_id = payload.get("goal_id")
+    if not goal_id:
+        return _error("缺少 goal_id")
+    try:
+        result = ai_service.decompose_goal_projects(goal_id)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/capability-entries", methods=["GET"])
 def api_list_capability_entries():
     module = request.args.get("module") or None

@@ -210,6 +210,13 @@ def list_goals():
     return [_row_to_dict(r) for r in rows]
 
 
+def get_goal(goal_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
 def create_project(goal_id, name):
     name = name.strip()
     if not name:

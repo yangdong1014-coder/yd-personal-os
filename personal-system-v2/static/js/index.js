@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const goalEl = document.getElementById("dashboard-goal-content");
   const projectsEl = document.getElementById("dashboard-projects-content");
   const tasksEl = document.getElementById("dashboard-tasks-content");
+  const briefingBtn = document.getElementById("ai-briefing-btn");
 
   if (!goalEl || !projectsEl || !tasksEl) return;
 
@@ -80,8 +81,55 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  if (briefingBtn) {
+    briefingBtn.addEventListener("click", async () => {
+      const prev = briefingBtn.textContent;
+      briefingBtn.disabled = true;
+      briefingBtn.textContent = "生成中…";
+
+      try {
+        const result = await apiRequest("/api/ai/dashboard-briefing", {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+
+        const prioritiesHtml = (result.priorities || [])
+          .map((p) => `<li>${escapeHtml(p)}</li>`)
+          .join("");
+
+        showAIViewModal({
+          title: "AI 今日作战简报",
+          bodyHtml: `
+            <div class="ai-briefing">
+              <p class="ai-briefing-text">${formatMultiline(result.briefing)}</p>
+              ${
+                prioritiesHtml
+                  ? `<h4 class="ai-briefing-subtitle">优先事项</h4><ul class="ai-briefing-list">${prioritiesHtml}</ul>`
+                  : ""
+              }
+              ${
+                result.focus
+                  ? `<p class="ai-briefing-focus"><strong>今日聚焦：</strong>${escapeHtml(result.focus)}</p>`
+                  : ""
+              }
+            </div>
+          `,
+        });
+      } catch (err) {
+        alert(err.message || "AI 简报生成失败");
+      } finally {
+        briefingBtn.disabled = false;
+        briefingBtn.textContent = prev;
+      }
+    });
+  }
+
   loadDashboard().catch((err) => console.error(err));
 });
+
+function formatMultiline(text) {
+  return escapeHtml(text || "").replace(/\n/g, "<br>");
+}
 
 function escapeHtml(text) {
   const div = document.createElement("div");

@@ -5,8 +5,11 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">目标系统</h1>
-  <p class="page-subtitle">目标牵引，项目拆解 — 项目嵌套在目标下管理</p>
-  <span class="version-badge">v0.2</span>
+  <p class="page-subtitle">目标牵引，项目拆解 — AI 辅助拆解可执行项目</p>
+  <span class="version-badge">v1.1-ai</span>
+  {% if not ai_enabled %}
+  <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
+  {% endif %}
 </header>
 
 <section class="section-card">
@@ -36,5 +39,6 @@
 {% block scripts %}
 <script>window.GOAL_TYPES = {{ goal_types | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/goals.js') }}"></script>
 {% endblock %}

@@ -19,6 +19,44 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
+  async function handleAIDecompose(goal, button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "拆解中…";
+
+    try {
+      const result = await apiRequest("/api/ai/decompose-goal", {
+        method: "POST",
+        body: JSON.stringify({ goal_id: goal.id }),
+      });
+
+      showAIModal({
+        title: `AI 项目拆解 — ${result.goal_name}`,
+        bodyHtml: buildProjectsDraftHtml(result.projects),
+        confirmLabel: "确认创建",
+        loadingLabel: "创建中…",
+        onConfirm: async () => {
+          const names = readSelectedProjectNames();
+          if (names.length === 0) {
+            throw new Error("请至少选择一个项目");
+          }
+          for (const name of names) {
+            await apiRequest("/api/projects", {
+              method: "POST",
+              body: JSON.stringify({ goal_id: goal.id, name }),
+            });
+          }
+          await loadGoals();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 拆解失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
   function renderEmpty() {
     goalsList.innerHTML = `
       <div class="empty-state">
@@ -68,6 +106,9 @@ document.addEventListener("DOMContentLoaded", () => {
             <h3 class="entity-title">${escapeHtml(goal.name)}</h3>
             <select class="select goal-type-select" title="修改目标类型">${typeOptions(goal.type)}</select>
           </div>
+          <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ai">AI拆解</button>
+          </div>
         </div>
         <div class="nested-block">
           <h4 class="nested-title">项目（${goalProjects.length}）</h4>
@@ -81,6 +122,11 @@ document.addEventListener("DOMContentLoaded", () => {
           </form>
         </div>
       `;
+
+      const aiBtn = card.querySelector(".btn-ai");
+      aiBtn.addEventListener("click", (e) => {
+        handleAIDecompose(goal, e.currentTarget);
+      });
 
       const typeSelect = card.querySelector(".goal-type-select");
       typeSelect.addEventListener("change", async () => {
