@@ -19,6 +19,17 @@ CAPABILITY_MODULES = (
     "落地力",
     "AI驾驭力",
 )
+LEVEL_TYPES = ("能力层", "应用层")
+CAPABILITY_LAYERS = {
+    "本质力": "基础认知层",
+    "建模力": "基础认知层",
+    "体系力": "系统创造层",
+    "产品力": "系统创造层",
+    "审美力": "系统创造层",
+    "创造力": "系统创造层",
+    "落地力": "结果放大层",
+    "AI驾驭力": "结果放大层",
+}
 
 
 def get_connection():
@@ -85,6 +96,16 @@ def init_db():
             source_review_id INTEGER,
             created_at TEXT NOT NULL,
             FOREIGN KEY (source_review_id) REFERENCES reviews(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS capability_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            module TEXT NOT NULL,
+            entry_date TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_project TEXT,
+            level_type TEXT NOT NULL,
+            created_at TEXT NOT NULL
         );
         """
     )
@@ -367,3 +388,62 @@ def list_assets(tag=None):
             raise ValueError("无效的能力标签")
         assets = [a for a in assets if tag in a["capability_tags"]]
     return assets
+
+
+def create_capability_entry(
+    module, entry_date, content, source_project, level_type
+):
+    if module not in CAPABILITY_MODULES:
+        raise ValueError("无效的能力模块")
+    if level_type not in LEVEL_TYPES:
+        raise ValueError("无效的层级判断")
+    entry_date = (entry_date or "").strip()
+    content = (content or "").strip()
+    if not entry_date:
+        raise ValueError("日期不能为空")
+    if not content:
+        raise ValueError("内容不能为空")
+
+    source_project = (source_project or "").strip() or None
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO capability_entries (
+            module, entry_date, content, source_project, level_type, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (module, entry_date, content, source_project, level_type, _now()),
+    )
+    conn.commit()
+    entry_id = cur.lastrowid
+    row = conn.execute(
+        "SELECT * FROM capability_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def list_capability_entries(module=None):
+    conn = get_connection()
+    if module is not None:
+        if module not in CAPABILITY_MODULES:
+            conn.close()
+            raise ValueError("无效的能力模块")
+        rows = conn.execute(
+            """
+            SELECT * FROM capability_entries
+            WHERE module = ?
+            ORDER BY entry_date DESC, created_at DESC
+            """,
+            (module,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM capability_entries
+            ORDER BY entry_date DESC, created_at DESC
+            """
+        ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]

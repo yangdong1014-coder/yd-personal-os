@@ -6,21 +6,58 @@
 <header class="page-header">
   <h1 class="page-title">能力系统</h1>
   <p class="page-subtitle">八个固定能力模块，成长可见、可记录、可回溯</p>
+  <span class="version-badge">v0.4</span>
 </header>
 
-<div class="capability-grid">
-  <div class="capability-item"><div class="num">01</div>本质力</div>
-  <div class="capability-item"><div class="num">02</div>建模力</div>
-  <div class="capability-item"><div class="num">03</div>体系力</div>
-  <div class="capability-item"><div class="num">04</div>产品力</div>
-  <div class="capability-item"><div class="num">05</div>审美力</div>
-  <div class="capability-item"><div class="num">06</div>创造力</div>
-  <div class="capability-item"><div class="num">07</div>落地力</div>
-  <div class="capability-item"><div class="num">08</div>AI驾驭力</div>
-</div>
+<div id="capability-modules">
+  {% for module in capability_modules %}
+  <section class="section-card module-panel" data-module="{{ module }}">
+    <div class="module-header">
+      <h2>
+        <span class="module-num">{{ "%02d"|format(loop.index) }}</span>
+        {{ module }}
+      </h2>
+      <span class="tag tag-layer">{{ capability_layers[module] }}</span>
+    </div>
 
-<div class="empty-state" style="margin-top: 1.5rem;">
-  <strong>添加第一条进展记录</strong>
-  每模块可记录训练与应用（v0.4 开放）
+    <form class="entry-form stacked-form">
+      <div class="form-row-inline">
+        <div class="form-row">
+          <label class="form-label">日期</label>
+          <input type="date" class="input entry-date" required>
+        </div>
+        <div class="form-row">
+          <label class="form-label">层级判断</label>
+          <select class="select entry-level">
+            {% for l in level_types %}
+            <option value="{{ l }}">{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row form-row-grow">
+          <label class="form-label">来源项目（可选）</label>
+          <select class="select entry-project">
+            <option value="">无</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">内容</label>
+        <textarea class="textarea entry-content" rows="2" placeholder="本次训练/应用了什么" required></textarea>
+      </div>
+      <button type="submit" class="btn btn-sm">添加进展</button>
+    </form>
+
+    <div class="entry-history">
+      <h3 class="history-title">历史记录</h3>
+      <div class="history-list"></div>
+    </div>
+  </section>
+  {% endfor %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/capabilities.js') }}"></script>
 {% endblock %}

@@ -67,7 +67,12 @@ def assets():
 @app.route("/capabilities")
 def capabilities():
     return render_template(
-        "capabilities.html", active_page="capabilities", nav_items=NAV_ITEMS
+        "capabilities.html",
+        active_page="capabilities",
+        nav_items=NAV_ITEMS,
+        capability_modules=database.CAPABILITY_MODULES,
+        capability_layers=database.CAPABILITY_LAYERS,
+        level_types=database.LEVEL_TYPES,
     )
 
 
@@ -183,6 +188,31 @@ def api_create_asset():
         return jsonify({"ok": True, "data": asset})
     except (ValueError, TypeError) as exc:
         return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/capability-entries", methods=["GET"])
+def api_list_capability_entries():
+    module = request.args.get("module") or None
+    try:
+        return jsonify({"ok": True, "data": database.list_capability_entries(module)})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/capability-entries", methods=["POST"])
+def api_create_capability_entry():
+    payload = request.get_json(silent=True) or {}
+    try:
+        entry = database.create_capability_entry(
+            payload.get("module", ""),
+            payload.get("entry_date", ""),
+            payload.get("content", ""),
+            payload.get("source_project", ""),
+            payload.get("level_type", ""),
+        )
+        return jsonify({"ok": True, "data": entry})
+    except ValueError as exc:
+        return _error(str(exc))
 
 
 if __name__ == "__main__":
