@@ -58,6 +58,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeModule = moduleFilter.querySelector(".filter-chip.active")?.dataset.module;
   let activeScene = null;
   let modelSettings = null;
+  const aiEnabled = Boolean(window.AI_ENABLED);
 
   function setStatus(message, isError = false) {
     if (!statusEl) return;
@@ -117,6 +118,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const userVars = USER_VARS[data.scene];
     const systemVars = SYSTEM_VARS[data.scene];
     const hasUser = data.user !== null && data.user !== undefined;
+    const canGenerateUser = hasUser && !hint;
+    const aiDisabledAttr = aiEnabled ? "" : " disabled";
 
     editor.innerHTML = `
       <header class="prompt-editor-head">
@@ -126,11 +129,25 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       </header>
 
+      <div class="prompt-brief-row">
+        <label class="form-label" for="prompt-brief">生成补充（可选）</label>
+        <input
+          type="text"
+          id="prompt-brief"
+          class="input prompt-brief-input"
+          placeholder="如：更简洁、强调 JSON 字段、保留现有变量…"
+          ${aiDisabledAttr}
+        >
+      </div>
+
       <div class="stacked-form">
         <div class="form-row">
           <div class="prompt-field-head">
             <label class="form-label" for="prompt-system">系统提示词</label>
-            <button type="button" class="btn btn-sm" id="save-system-btn">保存</button>
+            <div class="prompt-field-actions">
+              <button type="button" class="btn btn-sm btn-ai" id="ai-system-btn"${aiDisabledAttr}>AI 生成</button>
+              <button type="button" class="btn btn-sm" id="save-system-btn">保存</button>
+            </div>
           </div>
           ${systemVars ? `<p class="form-hint">可用变量：${escapeHtml(systemVars)}</p>` : ""}
           <textarea id="prompt-system" class="textarea prompt-textarea" rows="14">${escapeHtml(data.system || "")}</textarea>
@@ -141,7 +158,14 @@ document.addEventListener("DOMContentLoaded", () => {
             <label class="form-label" for="prompt-user">用户上下文模板</label>
             ${
               hasUser
-                ? '<button type="button" class="btn btn-sm" id="save-user-btn">保存</button>'
+                ? `<div class="prompt-field-actions">
+              ${
+                canGenerateUser
+                  ? `<button type="button" class="btn btn-sm btn-ai" id="ai-user-btn"${aiDisabledAttr}>AI 生成</button>`
+                  : ""
+              }
+              <button type="button" class="btn btn-sm" id="save-user-btn">保存</button>
+            </div>`
                 : ""
             }
           </div>
@@ -166,9 +190,75 @@ document.addEventListener("DOMContentLoaded", () => {
       savePrompt("system");
     });
 
+    const aiSystemBtn = document.getElementById("ai-system-btn");
+    if (aiSystemBtn) {
+      aiSystemBtn.addEventListener("click", () => generatePrompt("system"));
+    }
+
     const saveUserBtn = document.getElementById("save-user-btn");
     if (saveUserBtn) {
       saveUserBtn.addEventListener("click", () => savePrompt("user"));
+    }
+
+    const aiUserBtn = document.getElementById("ai-user-btn");
+    if (aiUserBtn) {
+      aiUserBtn.addEventListener("click", () => generatePrompt("user"));
+    }
+  }
+
+  async function generatePrompt(kind) {
+    if (!aiEnabled) {
+      setStatus("AI 功能未启用，请配置 DEEPSEEK_API_KEY 后重启服务", true);
+      return;
+    }
+
+    const textarea = document.getElementById(
+      kind === "system" ? "prompt-system" : "prompt-user"
+    );
+    if (!textarea || !activeModule || !activeScene) return;
+
+    if (
+      textarea.value.trim() &&
+      !window.confirm("AI 生成将覆盖当前编辑区内容，是否继续？")
+    ) {
+      return;
+    }
+
+    const btn = document.getElementById(
+      kind === "system" ? "ai-system-btn" : "ai-user-btn"
+    );
+    const prev = btn?.textContent;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "生成中…";
+    }
+    setStatus("");
+
+    const brief = document.getElementById("prompt-brief")?.value.trim() || "";
+
+    try {
+      const result = await apiRequest(
+        `/api/ai/prompts/${activeModule}/${activeScene}/generate`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            kind,
+            brief,
+            current: textarea.value,
+          }),
+        }
+      );
+      textarea.value = result.content || "";
+      setStatus(
+        `已生成${kind === "system" ? "系统提示词" : "用户模板"}初版，可继续编辑后保存`
+      );
+    } catch (err) {
+      setStatus(err.message || "AI 生成失败", true);
+    } finally {
+      if (btn) {
+        btn.disabled = !aiEnabled;
+        btn.textContent = prev;
+      }
     }
   }
 

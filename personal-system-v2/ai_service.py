@@ -1,11 +1,17 @@
 import json
 from datetime import datetime
+from pathlib import Path
 
 from openai import APIConnectionError, APIStatusError, OpenAI
 
 import config
 import database
+import prompt_specs
 from prompts import load as load_prompt
+
+_META_GENERATE_PROMPT_PATH = (
+    Path(__file__).parent / "prompts" / "_meta" / "generate-draft.system.txt"
+)
 
 CAPABILITY_LIST = "、".join(database.CAPABILITY_MODULES)
 ASSET_TYPE_LIST = "、".join(database.ASSET_TYPES)
@@ -711,4 +717,69 @@ def dispatch_dashboard_actions():
     return {
         "mark_today": mark_today,
         "new_tasks": new_tasks,
+    }
+
+
+def _load_meta_generate_prompt():
+    if not _META_GENERATE_PROMPT_PATH.is_file():
+        raise AIServiceError("提示词生成元提示词缺失")
+    return _META_GENERATE_PROMPT_PATH.read_text(encoding="utf-8").strip()
+
+
+def generate_prompt_draft(module, scene, kind, brief="", current=""):
+    if kind not in ("system", "user"):
+        raise AIServiceError("kind 必须为 system 或 user")
+
+    try:
+        spec = prompt_specs.get_scene_spec(module, scene)
+    except ValueError as exc:
+        raise AIServiceError(str(exc)) from exc
+
+    if kind == "user" and not prompt_specs.can_generate_user(module, scene):
+        raise AIServiceError("该场景的用户上下文由系统自动拼装，无需用户模板")
+
+    module_label = prompt_specs.MODULE_LABELS.get(module, module)
+    system_vars = spec.get("system_vars") or []
+    user_vars = spec.get("user_vars") or []
+
+    lines = [
+        f"模块：{module_label}（{module}）",
+        f"场景：{spec['label']}（{scene}）",
+        f"场景用途：{spec['purpose']}",
+        f"生成类型：{'系统提示词' if kind == 'system' else '用户上下文模板'}",
+    ]
+
+    if kind == "system":
+        lines.append(f"期望 AI 输出 JSON 结构：{spec['json_schema']}")
+        if system_vars:
+            lines.append(
+                "系统提示词可用变量："
+                + " ".join(f"{{{name}}}" for name in system_vars)
+            )
+    elif user_vars:
+        lines.append(
+            "用户模板必须包含变量："
+            + " ".join(f"{{{name}}}" for name in user_vars)
+        )
+
+    current = (current or "").strip()
+    if current:
+        lines.append(f"\n当前内容（可在此基础上优化）：\n{current}")
+
+    brief = (brief or "").strip()
+    if brief:
+        lines.append(f"\n补充说明：{brief}")
+
+    meta_system = _load_meta_generate_prompt()
+    data = _chat_json(meta_system, "\n".join(lines))
+
+    content = (data.get("content") or "").strip()
+    if not content:
+        raise AIServiceError("AI 未能生成有效提示词初稿，请重试")
+
+    return {
+        "content": content,
+        "kind": kind,
+        "module": module,
+        "scene": scene,
     }

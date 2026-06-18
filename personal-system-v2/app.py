@@ -5,6 +5,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import ai_service
 import config
 import database
+import prompt_specs
 import settings_store
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
 
@@ -490,6 +491,29 @@ def api_get_prompt(module, scene):
             "user": user,
         },
     })
+
+
+@app.route("/api/ai/prompts/<module>/<scene>/generate", methods=["POST"])
+def api_generate_prompt(module, scene):
+    payload = request.get_json(silent=True) or {}
+    kind = payload.get("kind", "system")
+    if kind not in ("system", "user"):
+        return _error("kind 必须为 system 或 user")
+    try:
+        prompt_specs.get_scene_spec(module, scene)
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    try:
+        result = ai_service.generate_prompt_draft(
+            module,
+            scene,
+            kind,
+            brief=payload.get("brief", ""),
+            current=payload.get("current", ""),
+        )
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
 
 
 @app.route("/api/ai/prompts/<module>/<scene>", methods=["PUT"])
