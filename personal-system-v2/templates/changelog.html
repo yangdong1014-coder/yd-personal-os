@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}版本日志 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">版本日志</h1>
+  <p class="page-subtitle">记录系统每个版本的更新内容，当前正式版 {{ current_version or '—' }}</p>
+  <span class="version-badge">{{ current_version or 'dev' }}</span>
+</header>
+
+<section class="changelog-timeline" aria-label="版本更新记录">
+  {% for entry in entries %}
+  <article class="changelog-entry{% if entry.is_current %} changelog-entry-current{% endif %}{% if entry.is_dev %} changelog-entry-dev{% endif %}">
+    <header class="changelog-entry-head">
+      <div class="changelog-version-wrap">
+        {% if entry.is_dev %}
+        <span class="changelog-version changelog-version-dev">开发中</span>
+        {% else %}
+        <span class="changelog-version">{{ entry.version }}</span>
+        {% endif %}
+        {% if entry.is_current %}
+        <span class="changelog-current-badge">当前</span>
+        {% endif %}
+      </div>
+      <div class="changelog-meta">
+        <span class="changelog-type changelog-type-{{ entry.type }}">{{ entry.type_label }}</span>
+        {% if entry.date %}
+        <time class="changelog-date" datetime="{{ entry.date }}">{{ entry.date }}</time>
+        {% endif %}
+      </div>
+    </header>
+    <h3 class="changelog-title">{{ entry.title }}</h3>
+    {% if entry.changes %}
+    <ul class="changelog-items">
+      {% for change in entry.changes %}
+      <li>{{ change }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% else %}
+  <div class="empty-state">
+    <strong>暂无版本记录</strong>
+    请在 changelog.json 中添加版本条目
+  </div>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -3,6 +3,7 @@ import json
 from flask import Flask, Response, jsonify, render_template, request
 
 import ai_service
+import changelog
 import config
 import database
 import prompt_specs
@@ -24,6 +25,7 @@ NAV_ITEMS = [
     {"endpoint": "assets", "label": "资产", "path": "/assets"},
     {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
     {"endpoint": "prompts", "label": "AI管理", "path": "/prompts"},
+    {"endpoint": "changelog", "label": "版本日志", "path": "/changelog"},
 ]
 
 
@@ -97,6 +99,17 @@ def prompts_page():
         active_page="prompts",
         nav_items=NAV_ITEMS,
         prompt_modules=MODULES,
+    )
+
+
+@app.route("/changelog")
+def changelog_page():
+    return render_template(
+        "changelog.html",
+        active_page="changelog",
+        nav_items=NAV_ITEMS,
+        entries=changelog.list_entries(),
+        current_version=changelog.get_current_version(),
     )
 
 
@@ -429,6 +442,17 @@ def api_ai_dispatch_actions():
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/changelog", methods=["GET"])
+def api_changelog():
+    return jsonify({
+        "ok": True,
+        "data": {
+            "current": changelog.get_current_version(),
+            "entries": changelog.list_entries(),
+        },
+    })
 
 
 @app.route("/api/settings/ai-model", methods=["GET"])
