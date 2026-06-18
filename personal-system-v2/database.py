@@ -549,6 +549,13 @@ def create_asset(
     return _asset_row(row)
 
 
+def get_asset(asset_id):
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    conn.close()
+    return _asset_row(row)
+
+
 def list_assets(tag=None):
     conn = get_connection()
     rows = conn.execute(
@@ -561,6 +568,39 @@ def list_assets(tag=None):
             raise ValueError("无效的能力标签")
         assets = [a for a in assets if tag in a["capability_tags"]]
     return assets
+
+
+def update_asset(asset_id, title, trigger_context, core_content):
+    title = (title or "").strip()
+    core_content = (core_content or "").strip()
+    if not title:
+        raise ValueError("标题不能为空")
+    if not core_content:
+        raise ValueError("核心内容不能为空")
+
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("知识卡片不存在")
+
+    conn.execute(
+        """
+        UPDATE assets
+        SET title = ?, trigger_context = ?, core_content = ?
+        WHERE id = ?
+        """,
+        (
+            title,
+            (trigger_context or "").strip(),
+            core_content,
+            asset_id,
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    conn.close()
+    return _asset_row(row)
 
 
 def create_capability_entry(

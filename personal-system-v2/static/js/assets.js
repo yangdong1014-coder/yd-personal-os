@@ -21,13 +21,55 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function renderEmpty() {
-    assetsList.innerHTML = `
-      <div class="empty-state">
-        <strong>添加第一张知识卡片</strong>
-        填写上方表单或从复盘生成
-      </div>
-    `;
+  async function handleAIOptimize(asset, button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "优化中…";
+
+    try {
+      const result = await apiRequest("/api/ai/optimize-asset", {
+        method: "POST",
+        body: JSON.stringify({ asset_id: asset.id }),
+      });
+
+      showAIModal({
+        title: "AI 优化结果",
+        bodyHtml: `
+          <div class="stacked-form">
+            <div class="form-row">
+              <label class="form-label">标题</label>
+              <input type="text" id="draft-title" class="input full-width" value="${escapeAttr(result.title || "")}">
+            </div>
+            <div class="form-row">
+              <label class="form-label">触发情境</label>
+              <textarea id="draft-trigger" class="textarea" rows="2">${escapeHtml(result.trigger_context || "")}</textarea>
+            </div>
+            <div class="form-row">
+              <label class="form-label">核心内容</label>
+              <textarea id="draft-content" class="textarea" rows="8">${escapeHtml(result.core_content || "")}</textarea>
+            </div>
+          </div>
+        `,
+        onConfirm: async () => {
+          const title = document.getElementById("draft-title").value.trim();
+          const trigger_context = document.getElementById("draft-trigger").value.trim();
+          const core_content = document.getElementById("draft-content").value.trim();
+          if (!title || !core_content) {
+            throw new Error("标题和核心内容不能为空");
+          }
+          await apiRequest(`/api/assets/${asset.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ title, trigger_context, core_content }),
+          });
+          await loadAssets();
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 优化失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
   }
 
   async function loadAssets() {
@@ -62,6 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="tag tag-type">${escapeHtml(asset.asset_type)}</span>
             ${tagsHtml}
           </div>
+          <button type="button" class="btn btn-sm btn-ai">AI优化</button>
         </div>
         <dl class="review-fields">
           <div><dt>触发情境</dt><dd>${formatText(asset.trigger_context)}</dd></div>
@@ -69,6 +112,10 @@ document.addEventListener("DOMContentLoaded", () => {
         </dl>
         <p class="asset-meta">${escapeHtml(asset.created_at)}</p>
       `;
+
+      card.querySelector(".btn-ai").addEventListener("click", (e) => {
+        handleAIOptimize(asset, e.currentTarget);
+      });
 
       assetsList.appendChild(card);
     });
@@ -147,6 +194,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   init.catch((err) => console.error(err));
 });
+
+function escapeAttr(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
 
 function formatText(text) {
   if (!text || !text.trim()) {

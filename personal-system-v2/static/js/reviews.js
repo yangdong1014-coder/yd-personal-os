@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const reviewForm = document.getElementById("review-form");
   const reviewsList = document.getElementById("reviews-list");
   const dateInput = document.getElementById("review-date");
+  const capabilityModules = window.CAPABILITY_MODULES || [];
 
   if (!reviewForm || !reviewsList) return;
 
@@ -16,6 +17,47 @@ document.addEventListener("DOMContentLoaded", () => {
         填写上方表单后即时保存
       </div>
     `;
+  }
+
+  async function handleAIRefine(review, button) {
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "提炼中…";
+
+    try {
+      const draft = await apiRequest("/api/ai/refine-review", {
+        method: "POST",
+        body: JSON.stringify({ review_id: review.id }),
+      });
+
+      showAIModal({
+        title: "AI 知识卡片草稿",
+        bodyHtml: buildDraftFormHtml(draft, capabilityModules),
+        onConfirm: async () => {
+          const data = readDraftForm();
+          if (!data.title || !data.core_content) {
+            throw new Error("标题和核心内容不能为空");
+          }
+          await apiRequest("/api/assets", {
+            method: "POST",
+            body: JSON.stringify({
+              title: data.title,
+              trigger_context: data.trigger_context,
+              core_content: data.core_content,
+              asset_type: "知识卡片",
+              capability_tags: data.capability_tags,
+              source_review_id: review.id,
+            }),
+          });
+          alert("已保存到资产模块，可前往「资产」页查看");
+        },
+      });
+    } catch (err) {
+      alert(err.message || "AI 提炼失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
   }
 
   async function loadReviews() {
@@ -40,11 +82,14 @@ document.addEventListener("DOMContentLoaded", () => {
             <h3 class="entity-title">${escapeHtml(review.review_date)}</h3>
             <span class="tag">${escapeHtml(review.type)}</span>
           </div>
-          ${
-            hasDepositable
-              ? `<a href="${assetUrl}" class="btn btn-sm">生成卡片</a>`
-              : ""
-          }
+          <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ai">AI提炼</button>
+            ${
+              hasDepositable
+                ? `<a href="${assetUrl}" class="btn btn-sm btn-ghost">生成卡片</a>`
+                : ""
+            }
+          </div>
         </div>
         <dl class="review-fields">
           <div><dt>今天做了什么</dt><dd>${formatText(review.what_done)}</dd></div>
@@ -53,6 +98,10 @@ document.addEventListener("DOMContentLoaded", () => {
           <div><dt>可沉淀内容</dt><dd>${formatText(review.depositable)}</dd></div>
         </dl>
       `;
+
+      card.querySelector(".btn-ai").addEventListener("click", (e) => {
+        handleAIRefine(review, e.currentTarget);
+      });
 
       reviewsList.appendChild(card);
     });

@@ -5,8 +5,11 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">资产系统</h1>
-  <p class="page-subtitle">将执行与复盘转化为可复用知识资产</p>
-  <span class="version-badge">v0.3</span>
+  <p class="page-subtitle">将执行与复盘转化为可复用知识资产，AI 辅助润色优化</p>
+  <span class="version-badge">v0.6</span>
+  {% if not ai_enabled %}
+  <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
+  {% endif %}
 </header>
 
 <section class="section-card">
@@ -72,5 +75,6 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/assets.js') }}"></script>
 {% endblock %}

@@ -1,8 +1,15 @@
 from flask import Flask, jsonify, render_template, request
 
+import ai_service
+import config
 import database
 
 app = Flask(__name__)
+
+
+@app.context_processor
+def inject_globals():
+    return {"ai_enabled": config.is_ai_enabled()}
 
 NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},
@@ -50,6 +57,7 @@ def reviews():
         active_page="reviews",
         nav_items=NAV_ITEMS,
         review_types=database.REVIEW_TYPES,
+        capability_modules=database.CAPABILITY_MODULES,
     )
 
 
@@ -215,6 +223,47 @@ def api_create_asset():
         return jsonify({"ok": True, "data": asset})
     except (ValueError, TypeError) as exc:
         return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/assets/<int:asset_id>", methods=["PATCH"])
+def api_update_asset(asset_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        asset = database.update_asset(
+            asset_id,
+            payload.get("title", ""),
+            payload.get("trigger_context", ""),
+            payload.get("core_content", ""),
+        )
+        return jsonify({"ok": True, "data": asset})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/refine-review", methods=["POST"])
+def api_ai_refine_review():
+    payload = request.get_json(silent=True) or {}
+    review_id = payload.get("review_id")
+    if not review_id:
+        return _error("缺少 review_id")
+    try:
+        draft = ai_service.refine_review_to_asset(review_id)
+        return jsonify({"ok": True, "data": draft})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/optimize-asset", methods=["POST"])
+def api_ai_optimize_asset():
+    payload = request.get_json(silent=True) or {}
+    asset_id = payload.get("asset_id")
+    if not asset_id:
+        return _error("缺少 asset_id")
+    try:
+        result = ai_service.optimize_asset(asset_id)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
 
 
 @app.route("/api/capability-entries", methods=["GET"])
