@@ -31,7 +31,7 @@ def _chat_json(system_prompt, user_prompt):
     client = _get_client()
     try:
         response = client.chat.completions.create(
-            model=config.DEEPSEEK_MODEL,
+            model=config.get_deepseek_model(),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

@@ -5,9 +5,21 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">提示词管理</h1>
-  <p class="page-subtitle">按模块编辑 AI 场景提示词，保存后下次调用立即生效</p>
-  <span class="version-badge">v1.4-prompts</span>
+  <p class="page-subtitle">配置 AI 模型与场景提示词，保存后下次调用立即生效</p>
+  <span class="version-badge">v1.6-model</span>
 </header>
+
+<section class="section-card model-settings-card" id="model-settings">
+  <h2>AI 模型</h2>
+  <div class="model-settings-row">
+    <label class="form-label" for="model-select">当前模型</label>
+    <select id="model-select" class="select model-select" disabled>
+      <option value="">加载中…</option>
+    </select>
+    <button type="button" class="btn btn-sm" id="save-model-btn" disabled>保存</button>
+  </div>
+  <p id="model-hint" class="form-hint model-hint" aria-live="polite"></p>
+</section>
 
 <section class="section-card">
   <h2>模块</h2>

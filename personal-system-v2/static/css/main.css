@@ -271,6 +271,32 @@ a {
   color: #e07070;
 }
 
+.model-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.model-settings-row .form-label {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.model-select {
+  flex: 1 1 12rem;
+  min-width: 12rem;
+  max-width: 24rem;
+}
+
+.model-hint {
+  margin-top: 0.65rem;
+}
+
+.model-hint-locked {
+  color: #c9a227;
+}
+
 .page-title {
   margin: 0 0 0.35rem;
   font-size: 1.5rem;

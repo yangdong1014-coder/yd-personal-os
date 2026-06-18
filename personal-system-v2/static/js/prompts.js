@@ -3,6 +3,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const sceneList = document.getElementById("scene-list");
   const editor = document.getElementById("prompt-editor");
   const statusEl = document.getElementById("prompt-status");
+  const modelSelect = document.getElementById("model-select");
+  const saveModelBtn = document.getElementById("save-model-btn");
+  const modelHint = document.getElementById("model-hint");
 
   if (!moduleFilter || !sceneList || !editor) return;
 
@@ -54,6 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let allItems = [];
   let activeModule = moduleFilter.querySelector(".filter-chip.active")?.dataset.module;
   let activeScene = null;
+  let modelSettings = null;
 
   function setStatus(message, isError = false) {
     if (!statusEl) return;
@@ -269,6 +273,90 @@ document.addEventListener("DOMContentLoaded", () => {
     await loadCatalog(true);
   });
 
+  function renderModelSettings(data) {
+    modelSettings = data;
+    if (!modelSelect || !saveModelBtn || !modelHint) return;
+
+    const available = data.available || [];
+    const knownIds = new Set(available.map((item) => item.id));
+    let options = available
+      .map(
+        (item) =>
+          `<option value="${escapeAttr(item.id)}">${escapeHtml(item.label)}</option>`
+      )
+      .join("");
+
+    if (data.env_locked && data.model && !knownIds.has(data.model)) {
+      options =
+        `<option value="${escapeAttr(data.model)}">${escapeHtml(data.model)}（环境变量）</option>` +
+        options;
+    }
+
+    modelSelect.innerHTML = options;
+    const selected = data.env_locked ? data.model : data.stored_model || data.model;
+    modelSelect.value = selected;
+    modelSelect.disabled = Boolean(data.env_locked);
+    saveModelBtn.disabled = Boolean(data.env_locked);
+
+    if (data.env_locked) {
+      modelHint.textContent = `已由环境变量 DEEPSEEK_MODEL 锁定为「${data.env_model || data.model}」，界面无法修改`;
+      modelHint.classList.add("model-hint-locked");
+    } else {
+      modelHint.textContent = `生效模型：${data.model}。切换后所有 AI 场景将使用新模型`;
+      modelHint.classList.remove("model-hint-locked");
+    }
+  }
+
+  async function loadModelSettings() {
+    if (!modelSelect) return;
+    try {
+      const data = await apiRequest("/api/settings/ai-model");
+      renderModelSettings(data);
+    } catch (err) {
+      if (modelHint) {
+        modelHint.textContent = err.message || "加载模型设置失败";
+        modelHint.classList.add("model-hint-locked");
+      }
+    }
+  }
+
+  async function saveModelSettings() {
+    if (!modelSelect || !saveModelBtn || modelSettings?.env_locked) return;
+
+    const model = modelSelect.value;
+    const prev = saveModelBtn.textContent;
+    saveModelBtn.disabled = true;
+    saveModelBtn.textContent = "保存中…";
+
+    try {
+      const result = await apiRequest("/api/settings/ai-model", {
+        method: "PUT",
+        body: JSON.stringify({ model }),
+      });
+      renderModelSettings({
+        ...modelSettings,
+        model: result.model,
+        stored_model: result.model,
+        env_locked: false,
+      });
+      setStatus(`已切换模型为 ${result.model}`);
+    } catch (err) {
+      setStatus(err.message || "保存模型失败", true);
+    } finally {
+      if (!modelSettings?.env_locked) {
+        saveModelBtn.disabled = false;
+        saveModelBtn.textContent = prev;
+      }
+    }
+  }
+
+  if (saveModelBtn) {
+    saveModelBtn.addEventListener("click", () => {
+      saveModelSettings();
+    });
+  }
+
+  loadModelSettings();
   loadCatalog(true).catch((err) => {
     setStatus(err.message || "加载提示词列表失败", true);
   });

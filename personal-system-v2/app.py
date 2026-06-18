@@ -5,6 +5,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import ai_service
 import config
 import database
+import settings_store
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
 
 app = Flask(__name__)
@@ -427,6 +428,35 @@ def api_ai_dispatch_actions():
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/settings/ai-model", methods=["GET"])
+def api_get_ai_model():
+    stored = settings_store.get_stored_model()
+    return jsonify({
+        "ok": True,
+        "data": {
+            "model": config.get_deepseek_model(),
+            "stored_model": stored or config.DEFAULT_DEEPSEEK_MODEL,
+            "available": config.AVAILABLE_DEEPSEEK_MODELS,
+            "env_locked": config.is_model_env_locked(),
+            "env_model": config._ENV_DEEPSEEK_MODEL or None,
+        },
+    })
+
+
+@app.route("/api/settings/ai-model", methods=["PUT"])
+def api_set_ai_model():
+    if config.is_model_env_locked():
+        return _error(
+            "模型已由环境变量 DEEPSEEK_MODEL 锁定，请在 .env 或系统环境中修改后重启服务"
+        )
+    payload = request.get_json(silent=True) or {}
+    model = (payload.get("model") or "").strip()
+    if model not in config.get_valid_model_ids():
+        return _error("不支持的模型")
+    settings_store.set_stored_model(model)
+    return jsonify({"ok": True, "data": {"model": model}})
 
 
 @app.route("/api/ai/prompts", methods=["GET"])
