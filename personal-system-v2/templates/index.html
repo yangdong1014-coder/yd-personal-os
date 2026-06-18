@@ -5,31 +5,27 @@
 {% block content %}
 <header class="page-header">
   <h1 class="page-title">指挥部总览</h1>
-  <p class="page-subtitle">当前最重要的目标、项目与任务 — v0.5 接入真实数据</p>
-  <span class="version-badge">v0.1 骨架</span>
+  <p class="page-subtitle">当前最重要的目标、项目与任务</p>
+  <span class="version-badge">v0.5</span>
 </header>
 
-<section class="section-card">
+<section class="section-card" id="dashboard-goal">
   <h2>当前主线目标</h2>
-  <div class="empty-state">
-    <strong>暂无主线目标</strong>
-    前往「目标」模块添加第一个目标
-  </div>
+  <div id="dashboard-goal-content"></div>
 </section>
 
-<section class="section-card">
+<section class="section-card" id="dashboard-projects">
   <h2>本周进行中的项目</h2>
-  <div class="empty-state">
-    <strong>暂无进行中项目</strong>
-    在目标下拆解项目后在此展示
-  </div>
+  <div id="dashboard-projects-content"></div>
 </section>
 
-<section class="section-card">
+<section class="section-card" id="dashboard-tasks">
   <h2>今日必须推进的任务</h2>
-  <div class="empty-state">
-    <strong>暂无今日任务</strong>
-    在「任务」模块标记「今日推进」后在此展示
-  </div>
+  <div id="dashboard-tasks-content"></div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
 {% endblock %}

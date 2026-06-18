@@ -15,7 +15,7 @@
     <input type="text" id="goal-name" class="input" placeholder="目标名称" required>
     <select id="goal-type" class="select">
       {% for t in goal_types %}
-      <option value="{{ t }}">{{ t }}</option>
+      <option value="{{ t }}"{% if t == '年度' %} selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
     <button type="submit" class="btn">添加目标</button>
@@ -34,6 +34,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script>window.GOAL_TYPES = {{ goal_types | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/goals.js') }}"></script>
 {% endblock %}

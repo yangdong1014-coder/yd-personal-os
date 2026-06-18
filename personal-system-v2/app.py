@@ -91,6 +91,16 @@ def api_create_goal():
         return _error(str(exc))
 
 
+@app.route("/api/goals/<int:goal_id>", methods=["PATCH"])
+def api_update_goal(goal_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        goal = database.update_goal(goal_id, payload.get("type", ""))
+        return jsonify({"ok": True, "data": goal})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/projects", methods=["GET"])
 def api_list_projects():
     goal_id = request.args.get("goal_id", type=int)
@@ -132,6 +142,23 @@ def api_update_task_status(task_id):
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/tasks/<int:task_id>/today-progress", methods=["PATCH"])
+def api_update_task_today_progress(task_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = database.update_task_today_progress(
+            task_id, bool(payload.get("enabled"))
+        )
+        return jsonify({"ok": True, "data": task})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    return jsonify({"ok": True, "data": database.get_dashboard()})
 
 
 @app.route("/api/reviews", methods=["GET"])

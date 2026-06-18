@@ -22,6 +22,11 @@ document.addEventListener("DOMContentLoaded", () => {
     formHint.style.display = projects.length === 0 ? "block" : "none";
   }
 
+  function isTodayProgress(task) {
+    const today = new Date().toISOString().slice(0, 10);
+    return task.today_progress === 1 && task.today_progress_date === today;
+  }
+
   async function loadTasks() {
     const tasks = await apiRequest("/api/tasks");
     const statuses = window.TASK_STATUSES || [];
@@ -50,13 +55,35 @@ document.addEventListener("DOMContentLoaded", () => {
         )
         .join("");
 
+      const todayChecked = isTodayProgress(task) ? " checked" : "";
+
       row.innerHTML = `
         <div class="task-info">
           <span class="task-name">${escapeHtml(task.name)}</span>
           <span class="task-meta">${escapeHtml(task.goal_name)} / ${escapeHtml(task.project_name)}</span>
         </div>
-        <select class="select status-select">${statusOptions}</select>
+        <div class="task-actions">
+          <label class="today-toggle">
+            <input type="checkbox" class="today-checkbox"${todayChecked}>
+            <span>今日推进</span>
+          </label>
+          <select class="select status-select">${statusOptions}</select>
+        </div>
       `;
+
+      const todayCheckbox = row.querySelector(".today-checkbox");
+      todayCheckbox.addEventListener("change", async () => {
+        const enabled = todayCheckbox.checked;
+        try {
+          await apiRequest(`/api/tasks/${task.id}/today-progress`, {
+            method: "PATCH",
+            body: JSON.stringify({ enabled }),
+          });
+        } catch (err) {
+          todayCheckbox.checked = !enabled;
+          alert(err.message);
+        }
+      });
 
       const statusSelect = row.querySelector(".status-select");
       statusSelect.addEventListener("change", async () => {

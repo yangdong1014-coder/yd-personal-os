@@ -1,7 +1,23 @@
 document.addEventListener("DOMContentLoaded", () => {
   const goalForm = document.getElementById("goal-form");
   const goalsList = document.getElementById("goals-list");
+  const newTypeSelect = document.getElementById("goal-type");
+
   if (!goalForm || !goalsList) return;
+
+  let cachedGoals = [];
+
+  function findMainline(goals, excludeId = null) {
+    return (
+      goals.find((g) => g.type === "当前主线" && g.id !== excludeId) || null
+    );
+  }
+
+  function confirmMainlineSwitch(mainline) {
+    return window.confirm(
+      `当前主线已是「${mainline.name}」，确认切换吗？`
+    );
+  }
 
   function renderEmpty() {
     goalsList.innerHTML = `
@@ -15,6 +31,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadGoals() {
     const goals = await apiRequest("/api/goals");
     const projects = await apiRequest("/api/projects");
+    cachedGoals = goals;
 
     const projectsByGoal = {};
     projects.forEach((p) => {
@@ -29,6 +46,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const goalTypes = window.GOAL_TYPES || [];
+    const typeOptions = (selected) =>
+      goalTypes
+        .map(
+          (t) =>
+            `<option value="${escapeHtml(t)}"${t === selected ? " selected" : ""}>${escapeHtml(t)}</option>`
+        )
+        .join("");
+
     goals.forEach((goal) => {
       const card = document.createElement("article");
       card.className = "entity-card";
@@ -40,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <div class="entity-header">
           <div>
             <h3 class="entity-title">${escapeHtml(goal.name)}</h3>
-            <span class="tag">${escapeHtml(goal.type)}</span>
+            <select class="select goal-type-select" title="修改目标类型">${typeOptions(goal.type)}</select>
           </div>
         </div>
         <div class="nested-block">
@@ -55,6 +81,31 @@ document.addEventListener("DOMContentLoaded", () => {
           </form>
         </div>
       `;
+
+      const typeSelect = card.querySelector(".goal-type-select");
+      typeSelect.addEventListener("change", async () => {
+        const prev = goal.type;
+        const next = typeSelect.value;
+
+        if (next === "当前主线") {
+          const existing = findMainline(cachedGoals, goal.id);
+          if (existing && !confirmMainlineSwitch(existing)) {
+            typeSelect.value = prev;
+            return;
+          }
+        }
+
+        try {
+          await apiRequest(`/api/goals/${goal.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ type: next }),
+          });
+          await loadGoals();
+        } catch (err) {
+          typeSelect.value = prev;
+          alert(err.message);
+        }
+      });
 
       const projectForm = card.querySelector(".project-form");
       projectForm.addEventListener("submit", async (e) => {
@@ -79,6 +130,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  if (newTypeSelect) {
+    newTypeSelect.addEventListener("change", () => {
+      if (newTypeSelect.value !== "当前主线") return;
+
+      const existing = findMainline(cachedGoals);
+      if (existing && !confirmMainlineSwitch(existing)) {
+        newTypeSelect.value = "年度";
+      }
+    });
+  }
+
   goalForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const nameInput = document.getElementById("goal-name");
@@ -86,12 +148,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const name = nameInput.value.trim();
     if (!name) return;
 
+    const goalType = typeSelect.value;
+    if (goalType === "当前主线") {
+      const existing = findMainline(cachedGoals);
+      if (existing && !confirmMainlineSwitch(existing)) {
+        typeSelect.value = "年度";
+        return;
+      }
+    }
+
     try {
       await apiRequest("/api/goals", {
         method: "POST",
-        body: JSON.stringify({ name, type: typeSelect.value }),
+        body: JSON.stringify({ name, type: goalType }),
       });
       nameInput.value = "";
+      typeSelect.value = "年度";
       await loadGoals();
     } catch (err) {
       alert(err.message);

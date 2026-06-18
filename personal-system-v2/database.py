@@ -1,7 +1,7 @@
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
 
@@ -45,6 +45,28 @@ def _row_to_dict(row):
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _today_local():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _week_start_local():
+    today = datetime.now().date()
+    monday = today - timedelta(days=today.weekday())
+    return monday.strftime("%Y-%m-%d")
+
+
+def _migrate_tasks_table(conn):
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    if "today_progress" not in columns:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN today_progress INTEGER NOT NULL DEFAULT 0"
+        )
+    if "today_progress_date" not in columns:
+        conn.execute("ALTER TABLE tasks ADD COLUMN today_progress_date TEXT")
 
 
 def init_db():
@@ -109,8 +131,34 @@ def init_db():
         );
         """
     )
+    _migrate_tasks_table(conn)
+    _normalize_mainline_goals(conn)
     conn.commit()
     conn.close()
+
+
+def _demote_other_mainline_goals(conn, keep_goal_id):
+    conn.execute(
+        """
+        UPDATE goals SET type = '季度'
+        WHERE type = '当前主线' AND id != ?
+        """,
+        (keep_goal_id,),
+    )
+
+
+def _normalize_mainline_goals(conn):
+    rows = conn.execute(
+        """
+        SELECT id FROM goals
+        WHERE type = '当前主线'
+        ORDER BY created_at DESC
+        """
+    ).fetchall()
+    if len(rows) <= 1:
+        return
+    keep_id = rows[0][0]
+    _demote_other_mainline_goals(conn, keep_id)
 
 
 def create_goal(name, goal_type):
@@ -125,8 +173,29 @@ def create_goal(name, goal_type):
         "INSERT INTO goals (name, type, created_at) VALUES (?, ?, ?)",
         (name, goal_type, _now()),
     )
-    conn.commit()
     goal_id = cur.lastrowid
+    if goal_type == "当前主线":
+        _demote_other_mainline_goals(conn, goal_id)
+    conn.commit()
+    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def update_goal(goal_id, goal_type):
+    if goal_type not in GOAL_TYPES:
+        raise ValueError("无效的目标类型")
+
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("目标不存在")
+
+    conn.execute("UPDATE goals SET type = ? WHERE id = ?", (goal_type, goal_id))
+    if goal_type == "当前主线":
+        _demote_other_mainline_goals(conn, goal_id)
+    conn.commit()
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
     conn.close()
     return _row_to_dict(row)
@@ -222,6 +291,19 @@ def create_task(project_id, name):
     return _row_to_dict(row)
 
 
+def _fetch_task(conn, task_id):
+    return conn.execute(
+        """
+        SELECT t.*, p.name AS project_name, g.name AS goal_name
+        FROM tasks t
+        JOIN projects p ON p.id = t.project_id
+        JOIN goals g ON g.id = p.goal_id
+        WHERE t.id = ?
+        """,
+        (task_id,),
+    ).fetchone()
+
+
 def list_tasks():
     conn = get_connection()
     rows = conn.execute(
@@ -249,18 +331,109 @@ def update_task_status(task_id, status):
 
     conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (status, task_id))
     conn.commit()
+    row = _fetch_task(conn, task_id)
+    conn.close()
+    return _row_to_dict(row)
+
+
+def update_task_today_progress(task_id, enabled):
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("任务不存在")
+
+    if enabled:
+        conn.execute(
+            """
+            UPDATE tasks
+            SET today_progress = 1, today_progress_date = ?
+            WHERE id = ?
+            """,
+            (_today_local(), task_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE tasks
+            SET today_progress = 0, today_progress_date = NULL
+            WHERE id = ?
+            """,
+            (task_id,),
+        )
+    conn.commit()
+    row = _fetch_task(conn, task_id)
+    conn.close()
+    return _row_to_dict(row)
+
+
+def get_mainline_goal():
+    conn = get_connection()
     row = conn.execute(
+        """
+        SELECT * FROM goals
+        WHERE type = '当前主线'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def list_week_active_projects():
+    week_start = _week_start_local()
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT DISTINCT p.*, g.name AS goal_name
+        FROM projects p
+        JOIN goals g ON g.id = p.goal_id
+        WHERE EXISTS (
+            SELECT 1 FROM tasks t
+            WHERE t.project_id = p.id
+            AND t.status IN ('待处理', '进行中')
+        )
+        AND (
+            date(p.created_at) >= ?
+            OR EXISTS (
+                SELECT 1 FROM tasks t2
+                WHERE t2.project_id = p.id
+                AND date(t2.created_at) >= ?
+            )
+        )
+        ORDER BY p.created_at DESC
+        """,
+        (week_start, week_start),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def list_today_progress_tasks():
+    today = _today_local()
+    conn = get_connection()
+    rows = conn.execute(
         """
         SELECT t.*, p.name AS project_name, g.name AS goal_name
         FROM tasks t
         JOIN projects p ON p.id = t.project_id
         JOIN goals g ON g.id = p.goal_id
-        WHERE t.id = ?
+        WHERE t.today_progress = 1 AND t.today_progress_date = ?
+        ORDER BY t.created_at DESC
         """,
-        (task_id,),
-    ).fetchone()
+        (today,),
+    ).fetchall()
     conn.close()
-    return _row_to_dict(row)
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_dashboard():
+    return {
+        "mainline_goal": get_mainline_goal(),
+        "week_projects": list_week_active_projects(),
+        "today_tasks": list_today_progress_tasks(),
+    }
 
 
 def _parse_tags(raw):
