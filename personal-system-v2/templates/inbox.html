@@ -9,6 +9,7 @@
     输入一段文字，系统会自动拆解为目标、项目、任务、复盘、知识卡片和能力记录。确认后才会入库。
   </p>
   <span class="version-badge">{{ current_version }}</span>
+  <p class="form-hint"><a href="{{ url_for('inbox_history_page') }}">查看归档历史 →</a></p>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}

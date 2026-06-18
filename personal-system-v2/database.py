@@ -41,6 +41,15 @@ INBOX_COMMITTABLE_TYPES = (
     "asset",
     "capability_entry",
 )
+INBOX_OVERRIDE_FIELDS = frozenset({"goal_id", "project_id"})
+INBOX_COMMIT_ORDER = {
+    "goal": 0,
+    "project": 1,
+    "review": 2,
+    "asset": 3,
+    "capability_entry": 4,
+    "task": 5,
+}
 CAPABILITY_LAYERS = {
     "本质力": "基础认知层",
     "建模力": "基础认知层",
@@ -1369,6 +1378,41 @@ def get_inbox_entry(entry_id):
     return _row_to_dict(row)
 
 
+def list_inbox_entries(limit=20):
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT
+            e.id,
+            e.raw_text,
+            e.source_type,
+            e.status,
+            e.created_at,
+            COUNT(s.id) AS suggestion_count,
+            COALESCE(SUM(CASE WHEN s.status = 'committed' THEN 1 ELSE 0 END), 0)
+                AS committed_count,
+            COALESCE(SUM(CASE WHEN s.status = 'pending' THEN 1 ELSE 0 END), 0)
+                AS pending_count,
+            COALESCE(SUM(CASE WHEN s.status = 'rejected' THEN 1 ELSE 0 END), 0)
+                AS rejected_count
+        FROM inbox_entries e
+        LEFT JOIN inbox_suggestions s ON s.inbox_entry_id = e.id
+        GROUP BY e.id
+        ORDER BY e.created_at DESC, e.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        item = _row_to_dict(row)
+        raw = item.get("raw_text") or ""
+        item["raw_text_summary"] = raw[:120] + ("…" if len(raw) > 120 else "")
+        result.append(item)
+    return result
+
+
 def create_inbox_suggestions(entry_id, items):
     if not get_inbox_entry(entry_id):
         raise ValueError("inbox 记录不存在")
@@ -1512,7 +1556,68 @@ def _coerce_positive_int(value):
     return None
 
 
-def _validate_suggestion_for_commit(conn, suggestion):
+def _parse_override_payloads(override_list):
+    result = {}
+    if not override_list:
+        return result
+    for item in override_list:
+        if not isinstance(item, dict):
+            continue
+        sid = item.get("suggestion_id")
+        if sid is None:
+            continue
+        allowed = {}
+        for key in INBOX_OVERRIDE_FIELDS:
+            if key in item:
+                allowed[key] = item[key]
+        if allowed:
+            result[int(sid)] = allowed
+    return result
+
+
+def _merge_suggestion_override(suggestion, override_map):
+    sid = suggestion["id"]
+    if sid not in override_map:
+        return suggestion
+    payload = dict(suggestion["suggested_payload"])
+    for key, value in override_map[sid].items():
+        if key in INBOX_OVERRIDE_FIELDS:
+            payload[key] = value
+    merged = dict(suggestion)
+    merged["suggested_payload"] = payload
+    return merged
+
+
+def _batch_project_local_refs(suggestions):
+    refs = set()
+    for suggestion in suggestions:
+        if suggestion["target_type"] != "project":
+            continue
+        ref = (suggestion["suggested_payload"].get("local_ref") or "").strip()
+        if ref:
+            refs.add(ref)
+    return refs
+
+
+def _sort_suggestions_for_commit(suggestions):
+    return sorted(
+        suggestions,
+        key=lambda item: (INBOX_COMMIT_ORDER.get(item["target_type"], 99), item["id"]),
+    )
+
+
+def _resolve_task_project_id(payload, ref_map):
+    project_id = _coerce_positive_int(payload.get("project_id"))
+    if project_id:
+        return project_id
+    parent_ref = (payload.get("parent_ref") or "").strip()
+    if parent_ref and parent_ref in ref_map:
+        return ref_map[parent_ref]
+    return None
+
+
+def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
+    batch_project_refs = batch_project_refs or set()
     sid = suggestion["id"]
     target_type = suggestion["target_type"]
     title = suggestion.get("title") or ""
@@ -1544,8 +1649,11 @@ def _validate_suggestion_for_commit(conn, suggestion):
     if target_type == "task":
         name = (payload.get("name") or title).strip()
         project_id = _coerce_positive_int(payload.get("project_id"))
+        parent_ref = (payload.get("parent_ref") or "").strip()
         if not name:
             return f"建议 #{sid}（任务）：缺少名称"
+        if not project_id and parent_ref and parent_ref in batch_project_refs:
+            return None
         if not project_id:
             raw = payload.get("project_id")
             if isinstance(raw, str) and raw.strip():
@@ -1553,9 +1661,14 @@ def _validate_suggestion_for_commit(conn, suggestion):
                     f"建议 #{sid}（任务「{name}」）：project_id 需为已存在项目的数字 ID，"
                     f"不能是项目名称（当前：{raw}）"
                 )
+            if parent_ref:
+                return (
+                    f"建议 #{sid}（任务「{name}」）：parent_ref「{parent_ref}」"
+                    "未匹配到同批项目，请选择归属项目或勾选对应项目建议"
+                )
             return (
                 f"建议 #{sid}（任务「{name}」）：缺少有效 project_id，"
-                "请先在项目模块创建项目后再归档任务"
+                "请选择归属项目或关联同批项目"
             )
         if not conn.execute(
             "SELECT id FROM projects WHERE id = ?", (project_id,)
@@ -1588,11 +1701,12 @@ def _validate_suggestion_for_commit(conn, suggestion):
     return f"建议 #{sid} 类型为 {target_type}，不可入库"
 
 
-def _commit_suggestion_in_tx(conn, suggestion):
+def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
+    ref_map = ref_map or {}
     target_type = suggestion["target_type"]
     title = suggestion["title"]
     content = suggestion["content"]
-    payload = suggestion["suggested_payload"]
+    payload = dict(suggestion["suggested_payload"])
 
     if target_type == "goal":
         name = (payload.get("name") or title).strip()
@@ -1605,7 +1719,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
         )
         if goal_type == "当前主线":
             _demote_other_mainline_goals(conn, cur.lastrowid)
-        return "goals"
+        return "goals", cur.lastrowid
 
     if target_type == "project":
         name = (payload.get("name") or title).strip()
@@ -1619,15 +1733,15 @@ def _commit_suggestion_in_tx(conn, suggestion):
         ).fetchone()
         if not goal:
             raise ValueError("关联目标不存在")
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO projects (goal_id, name, created_at) VALUES (?, ?, ?)",
             (goal_id, name, _now()),
         )
-        return "projects"
+        return "projects", cur.lastrowid
 
     if target_type == "task":
         name = (payload.get("name") or title).strip()
-        project_id = _coerce_positive_int(payload.get("project_id"))
+        project_id = _resolve_task_project_id(payload, ref_map)
         status = _map_task_status(payload.get("status"))
         if not name:
             raise ValueError("任务名称不能为空")
@@ -1638,14 +1752,14 @@ def _commit_suggestion_in_tx(conn, suggestion):
         ).fetchone()
         if not project:
             raise ValueError("关联项目不存在")
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO tasks (project_id, name, status, created_at)
             VALUES (?, ?, ?, ?)
             """,
             (project_id, name, status, _now()),
         )
-        return "tasks"
+        return "tasks", cur.lastrowid
 
     if target_type == "review":
         review_date = (payload.get("review_date") or _today_local()).strip()
@@ -1653,7 +1767,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
         what_done = (payload.get("what_done") or content or title).strip()
         if not review_date:
             raise ValueError("复盘日期不能为空")
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO reviews (
                 review_date, type, what_done, stuck, next_adjust, depositable, created_at
@@ -1669,7 +1783,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
                 _now(),
             ),
         )
-        return "reviews"
+        return "reviews", cur.lastrowid
 
     if target_type == "asset":
         asset_title = (payload.get("title") or title).strip()
@@ -1684,7 +1798,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
             tags = []
         tags = [t for t in tags if t in CAPABILITY_MODULES]
         source_review_id = payload.get("source_review_id")
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO assets (
                 title, trigger_context, core_content, asset_type,
@@ -1701,7 +1815,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
                 _now(),
             ),
         )
-        return "assets"
+        return "assets", cur.lastrowid
 
     if target_type == "capability_entry":
         module = payload.get("capability") or payload.get("module") or "AI驾驭力"
@@ -1714,7 +1828,7 @@ def _commit_suggestion_in_tx(conn, suggestion):
             level_type = "能力层"
         if not entry_content:
             raise ValueError("能力记录内容不能为空")
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO capability_entries (
                 module, entry_date, content, source_project, level_type, created_at
@@ -1729,12 +1843,12 @@ def _commit_suggestion_in_tx(conn, suggestion):
                 _now(),
             ),
         )
-        return "capability_entries"
+        return "capability_entries", cur.lastrowid
 
     raise ValueError(f"类型 {target_type} 不可入库")
 
 
-def commit_inbox_suggestions(suggestion_ids):
+def commit_inbox_suggestions(suggestion_ids, override_payload=None):
     if not suggestion_ids:
         raise ValueError("未选择任何建议")
 
@@ -1758,8 +1872,9 @@ def commit_inbox_suggestions(suggestion_ids):
     skipped = 0
     errors = []
 
+    override_map = _parse_override_payloads(override_payload)
     conn = get_connection()
-    to_commit = []
+    candidates = []
     try:
         for suggestion_id in unique_ids:
             row = conn.execute(
@@ -1769,7 +1884,7 @@ def commit_inbox_suggestions(suggestion_ids):
             if not row:
                 errors.append(f"建议 #{suggestion_id} 不存在")
                 continue
-            suggestion = _suggestion_row(row)
+            suggestion = _merge_suggestion_override(_suggestion_row(row), override_map)
             if suggestion["status"] == "committed":
                 skipped += 1
                 continue
@@ -1781,7 +1896,14 @@ def commit_inbox_suggestions(suggestion_ids):
                     f"建议 #{suggestion_id} 类型为 {suggestion['target_type']}，不可入库"
                 )
                 continue
-            validation_error = _validate_suggestion_for_commit(conn, suggestion)
+            candidates.append(suggestion)
+
+        batch_project_refs = _batch_project_local_refs(candidates)
+        to_commit = []
+        for suggestion in candidates:
+            validation_error = _validate_suggestion_for_commit(
+                conn, suggestion, batch_project_refs
+            )
             if validation_error:
                 errors.append(validation_error)
                 continue
@@ -1792,9 +1914,15 @@ def commit_inbox_suggestions(suggestion_ids):
 
         conn.execute("BEGIN")
         entry_ids = set()
-        for suggestion in to_commit:
-            table_key = _commit_suggestion_in_tx(conn, suggestion)
+        ref_map = {}
+        for suggestion in _sort_suggestions_for_commit(to_commit):
+            table_key, entity_id = _commit_suggestion_in_tx(conn, suggestion, ref_map)
             created[table_key] += 1
+            payload = suggestion["suggested_payload"]
+            if suggestion["target_type"] == "project":
+                local_ref = (payload.get("local_ref") or "").strip()
+                if local_ref:
+                    ref_map[local_ref] = entity_id
             conn.execute(
                 "UPDATE inbox_suggestions SET status = 'committed' WHERE id = ?",
                 (suggestion["id"],),

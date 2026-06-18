@@ -107,6 +107,15 @@ def inbox_page():
     )
 
 
+@app.route("/inbox/history")
+def inbox_history_page():
+    return render_template(
+        "inbox_history.html",
+        active_page="inbox",
+        nav_items=NAV_ITEMS,
+    )
+
+
 @app.route("/prompts")
 def prompts_page():
     return render_template(
@@ -578,6 +587,13 @@ def api_inbox_analyze():
         return _error(str(exc))
 
 
+@app.route("/api/inbox", methods=["GET"])
+def api_list_inbox():
+    limit = request.args.get("limit", default=20, type=int)
+    limit = max(1, min(limit, 50))
+    return jsonify({"ok": True, "data": database.list_inbox_entries(limit)})
+
+
 @app.route("/api/inbox/<int:entry_id>", methods=["GET"])
 def api_get_inbox(entry_id):
     try:
@@ -591,10 +607,15 @@ def api_get_inbox(entry_id):
 def api_inbox_commit():
     payload = request.get_json(silent=True) or {}
     suggestion_ids = payload.get("suggestion_ids") or []
+    override_payload = payload.get("override_payload") or []
     if not isinstance(suggestion_ids, list):
         return _error("suggestion_ids 必须为数组")
+    if not isinstance(override_payload, list):
+        return _error("override_payload 必须为数组")
     try:
-        result = inbox_service.commit_suggestions(suggestion_ids)
+        result = inbox_service.commit_suggestions(
+            suggestion_ids, override_payload=override_payload
+        )
         return jsonify({"ok": True, "data": result})
     except inbox_service.InboxServiceError as exc:
         return _error(str(exc))

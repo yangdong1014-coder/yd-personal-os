@@ -77,4 +77,7 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 - 外键约束：project 需有效 `goal_id`；task 需有效 `project_id`（均为数字 ID）
 - AI 若返回项目名称而非 ID，commit 前校验跳过并返回明确 errors
 - 批量归档支持部分成功：有效建议写入，无效建议保留 pending 并列出 errors
+- v1.11.1 链式入库：同批 project 带 `local_ref`，task 带 `parent_ref`；commit 按 goal→project→task 顺序，task 自动挂到本批新建 project
+- `override_payload`：前端可补充 `goal_id` / `project_id`，后端仅允许覆盖这两个关联字段
+- 历史：`GET /api/inbox` 列表 + `/inbox/history` 详情
 - 拒绝：`POST /api/inbox/suggestions/<id>/reject`

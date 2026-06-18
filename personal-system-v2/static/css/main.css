@@ -1916,3 +1916,45 @@ a {
   border-color: var(--border-subtle);
   background: transparent;
 }
+
+.inbox-relation-row {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.inbox-relation-row .select {
+  width: 100%;
+  max-width: 360px;
+}
+
+.inbox-batch-hint {
+  margin: 0.35rem 0 0;
+  color: var(--accent);
+}
+
+.inbox-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.inbox-history-item.is-active,
+.inbox-history-item:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.inbox-history-suggestions {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.88rem;
+}
+
+.inbox-history-detail .inbox-payload-pre {
+  max-height: 240px;
+  overflow-y: auto;
+}

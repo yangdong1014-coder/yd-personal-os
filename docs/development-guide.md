@@ -60,6 +60,7 @@ def test_inbox_analyze(client, monkeypatch):
 - goal/asset/review/capability_entry 可直接入库；project 需 `goal_id`，task 需 `project_id`
 - AI 常返回项目名称字符串而非数字 ID，此时 UI 会展示校验 errors，建议先手动建目标/项目
 - 真实 AI 验证前建议 `GET /api/export` 备份生产库；`data/backup_*.json` 已 gitignore
+- 验证产生的 inbox 记录、测试资产等如无保留价值，应在各模块手动删除；**不要**提交 `data/yd_os.db`
 
 ## 目录约定
 

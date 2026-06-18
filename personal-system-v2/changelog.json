@@ -1,6 +1,19 @@
 {
-  "current": "v1.11",
+  "current": "v1.11.1",
   "entries": [
+    {
+      "version": "v1.11.1",
+      "date": "2026-06-18",
+      "title": "智能归档体验收口",
+      "type": "fix",
+      "items": [
+        "同批 project/task 支持 local_ref / parent_ref 链式入库",
+        "suggestion 卡片支持选择已有目标/项目归属",
+        "commit 支持 override_payload 安全覆盖 goal_id / project_id",
+        "新增 GET /api/inbox 历史列表与 /inbox/history 页面",
+        "pytest 覆盖链式入库、override 与历史计数"
+      ]
+    },
     {
       "version": "v1.11",
       "date": "2026-06-18",

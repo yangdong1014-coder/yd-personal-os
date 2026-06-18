@@ -115,6 +115,16 @@ inbox_entries (1) ──< inbox_suggestions (N)
 - 校验失败时该 suggestion 保持 `pending`，`commit` 响应 `errors` 列出原因
 - 系统不会为通过校验而自动创建占位 goal/project
 
+#### suggested_payload 关联字段（v1.11.1）
+
+| 字段 | 说明 |
+|------|------|
+| local_ref | 同批临时引用（如 `project_ai_retouche`），project 创建后映射为真实 id |
+| parent_ref | task 指向同批 project 的 local_ref，commit 时解析为 project_id |
+| goal_id / project_id | 数字 ID；可由用户在卡片选择或 `override_payload` 补充 |
+
+`override_payload` 仅允许覆盖 `goal_id`、`project_id`，后端仍做最终校验。
+
 ## 外键与级联
 
 | 删除对象 | 行为 |

@@ -27,6 +27,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentEntryId = null;
   let suggestions = [];
+  let goals = [];
+  let projects = [];
+  const overridePayloads = {};
+
+  async function loadRelations() {
+    try {
+      goals = await apiRequest("/api/goals");
+      projects = await apiRequest("/api/projects");
+    } catch (_error) {
+      goals = [];
+      projects = [];
+    }
+  }
 
   function escapeHtml(text) {
     return String(text || "")
@@ -42,12 +55,113 @@ document.addEventListener("DOMContentLoaded", () => {
     return `${value.slice(0, maxLen)}…`;
   }
 
-  function defaultChecked(suggestion) {
+  function getEffectivePayload(suggestion) {
+    const base = { ...(suggestion.suggested_payload || {}) };
+    const override = overridePayloads[suggestion.id] || {};
+    return { ...base, ...override };
+  }
+
+  function findBatchProjectByRef(ref) {
+    return suggestions.find(
+      (item) =>
+        item.target_type === "project" &&
+        (item.suggested_payload?.local_ref || "") === ref
+    );
+  }
+
+  function hasValidGoalId(payload) {
+    const id = Number(payload.goal_id);
+    return Number.isInteger(id) && id > 0;
+  }
+
+  function hasValidProjectId(payload) {
+    const id = Number(payload.project_id);
+    return Number.isInteger(id) && id > 0;
+  }
+
+  function isCommittable(suggestion) {
     if (suggestion.status !== "pending") return false;
     if (suggestion.target_type === "uncertain" || suggestion.target_type === "ignored") {
       return false;
     }
+    const payload = getEffectivePayload(suggestion);
+    if (suggestion.target_type === "project") {
+      return hasValidGoalId(payload);
+    }
+    if (suggestion.target_type === "task") {
+      if (hasValidProjectId(payload)) return true;
+      const parentRef = (payload.parent_ref || "").trim();
+      if (!parentRef) return false;
+      const batchProject = findBatchProjectByRef(parentRef);
+      if (!batchProject || batchProject.status !== "pending") return false;
+      return hasValidGoalId(getEffectivePayload(batchProject));
+    }
+    return true;
+  }
+
+  function defaultChecked(suggestion) {
+    if (!isCommittable(suggestion)) return false;
     return Number(suggestion.confidence) >= CONFIDENCE_THRESHOLD;
+  }
+
+  function renderGoalSelect(suggestion) {
+    const payload = getEffectivePayload(suggestion);
+    const selected = payload.goal_id || "";
+    const options = ['<option value="">选择归属目标</option>']
+      .concat(
+        goals.map(
+          (goal) =>
+            `<option value="${goal.id}"${String(goal.id) === String(selected) ? " selected" : ""}>${escapeHtml(goal.name)}</option>`
+        )
+      )
+      .join("");
+    return `
+      <div class="inbox-relation-row">
+        <label class="form-label">选择归属目标</label>
+        <select class="select inbox-goal-select" data-id="${suggestion.id}">${options}</select>
+      </div>`;
+  }
+
+  function renderProjectSelect(suggestion) {
+    const payload = getEffectivePayload(suggestion);
+    const parentRef = (payload.parent_ref || "").trim();
+    const batchProject = parentRef ? findBatchProjectByRef(parentRef) : null;
+    if (batchProject) {
+      return `<p class="form-hint inbox-batch-hint">将归属同批项目：${escapeHtml(batchProject.title)}</p>`;
+    }
+    const selected = payload.project_id || "";
+    const options = ['<option value="">选择归属项目</option>']
+      .concat(
+        projects.map(
+          (project) =>
+            `<option value="${project.id}"${String(project.id) === String(selected) ? " selected" : ""}>${escapeHtml(project.name)}${project.goal_name ? `（${escapeHtml(project.goal_name)}）` : ""}</option>`
+        )
+      )
+      .join("");
+    return `
+      <div class="inbox-relation-row">
+        <label class="form-label">选择归属项目</label>
+        <select class="select inbox-project-select" data-id="${suggestion.id}">${options}</select>
+      </div>`;
+  }
+
+  function renderRelationControls(suggestion) {
+    if (suggestion.status !== "pending") return "";
+    const payload = getEffectivePayload(suggestion);
+    if (suggestion.target_type === "project" && !hasValidGoalId(payload)) {
+      return renderGoalSelect(suggestion);
+    }
+    if (suggestion.target_type === "task") {
+      if (hasValidProjectId(payload)) return "";
+      const parentRef = (payload.parent_ref || "").trim();
+      if (parentRef && findBatchProjectByRef(parentRef)) {
+        return renderProjectSelect(suggestion);
+      }
+      if (!hasValidProjectId(payload)) {
+        return renderProjectSelect(suggestion);
+      }
+    }
+    return "";
   }
 
   function renderSuggestions() {
@@ -66,19 +180,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     suggestionsEl.innerHTML = suggestions
       .map((suggestion) => {
+        const committable = isCommittable(suggestion);
         const checked = defaultChecked(suggestion);
         const disabled =
           suggestion.status !== "pending" ||
           suggestion.target_type === "uncertain" ||
-          suggestion.target_type === "ignored";
+          suggestion.target_type === "ignored" ||
+          !committable;
         const payload = suggestion.suggested_payload || {};
-        const payloadText = JSON.stringify(payload, null, 2);
+        const payloadText = JSON.stringify(getEffectivePayload(suggestion), null, 2);
         const statusTag =
           suggestion.status === "committed"
             ? '<span class="tag tag-success">已入库</span>'
             : suggestion.status === "rejected"
               ? '<span class="tag tag-muted">已拒绝</span>'
-              : "";
+              : !committable && suggestion.status === "pending"
+                ? '<span class="tag tag-muted">待补关联</span>'
+                : "";
 
         return `
           <article class="inbox-card entity-card" data-id="${suggestion.id}">
@@ -102,6 +220,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <h3 class="entity-title">${escapeHtml(suggestion.title)}</h3>
             <p class="inbox-summary">${escapeHtml(summarize(suggestion.content))}</p>
             <p class="form-hint"><strong>归档理由：</strong>${escapeHtml(suggestion.reason || "—")}</p>
+            ${renderRelationControls(suggestion)}
             <details class="inbox-payload-details">
               <summary>建议字段</summary>
               <pre class="inbox-payload-pre">${escapeHtml(payloadText)}</pre>
@@ -112,6 +231,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
     suggestionsEl.querySelectorAll(".inbox-reject-btn").forEach((btn) => {
       btn.addEventListener("click", () => rejectSuggestion(Number(btn.dataset.id)));
+    });
+
+    suggestionsEl.querySelectorAll(".inbox-goal-select").forEach((select) => {
+      select.addEventListener("change", () => {
+        const id = Number(select.dataset.id);
+        overridePayloads[id] = {
+          ...(overridePayloads[id] || {}),
+          goal_id: select.value ? Number(select.value) : undefined,
+        };
+        renderSuggestions();
+      });
+    });
+
+    suggestionsEl.querySelectorAll(".inbox-project-select").forEach((select) => {
+      select.addEventListener("change", () => {
+        const id = Number(select.dataset.id);
+        overridePayloads[id] = {
+          ...(overridePayloads[id] || {}),
+          project_id: select.value ? Number(select.value) : undefined,
+        };
+        renderSuggestions();
+      });
     });
   }
 
@@ -126,8 +267,10 @@ document.addEventListener("DOMContentLoaded", () => {
     loadingEl.hidden = false;
     commitResultEl.hidden = true;
     resultHint.textContent = "AI 正在分析，请稍候…";
+    Object.keys(overridePayloads).forEach((key) => delete overridePayloads[key]);
 
     try {
+      await loadRelations();
       const result = await apiRequest("/api/inbox/analyze", {
         method: "POST",
         body: JSON.stringify({ text }),
@@ -135,7 +278,7 @@ document.addEventListener("DOMContentLoaded", () => {
       currentEntryId = result.inbox_entry_id;
       suggestions = result.suggestions || [];
       renderSuggestions();
-      resultHint.textContent = `已生成 ${suggestions.length} 条建议，低置信度（<60%）默认不勾选`;
+      resultHint.textContent = `已生成 ${suggestions.length} 条建议；项目需选目标，任务可挂同批项目或选已有项目`;
       showToast("解析完成，请确认后归档", "success");
     } catch (error) {
       showToast(error.message || "解析失败", "error");
@@ -176,6 +319,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function buildOverridePayload() {
+    return Object.entries(overridePayloads)
+      .filter(([, value]) => value && (value.goal_id || value.project_id))
+      .map(([id, value]) => {
+        const item = { suggestion_id: Number(id) };
+        if (value.goal_id) item.goal_id = value.goal_id;
+        if (value.project_id) item.project_id = value.project_id;
+        return item;
+      });
+  }
+
   function renderCommitResult(data) {
     const created = data.created || {};
     const errors = data.errors || [];
@@ -201,7 +355,7 @@ document.addEventListener("DOMContentLoaded", () => {
       (input) => Number(input.dataset.id)
     );
     if (!ids.length) {
-      showToast("请至少选择一条建议", "warning");
+      showToast("请至少选择一条可提交的建议", "warning");
       return;
     }
 
@@ -209,12 +363,16 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const result = await apiRequest("/api/inbox/commit", {
         method: "POST",
-        body: JSON.stringify({ suggestion_ids: ids }),
+        body: JSON.stringify({
+          suggestion_ids: ids,
+          override_payload: buildOverridePayload(),
+        }),
       });
       if (currentEntryId) {
         const refreshed = await apiRequest(`/api/inbox/${currentEntryId}`);
         suggestions = refreshed.suggestions || [];
       }
+      await loadRelations();
       renderSuggestions();
       renderCommitResult(result);
       const createdTotal = Object.values(result.created || {}).reduce(
@@ -238,11 +396,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  loadRelations();
   analyzeBtn.addEventListener("click", analyze);
   clearBtn.addEventListener("click", () => {
     textInput.value = "";
     suggestions = [];
     currentEntryId = null;
+    Object.keys(overridePayloads).forEach((key) => delete overridePayloads[key]);
     commitResultEl.hidden = true;
     bulkActions.hidden = true;
     resultHint.textContent = "解析后在此预览，勾选需要归档的条目";

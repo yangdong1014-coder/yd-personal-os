@@ -280,6 +280,214 @@ def test_inbox_commit_skips_invalid_foreign_keys(client, monkeypatch):
     assert any("goal_id" in err for err in data["errors"])
 
 
+def test_inbox_chain_commit_project_task_parent_ref(client, monkeypatch):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "链式目标", "type": "季度"},
+    ).get_json()["data"]
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "project",
+                    "title": "AI修图项目",
+                    "content": "推进修图项目",
+                    "confidence": 0.9,
+                    "reason": "多步骤项目",
+                    "suggested_payload": {
+                        "name": "AI修图项目",
+                        "local_ref": "project_ai_retouche",
+                    },
+                },
+                {
+                    "target_type": "task",
+                    "title": "输出MVP流程图",
+                    "content": "明天输出流程图",
+                    "confidence": 0.9,
+                    "reason": "明确行动",
+                    "suggested_payload": {
+                        "name": "输出MVP流程图",
+                        "parent_ref": "project_ai_retouche",
+                        "status": "todo",
+                    },
+                },
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "推进 AI 修图项目并输出 MVP 流程图"},
+    ).get_json()["data"]
+    project_suggestion = next(
+        s for s in analyze["suggestions"] if s["target_type"] == "project"
+    )
+    ids = [s["id"] for s in analyze["suggestions"]]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={
+            "suggestion_ids": ids,
+            "override_payload": [
+                {"suggestion_id": project_suggestion["id"], "goal_id": goal["id"]}
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["projects"] == 1
+    assert data["created"]["tasks"] == 1
+    assert not data["errors"]
+
+    tasks = client.get("/api/tasks").get_json()["data"]
+    assert any(task["name"] == "输出MVP流程图" for task in tasks)
+
+
+def test_inbox_override_goal_id_for_project(client, monkeypatch):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "覆盖目标", "type": "年度"},
+    ).get_json()["data"]
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "project",
+                    "title": "覆盖项目",
+                    "content": "项目",
+                    "confidence": 0.9,
+                    "reason": "项目",
+                    "suggested_payload": {"name": "覆盖项目"},
+                }
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "项目测试"},
+    ).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={
+            "suggestion_ids": [suggestion_id],
+            "override_payload": [{"suggestion_id": suggestion_id, "goal_id": goal["id"]}],
+        },
+    )
+    assert response.get_json()["data"]["created"]["projects"] == 1
+
+
+def test_inbox_override_project_id_for_task(client, monkeypatch):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "任务覆盖目标", "type": "季度"},
+    ).get_json()["data"]
+    project = client.post(
+        "/api/projects",
+        json={"goal_id": goal["id"], "name": "任务覆盖项目"},
+    ).get_json()["data"]
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "task",
+                    "title": "覆盖任务",
+                    "content": "任务",
+                    "confidence": 0.9,
+                    "reason": "任务",
+                    "suggested_payload": {"name": "覆盖任务", "status": "todo"},
+                }
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "任务测试"},
+    ).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={
+            "suggestion_ids": [suggestion_id],
+            "override_payload": [
+                {"suggestion_id": suggestion_id, "project_id": project["id"]}
+            ],
+        },
+    )
+    assert response.get_json()["data"]["created"]["tasks"] == 1
+
+
+def test_inbox_override_ignores_sensitive_fields(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "goal",
+                    "title": "原始目标名",
+                    "content": "目标",
+                    "confidence": 0.9,
+                    "reason": "目标",
+                    "suggested_payload": {"name": "原始目标名", "type": "季度"},
+                }
+            ]
+        },
+    )
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "敏感字段测试"},
+    ).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={
+            "suggestion_ids": [suggestion_id],
+            "override_payload": [
+                {
+                    "suggestion_id": suggestion_id,
+                    "name": "被篡改的名称",
+                    "type": "当前主线",
+                }
+            ],
+        },
+    )
+    data = response.get_json()["data"]
+    assert data["created"]["goals"] == 1
+    goals = client.get("/api/goals").get_json()["data"]
+    created = next(g for g in goals if g["name"] == "原始目标名")
+    assert created["type"] == "季度"
+
+
+def test_inbox_list_entries(client, monkeypatch):
+    monkeypatch.setattr(ai_service, "analyze_inbox_text", lambda text: _mock_ai_items())
+    client.post("/api/inbox/analyze", json={"text": "历史列表测试文本"})
+    response = client.get("/api/inbox")
+    assert response.status_code == 200
+    entries = response.get_json()["data"]
+    assert len(entries) >= 1
+    entry = entries[0]
+    assert "raw_text_summary" in entry
+    assert "suggestion_count" in entry
+    assert "committed_count" in entry
+    assert "pending_count" in entry
+    assert "rejected_count" in entry
+
+
+def test_inbox_history_page(client):
+    response = client.get("/inbox/history")
+    assert response.status_code == 200
+    assert "归档历史" in response.get_data(as_text=True)
+
+
 def test_inbox_normalize_low_confidence_to_uncertain():
     items = inbox_service._normalize_ai_items(
         [

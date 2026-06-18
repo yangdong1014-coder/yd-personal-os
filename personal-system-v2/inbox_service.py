@@ -101,9 +101,11 @@ def get_inbox_detail(entry_id):
     }
 
 
-def commit_suggestions(suggestion_ids):
+def commit_suggestions(suggestion_ids, override_payload=None):
     try:
-        return database.commit_inbox_suggestions(suggestion_ids)
+        return database.commit_inbox_suggestions(
+            suggestion_ids, override_payload=override_payload
+        )
     except database.InboxError as exc:
         raise InboxServiceError(str(exc), getattr(exc, "stats", None)) from exc
     except ValueError as exc:

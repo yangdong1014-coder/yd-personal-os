@@ -57,9 +57,10 @@
 
 ## suggested_payload 字段提示
 
-- goal: name, type
-- project: name, goal_id（必须是已存在目标的**数字 ID**；无法确定时不要填 null 或名称，留空对象即可）
-- task: name, status（todo/doing/done 或 待处理/进行中/完成）, project_id（必须是已存在项目的**数字 ID**，不能填项目名称）
+- goal: name, type, local_ref（可选，同批临时引用）
+- project: name, goal_id（必须是已存在目标的**数字 ID**；无法确定时不要填 null 或名称）, local_ref（同批项目临时引用，如 project_ai_retouche）
+- task: name, status（todo/doing/done 或 待处理/进行中/完成）, project_id（仅当已知已存在项目时填数字 ID）, parent_ref（挂到同批项目的 local_ref，优先于 project_id 名称）
+- 同一段文本若同时有项目和任务：project 必须带 local_ref，task 用 parent_ref 指向该项目，不要伪造数字 ID
 - review: review_date, type, what_done, stuck, next_adjust, depositable
 - asset: title, core_content, asset_type, capability_tags, trigger_context
 - capability_entry: capability（模块名）, content, entry_date, level_type, source_project

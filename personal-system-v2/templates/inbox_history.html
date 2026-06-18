@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}归档历史 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">归档历史</h1>
+  <p class="page-subtitle">查看最近智能归档的原文与解析记录</p>
+  <span class="version-badge">{{ current_version }}</span>
+  <p class="form-hint"><a href="{{ url_for('inbox_page') }}">← 返回智能归档</a></p>
+</header>
+
+<div class="page-split page-split-wide">
+  <section class="section-card page-split-side">
+    <h2>最近记录</h2>
+    <p class="form-hint section-hint">显示最近 20 条 inbox 输入</p>
+    <div id="inbox-history-list" class="entity-list">
+      <div class="empty-state">加载中…</div>
+    </div>
+  </section>
+
+  <section class="section-card page-split-main">
+    <h2>详情</h2>
+    <div id="inbox-history-detail" class="inbox-history-detail">
+      <div class="empty-state">
+        <strong>选择一条记录</strong>
+        点击左侧列表查看原文与建议状态
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inbox_history.js') }}"></script>
+{% endblock %}
