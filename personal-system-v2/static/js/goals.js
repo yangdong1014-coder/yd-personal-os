@@ -140,13 +140,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const deleteGoalBtn = card.querySelector(".btn-delete-goal");
       deleteGoalBtn.addEventListener("click", async () => {
         const projectCount = goalProjects.length;
-        const taskHint =
+        const countHint =
           projectCount > 0
-            ? `将同时删除其下 ${projectCount} 个项目及关联任务。`
+            ? `（当前含 ${projectCount} 个项目及下属任务）`
             : "";
         if (
           !window.confirm(
-            `确定删除目标「${goal.name}」？${taskHint}此操作不可撤销。`
+            `确定删除目标「${goal.name}」？${countHint}\n\n删除目标将级联删除其下所有项目与任务，操作不可撤销。`
           )
         ) {
           return;
@@ -166,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (!project) return;
           if (
             !window.confirm(
-              `确定删除项目「${project.name}」？将同时删除其下所有任务。此操作不可撤销。`
+              `确定删除项目「${project.name}」？\n\n删除项目将级联删除其下所有任务，操作不可撤销。`
             )
           ) {
             return;

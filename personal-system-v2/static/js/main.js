@@ -77,7 +77,11 @@ async function handleImport(event) {
 
   if (
     !window.confirm(
-      "导入将合并备份数据（相同 id 更新，相同内容跳过）。确定继续？"
+      "当前为合并导入模式：\n" +
+        "· 按 id 更新或跳过记录，不会自动清空现有数据\n" +
+        "· 同 id 且内容不同的记录将被覆盖更新\n" +
+        "· 建议导入前先导出当前备份\n\n" +
+        "确定继续导入？"
     )
   ) {
     return;
@@ -113,9 +117,9 @@ async function handleImport(event) {
     }
 
     const stats = result.data;
-    alert(
-      `导入完成：新增/更新 ${stats.imported} 条，跳过 ${stats.skipped} 条`
-    );
+    const failed = stats.failed || 0;
+    const summary = `导入完成：新增/更新 ${stats.imported} 条，跳过 ${stats.skipped} 条`;
+    alert(failed > 0 ? `${summary}，失败 ${failed} 条` : summary);
   } catch (err) {
     alert(err.message || "导入失败，请稍后重试");
   } finally {

@@ -2,7 +2,7 @@
 
 本地优先的个人操作系统。Flask + SQLite + 原生 HTML/CSS/JS，可选接入 DeepSeek API。
 
-**当前版本：v1.8**
+**当前版本：v1.8.1**
 
 ## 主要模块
 
@@ -54,7 +54,26 @@ python app.py
 
 导航栏右侧「导出备份」按钮，或请求 `GET /api/export`，下载 JSON 备份。
 
-「导入恢复」按钮或 `POST /api/import`（请求体为导出 JSON）可合并恢复数据：相同 id 且内容一致则跳过，内容不同则更新，不存在则插入。导入失败时事务回滚，不破坏已有数据。
+「导入恢复」按钮或 `POST /api/import`（请求体为导出 JSON）采用**合并导入**：
+
+- 按 `id` 判断：不存在则插入，存在且内容相同则跳过，存在且内容不同则更新
+- **不会自动清空**现有数据；误导入错误备份可能覆盖同 id 记录
+- **建议导入前先导出当前备份**
+- 导入失败时事务回滚，不破坏已有数据
+- 接口返回 `{ imported, skipped, failed, errors }`
+
+## 数据删除
+
+各列表页提供删除按钮，操作前需确认，**不可撤销**：
+
+| 对象 | 级联行为 |
+|------|----------|
+| 目标 (goal) | 级联删除其下所有项目与任务 |
+| 项目 (project) | 级联删除其下所有任务 |
+| 复盘 (review) | 关联资产的 `source_review_id` 置为 NULL，资产本身保留 |
+| 任务 / 资产 / 能力记录 | 无子表级联 |
+
+外键约束由 `PRAGMA foreign_keys = ON` 保障，不会产生孤儿数据。
 
 ## 测试
 
@@ -64,7 +83,9 @@ pip install -r requirements.txt
 pytest
 ```
 
-测试使用临时 SQLite 数据库（`YD_OS_DB_PATH` / fixture 覆盖），不依赖生产 `data/yd_os.db`。
+- 测试使用**临时 SQLite 数据库**，不依赖生产 `data/yd_os.db`
+- pytest fixture 会覆盖 `database.DB_PATH`；也可通过环境变量 `YD_OS_DB_PATH` 指定数据库路径
+- 覆盖首页/changelog、列表、删除（含级联）、导入（去重/回滚）等基础回归
 
 ## 版本记录
 
@@ -72,7 +93,7 @@ pytest
 - `changelog.json` 中 `current` 字段为当前正式版号
 - 页面版本徽章统一读取 `changelog.current`
 
-版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ **v1.8**（布局与体验升级）
+版本线：v1.0（数据导出）→ v1.1–v1.4（AI Phase 1–4）→ v1.5（提示词管理）→ v1.6（模型选择）→ v1.7（提示词 AI 生成）→ v1.8（布局与体验升级）→ **v1.8.1**（数据能力闭环收口）
 
 ## 目录结构
 
