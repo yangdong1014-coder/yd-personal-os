@@ -1,0 +1,2 @@
+复盘类型：{review_type}
+今天做了什么：{what_done}

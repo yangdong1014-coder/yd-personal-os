@@ -5,8 +5,10 @@ from openai import APIConnectionError, APIStatusError, OpenAI
 
 import config
 import database
+from prompts import load as load_prompt
 
 CAPABILITY_LIST = "、".join(database.CAPABILITY_MODULES)
+ASSET_TYPE_LIST = "、".join(database.ASSET_TYPES)
 
 
 class AIServiceError(Exception):
@@ -68,19 +70,22 @@ def refine_review_to_asset(review_id):
     if not review:
         raise AIServiceError("复盘记录不存在")
 
-    system_prompt = f"""你是个人知识资产提炼助手。根据复盘内容生成一张知识卡片草稿。
-只输出 JSON，字段：
-- title: 字符串，简洁标题
-- core_content: 字符串，结构化核心知识（可分点）
-- capability_tags: 字符串数组，从以下模块选 1-3 个：{CAPABILITY_LIST}
-- trigger_context: 字符串，这张卡片从什么事情来的（概括复盘情境）"""
-
-    user_prompt = f"""复盘日期：{review.get('review_date', '')}
-复盘类型：{review.get('type', '')}
-今天做了什么：{review.get('what_done', '')}
-卡住了什么：{review.get('stuck', '')}
-下一步调整：{review.get('next_adjust', '')}
-可沉淀内容：{review.get('depositable', '')}"""
+    system_prompt = load_prompt(
+        "reviews",
+        "refine-to-asset",
+        capability_list=CAPABILITY_LIST,
+    )
+    user_prompt = load_prompt(
+        "reviews",
+        "refine-to-asset",
+        kind="user",
+        review_date=review.get("review_date", ""),
+        review_type=review.get("type", ""),
+        what_done=review.get("what_done", ""),
+        stuck=review.get("stuck", ""),
+        next_adjust=review.get("next_adjust", ""),
+        depositable=review.get("depositable", ""),
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -104,16 +109,15 @@ def optimize_asset(asset_id):
     if not asset:
         raise AIServiceError("知识卡片不存在")
 
-    system_prompt = """你是个人知识资产优化助手。对现有知识卡片进行润色和结构化。
-保持原意，提升清晰度、可复用性与结构层次。
-只输出 JSON，字段：
-- title: 优化后的标题
-- trigger_context: 优化后的触发情境
-- core_content: 优化后的核心内容（可分点、小标题）"""
-
-    user_prompt = f"""标题：{asset.get('title', '')}
-触发情境：{asset.get('trigger_context', '')}
-核心内容：{asset.get('core_content', '')}"""
+    system_prompt = load_prompt("assets", "optimize")
+    user_prompt = load_prompt(
+        "assets",
+        "optimize",
+        kind="user",
+        title=asset.get("title", ""),
+        trigger_context=asset.get("trigger_context", ""),
+        core_content=asset.get("core_content", ""),
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -169,14 +173,7 @@ def _format_dashboard_context():
 
 def dashboard_briefing():
     context = _format_dashboard_context()
-
-    system_prompt = """你是个人作战指挥助手。根据用户当前目标、项目、任务与复盘，生成今日作战简报。
-语气简洁、可执行，避免空话。
-只输出 JSON，字段：
-- briefing: 字符串，3-5句话的总览简报
-- priorities: 字符串数组，今日优先事项 1-3 条
-- focus: 字符串，一句话今日最重要的一件事"""
-
+    system_prompt = load_prompt("dashboard", "briefing")
     data = _chat_json(system_prompt, context)
 
     briefing = (data.get("briefing") or "").strip()
@@ -205,15 +202,15 @@ def decompose_goal_projects(goal_id):
     existing = database.list_projects(goal_id)
     existing_names = [p["name"] for p in existing]
 
-    system_prompt = """你是目标拆解助手。将目标拆解为可执行的项目（不是任务）。
-每个项目应是可独立推进的工作包，名称简洁（2-12字）。
-避免与已有项目重复。
-只输出 JSON，字段：
-- projects: 对象数组，每项含 name（项目名）和 reason（一句话说明为何需要）"""
-
-    user_prompt = f"""目标名称：{goal['name']}
-目标类型：{goal['type']}
-已有项目：{', '.join(existing_names) if existing_names else '无'}"""
+    system_prompt = load_prompt("goals", "decompose-projects")
+    user_prompt = load_prompt(
+        "goals",
+        "decompose-projects",
+        kind="user",
+        goal_name=goal["name"],
+        goal_type=goal["type"],
+        existing_projects=", ".join(existing_names) if existing_names else "无",
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -252,16 +249,16 @@ def decompose_project_tasks(project_id):
     existing = database.list_tasks(project_id)
     existing_names = [t["name"] for t in existing]
 
-    system_prompt = """你是任务拆解助手。将项目拆解为可执行的具体任务（不是子项目）。
-每个任务应是今天或本周可推进的动作，名称简洁（2-20字）。
-可建议优先级：高 / 中 / 低（仅作参考，不写入系统）。
-避免与已有任务重复。
-只输出 JSON，字段：
-- tasks: 对象数组，每项含 name（任务名）、priority（高/中/低）、reason（一句话说明）"""
-
-    user_prompt = f"""项目名称：{project['name']}
-所属目标：{project['goal_name']}（{project['goal_type']}）
-已有任务：{', '.join(existing_names) if existing_names else '无'}"""
+    system_prompt = load_prompt("tasks", "decompose-tasks")
+    user_prompt = load_prompt(
+        "tasks",
+        "decompose-tasks",
+        kind="user",
+        project_name=project["name"],
+        goal_name=project["goal_name"],
+        goal_type=project["goal_type"],
+        existing_tasks=", ".join(existing_names) if existing_names else "无",
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -319,11 +316,7 @@ def recommend_today_tasks():
             f"{t['goal_name']}/{t['project_name']}"
         )
 
-    system_prompt = """你是个人任务优先级助手。从给定的未完成任务中，推荐今日最应推进的 1-3 项。
-优先：与主线目标相关、状态为进行中、阻塞后续工作的任务。
-只输出 JSON，字段：
-- recommendations: 对象数组，每项含 task_id（整数，必须来自列表中的 id）、reason（一句话推荐理由）"""
-
+    system_prompt = load_prompt("tasks", "recommend-today")
     data = _chat_json(system_prompt, "\n".join(lines))
 
     recommendations = data.get("recommendations") or []
@@ -386,15 +379,14 @@ def complete_review_fields(what_done, review_type="每日"):
     if not what_done:
         raise AIServiceError("请先填写「今天做了什么」")
 
-    system_prompt = """你是复盘补全助手。根据用户描述的今日事项，合理补全复盘字段。
-语气具体、可执行，避免空话。可合理推断卡点，但不要编造未提及的重大事件。
-只输出 JSON，字段：
-- stuck: 字符串，可能的卡点与原因
-- next_adjust: 字符串，下一步调整建议
-- depositable: 字符串，可沉淀为知识资产的内容（无则空字符串）"""
-
-    user_prompt = f"""复盘类型：{review_type or '每日'}
-今天做了什么：{what_done}"""
+    system_prompt = load_prompt("reviews", "complete-fields")
+    user_prompt = load_prompt(
+        "reviews",
+        "complete-fields",
+        kind="user",
+        review_type=review_type or "每日",
+        what_done=what_done,
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -449,20 +441,22 @@ def classify_asset(asset_id):
     if not asset:
         raise AIServiceError("知识卡片不存在")
 
-    asset_types = "、".join(database.ASSET_TYPES)
-    system_prompt = f"""你是知识资产归类助手。根据卡片内容建议资产类型与能力标签。
-资产类型从以下选择：{asset_types}
-能力标签从以下选 1-3 个：{CAPABILITY_LIST}
-只输出 JSON，字段：
-- asset_type: 字符串
-- capability_tags: 字符串数组
-- reason: 一句话归类理由"""
-
-    user_prompt = f"""标题：{asset.get('title', '')}
-当前类型：{asset.get('asset_type', '')}
-当前标签：{', '.join(asset.get('capability_tags') or []) or '无'}
-触发情境：{asset.get('trigger_context', '')}
-核心内容：{asset.get('core_content', '')}"""
+    system_prompt = load_prompt(
+        "assets",
+        "classify",
+        asset_types=ASSET_TYPE_LIST,
+        capability_list=CAPABILITY_LIST,
+    )
+    user_prompt = load_prompt(
+        "assets",
+        "classify",
+        kind="user",
+        title=asset.get("title", ""),
+        asset_type=asset.get("asset_type", ""),
+        capability_tags=", ".join(asset.get("capability_tags") or []) or "无",
+        trigger_context=asset.get("trigger_context", ""),
+        core_content=asset.get("core_content", ""),
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -488,17 +482,16 @@ def template_asset(asset_id, target_type):
     if target_type not in allowed:
         raise AIServiceError("目标类型仅支持 SOP 或 提示词")
 
-    system_prompt = f"""你是知识资产模板化助手。将知识卡片改写为「{target_type}」格式。
-保持核心知识不丢失，按该类型最佳实践组织结构。
-只输出 JSON，字段：
-- title: 改写后标题
-- trigger_context: 适用情境/使用场景
-- core_content: 按{target_type}格式组织的正文"""
-
-    user_prompt = f"""原标题：{asset.get('title', '')}
-原类型：{asset.get('asset_type', '')}
-触发情境：{asset.get('trigger_context', '')}
-核心内容：{asset.get('core_content', '')}"""
+    system_prompt = load_prompt("assets", "template", target_type=target_type)
+    user_prompt = load_prompt(
+        "assets",
+        "template",
+        kind="user",
+        title=asset.get("title", ""),
+        asset_type=asset.get("asset_type", ""),
+        trigger_context=asset.get("trigger_context", ""),
+        core_content=asset.get("core_content", ""),
+    )
 
     data = _chat_json(system_prompt, user_prompt)
 
@@ -521,13 +514,7 @@ def attribute_capability(module):
         raise AIServiceError("无效的能力模块")
 
     context = _format_capability_context()
-    system_prompt = f"""你是个人能力归因助手。根据用户近期任务、复盘与资产，为「{module}」模块建议一条进展记录。
-只输出 JSON，字段：
-- content: 进展记录内容（具体、可回溯）
-- level_type: 能力层 或 应用层
-- source_project: 来源项目建议（格式：目标名 / 项目名，无则空字符串）
-- reason: 一句话说明为何归入此模块"""
-
+    system_prompt = load_prompt("capabilities", "attribute", module=module)
     data = _chat_json(system_prompt, context)
 
     content = (data.get("content") or "").strip()
@@ -568,14 +555,7 @@ def diagnose_capabilities():
             f"- {module}：共{s['total']}条，能力层{s['能力层']}，应用层{s['应用层']}"
         )
 
-    system_prompt = """你是个人能力诊断助手。根据八模块历史记录统计，分析能力层与应用层的失衡。
-语气具体、可执行，避免空话。
-只输出 JSON，字段：
-- summary: 字符串，3-5句话总览诊断
-- imbalances: 字符串数组，1-3条失衡提示
-- focus_module: 字符串，本周最应关注的模块名
-- focus_action: 字符串，针对该模块的一句话行动建议"""
-
+    system_prompt = load_prompt("capabilities", "diagnose")
     data = _chat_json(system_prompt, "\n".join(lines))
 
     summary = (data.get("summary") or "").strip()
@@ -628,15 +608,7 @@ def aggregate_weekly_reviews(review_ids):
         if review.get("depositable"):
             lines.append(f"可沉淀：{review.get('depositable', '')}")
 
-    system_prompt = """你是周复盘聚合助手。将多条日复盘整合为一条「每周」复盘草稿。
-提炼共性进展、主要卡点、下周调整方向，合并可沉淀内容。
-语气具体、可执行，避免简单拼接。
-只输出 JSON，字段：
-- what_done: 字符串，本周主要推进事项
-- stuck: 字符串，本周主要卡点
-- next_adjust: 字符串，下周调整方向
-- depositable: 字符串，本周可沉淀内容（无则空字符串）"""
-
+    system_prompt = load_prompt("reviews", "aggregate-weekly")
     data = _chat_json(system_prompt, "\n".join(lines))
 
     what_done = (data.get("what_done") or "").strip()
@@ -687,14 +659,7 @@ def dispatch_dashboard_actions():
     else:
         lines.append("未完成任务：无")
 
-    system_prompt = """你是个人作战行动分发助手。根据指挥部状态，建议今日应执行的具体行动。
-分两类，每类 0-3 项，避免贪多：
-1. mark_today: 从未完成任务中选今日应推进的（task_id 整数，必须来自列表）
-2. new_tasks: 需新建的任务（project_id 整数必须来自项目列表，name 简洁 2-20字）
-只输出 JSON，字段：
-- mark_today: 对象数组，每项含 task_id、reason
-- new_tasks: 对象数组，每项含 project_id、name、reason"""
-
+    system_prompt = load_prompt("dashboard", "dispatch-actions")
     data = _chat_json(system_prompt, "\n".join(lines))
 
     mark_today = []

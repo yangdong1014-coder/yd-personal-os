@@ -1,0 +1,4 @@
+原标题：{title}
+原类型：{asset_type}
+触发情境：{trigger_context}
+核心内容：{core_content}

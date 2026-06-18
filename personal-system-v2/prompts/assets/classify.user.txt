@@ -1,0 +1,5 @@
+标题：{title}
+当前类型：{asset_type}
+当前标签：{capability_tags}
+触发情境：{trigger_context}
+核心内容：{core_content}

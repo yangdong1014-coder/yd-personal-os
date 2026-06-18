@@ -5,6 +5,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import ai_service
 import config
 import database
+from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
 
 app = Flask(__name__)
 
@@ -20,6 +21,7 @@ NAV_ITEMS = [
     {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
     {"endpoint": "assets", "label": "资产", "path": "/assets"},
     {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
+    {"endpoint": "prompts", "label": "提示词", "path": "/prompts"},
 ]
 
 
@@ -83,6 +85,16 @@ def capabilities():
         capability_modules=database.CAPABILITY_MODULES,
         capability_layers=database.CAPABILITY_LAYERS,
         level_types=database.LEVEL_TYPES,
+    )
+
+
+@app.route("/prompts")
+def prompts_page():
+    return render_template(
+        "prompts.html",
+        active_page="prompts",
+        nav_items=NAV_ITEMS,
+        prompt_modules=MODULES,
     )
 
 
@@ -414,6 +426,55 @@ def api_ai_dispatch_actions():
         result = ai_service.dispatch_dashboard_actions()
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/prompts", methods=["GET"])
+def api_list_prompts():
+    module = request.args.get("module") or None
+    items = list_prompts()
+    if module:
+        items = [item for item in items if item["module"] == module]
+    return jsonify({"ok": True, "data": items})
+
+
+@app.route("/api/ai/prompts/<module>/<scene>", methods=["GET"])
+def api_get_prompt(module, scene):
+    try:
+        system = read_raw(module, scene, "system")
+    except (PromptNotFoundError, ValueError) as exc:
+        return _error(str(exc), 404)
+
+    user = None
+    try:
+        user = read_raw(module, scene, "user")
+    except PromptNotFoundError:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "data": {
+            "module": module,
+            "scene": scene,
+            "system": system,
+            "user": user,
+        },
+    })
+
+
+@app.route("/api/ai/prompts/<module>/<scene>", methods=["PUT"])
+def api_save_prompt(module, scene):
+    payload = request.get_json(silent=True) or {}
+    kind = payload.get("kind", "system")
+    content = payload.get("content")
+    if content is None:
+        return _error("缺少 content")
+    if kind not in ("system", "user"):
+        return _error("kind 必须为 system 或 user")
+    try:
+        path = save_prompt(module, scene, kind, content)
+        return jsonify({"ok": True, "data": {"path": path}})
+    except ValueError as exc:
         return _error(str(exc))
 
 

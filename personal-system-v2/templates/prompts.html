@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}提示词 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">提示词管理</h1>
+  <p class="page-subtitle">按模块编辑 AI 场景提示词，保存后下次调用立即生效</p>
+  <span class="version-badge">v1.4-prompts</span>
+</header>
+
+<section class="section-card">
+  <h2>模块</h2>
+  <div class="filter-bar" id="module-filter">
+    {% set module_labels = {
+      'dashboard': '首页',
+      'goals': '目标',
+      'tasks': '任务',
+      'reviews': '复盘',
+      'assets': '资产',
+      'capabilities': '能力'
+    } %}
+    {% for m in prompt_modules %}
+    <button type="button" class="filter-chip{% if loop.first %} active{% endif %}" data-module="{{ m }}">
+      {{ module_labels.get(m, m) }}
+    </button>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section-card prompt-workspace">
+  <aside class="prompt-scene-list" id="scene-list">
+    <p class="prompt-list-hint">选择场景</p>
+  </aside>
+  <div class="prompt-editor" id="prompt-editor">
+    <div class="empty-state empty-state-compact">
+      <strong>选择左侧场景</strong>
+      编辑系统提示词与用户上下文模板
+    </div>
+  </div>
+</section>
+
+<p id="prompt-status" class="form-hint prompt-status" aria-live="polite"></p>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/prompts.js') }}"></script>
+{% endblock %}

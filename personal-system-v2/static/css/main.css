@@ -171,6 +171,106 @@ a {
   border: 0;
 }
 
+.prompt-workspace {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.prompt-scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
+  min-height: 320px;
+}
+
+.prompt-list-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.prompt-scene-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-scene-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+}
+
+.prompt-scene-item.active {
+  background: rgba(192, 96, 58, 0.1);
+  border-color: rgba(192, 96, 58, 0.35);
+}
+
+.prompt-scene-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.prompt-scene-meta {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.prompt-editor {
+  min-width: 0;
+}
+
+.prompt-editor-head {
+  margin-bottom: 1rem;
+}
+
+.prompt-editor-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.prompt-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.prompt-textarea {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.prompt-loading {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.prompt-status {
+  margin-top: 0.5rem;
+}
+
+.prompt-status-error {
+  color: #e07070;
+}
+
 .page-title {
   margin: 0 0 0.35rem;
   font-size: 1.5rem;
@@ -927,6 +1027,18 @@ a {
   .header-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .prompt-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-scene-list {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0;
+    padding-bottom: 1rem;
+    min-height: 0;
   }
 
   .entity-header {

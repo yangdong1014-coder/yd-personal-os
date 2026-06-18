@@ -1,0 +1,6 @@
+复盘日期：{review_date}
+复盘类型：{review_type}
+今天做了什么：{what_done}
+卡住了什么：{stuck}
+下一步调整：{next_adjust}
+可沉淀内容：{depositable}
