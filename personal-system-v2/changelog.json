@@ -1,8 +1,8 @@
 {
-  "current": "v1.13.0",
+  "current": "v1.14.1",
   "entries": [
     {
-      "version": "v1.13.0",
+      "version": "v1.14.1",
       "date": "2026-06-18",
       "title": "家庭服务器远程访问 MVP",
       "type": "feat",
