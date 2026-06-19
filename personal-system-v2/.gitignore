@@ -8,3 +8,14 @@ __pycache__/
 *.pyc
 venv/
 .env
+# Local secrets and runtime files
+.env
+.env.local
+.env.bak*
+.env.save
+.venv/
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+backups/
+*.log
