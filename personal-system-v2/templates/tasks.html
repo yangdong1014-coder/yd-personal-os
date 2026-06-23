@@ -33,7 +33,12 @@
       <h2>任务列表</h2>
       <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
     </div>
-    <div id="tasks-list" class="entity-list">
+    <div id="task-overview" class="task-overview" aria-live="polite"></div>
+    <div class="task-view-toggle" role="tablist" aria-label="任务视图">
+      <button type="button" class="btn btn-sm task-view-btn is-active" data-view="overview" aria-selected="true">总览模式</button>
+      <button type="button" class="btn btn-sm btn-ghost task-view-btn" data-view="project" aria-selected="false">按项目模式</button>
+    </div>
+    <div id="tasks-list" class="entity-list task-list">
       <div class="empty-state" id="tasks-empty">
         <strong>添加第一个任务</strong>
         选择项目并输入任务名称

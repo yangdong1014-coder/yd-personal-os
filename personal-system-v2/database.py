@@ -949,6 +949,21 @@ def list_assets(tag=None, asset_type=None):
 
 
 def update_asset(asset_id, **kwargs):
+    allowed_fields = {
+        "title",
+        "asset_type",
+        "capability_tags",
+        "maturity",
+        "summary",
+        "reusable_scenario",
+        "fields",
+        "trigger_context",
+        "core_content",
+    }
+    kwargs = {key: value for key, value in kwargs.items() if key in allowed_fields}
+    if not kwargs:
+        raise ValueError("没有可更新的资产字段")
+
     conn = get_connection()
     row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
     if not row:
@@ -1023,8 +1038,6 @@ def update_asset(asset_id, **kwargs):
         "capability_tags": json.dumps(tags, ensure_ascii=False),
         "updated_at": _now(),
     }
-    if "reuse_count" in kwargs and kwargs["reuse_count"] is not None:
-        updates["reuse_count"] = max(0, int(kwargs["reuse_count"]))
 
     set_clause = ", ".join(f"{key} = ?" for key in updates)
     conn.execute(

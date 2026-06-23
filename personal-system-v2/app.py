@@ -467,8 +467,22 @@ def api_create_asset():
 @app.route("/api/assets/<int:asset_id>", methods=["PATCH"])
 def api_update_asset(asset_id):
     payload = request.get_json(silent=True) or {}
+    allowed_fields = {
+        "title",
+        "asset_type",
+        "capability_tags",
+        "maturity",
+        "summary",
+        "reusable_scenario",
+        "fields",
+        "trigger_context",
+        "core_content",
+    }
+    update_payload = {
+        key: value for key, value in payload.items() if key in allowed_fields
+    }
     try:
-        asset = database.update_asset(asset_id, **payload)
+        asset = database.update_asset(asset_id, **update_payload)
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
         return _error(str(exc))

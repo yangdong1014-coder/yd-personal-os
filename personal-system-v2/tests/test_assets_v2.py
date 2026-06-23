@@ -86,3 +86,68 @@ def test_increment_reuse_count(client):
     ).get_json()["data"]
     updated = client.post(f"/api/assets/{created['id']}/reuse").get_json()["data"]
     assert updated["reuse_count"] == 1
+
+
+def test_update_asset_editable_fields_preserves_system_fields(client, monkeypatch):
+    now_values = iter(
+        [
+            "2026-06-23 01:00:00",
+            "2026-06-23 01:30:00",
+            "2026-06-23 02:00:00",
+        ]
+    )
+    monkeypatch.setattr(database, "_now", lambda: next(now_values))
+
+    created = client.post(
+        "/api/assets",
+        json={
+            "title": "待编辑资产",
+            "asset_type": "本质洞察",
+            "maturity": "草稿",
+            "fields": {"底层本质": "旧本质"},
+            "reusable_scenario": "旧场景",
+            "capability_tags": ["本质力"],
+        },
+    ).get_json()["data"]
+    reused = client.post(f"/api/assets/{created['id']}/reuse").get_json()["data"]
+    assert reused["reuse_count"] == 1
+
+    response = client.patch(
+        f"/api/assets/{created['id']}",
+        json={
+            "id": 99999,
+            "created_at": "1999-01-01 00:00:00",
+            "reuse_count": 999,
+            "title": "已编辑资产",
+            "asset_type": "方法论",
+            "maturity": "稳定",
+            "summary": "",
+            "fields": {
+                "解决的问题": "重复思考",
+                "核心原则": "先抽象再执行",
+                "操作流程": "收集事实\n提炼原则",
+            },
+            "reusable_scenario": "方案复盘",
+            "capability_tags": ["产品力", "不存在的能力"],
+        },
+    )
+
+    assert response.status_code == 200
+    asset = response.get_json()["data"]
+    assert asset["id"] == created["id"]
+    assert asset["created_at"] == created["created_at"]
+    assert asset["reuse_count"] == 1
+    assert asset["updated_at"] == "2026-06-23 02:00:00"
+    assert asset["updated_at"] != created["updated_at"]
+    assert asset["title"] == "已编辑资产"
+    assert asset["asset_type"] == "方法论"
+    assert asset["maturity"] == "稳定"
+    assert asset["fields"]["核心原则"] == "先抽象再执行"
+    assert asset["reusable_scenario"] == "方案复盘"
+    assert asset["capability_tags"] == ["产品力"]
+    assert asset["summary"] == "先抽象再执行"
+
+    assets = client.get("/api/assets").get_json()["data"]
+    listed = next(item for item in assets if item["id"] == created["id"])
+    assert listed["title"] == "已编辑资产"
+    assert listed["fields"]["核心原则"] == "先抽象再执行"
