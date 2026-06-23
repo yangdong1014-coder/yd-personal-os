@@ -19,6 +19,82 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
+  function buildGoalTypeOptions(selected) {
+    return (window.GOAL_TYPES || [])
+      .map(
+        (t) =>
+          `<option value="${escapeAttr(t)}"${t === selected ? " selected" : ""}>${escapeHtml(t)}</option>`
+      )
+      .join("");
+  }
+
+  function openGoalEditModal(goal) {
+    showAIModal({
+      title: `编辑目标 — ${goal.name}`,
+      bodyHtml: `
+        <div class="stacked-form">
+          <label class="form-row">
+            <span class="form-label">目标名称</span>
+            <input type="text" id="edit-goal-name" class="input full-width" value="${escapeAttr(goal.name)}" required>
+          </label>
+          <label class="form-row">
+            <span class="form-label">目标类型</span>
+            <select id="edit-goal-type" class="select full-width">${buildGoalTypeOptions(goal.type)}</select>
+          </label>
+        </div>
+      `,
+      confirmLabel: "保存",
+      loadingLabel: "保存中…",
+      onConfirm: async () => {
+        const name = document.getElementById("edit-goal-name").value.trim();
+        const type = document.getElementById("edit-goal-type").value;
+        if (!name) {
+          throw new Error("目标名称不能为空");
+        }
+        if (type === "当前主线" && type !== goal.type) {
+          const existing = findMainline(cachedGoals, goal.id);
+          if (existing && !confirmMainlineSwitch(existing)) {
+            throw new Error("已取消切换当前主线");
+          }
+        }
+        await apiRequest(`/api/goals/${goal.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name, type }),
+        });
+        showToast("目标已更新", "success");
+        await loadGoals();
+      },
+    });
+  }
+
+  function openProjectEditModal(project) {
+    showAIModal({
+      title: `编辑项目 — ${project.name}`,
+      bodyHtml: `
+        <div class="stacked-form">
+          <label class="form-row">
+            <span class="form-label">项目名称</span>
+            <input type="text" id="edit-project-name" class="input full-width" value="${escapeAttr(project.name)}" required>
+          </label>
+        </div>
+      `,
+      confirmLabel: "保存",
+      loadingLabel: "保存中…",
+      onConfirm: async () => {
+        const name = document.getElementById("edit-project-name").value.trim();
+        if (!name) {
+          throw new Error("项目名称不能为空");
+        }
+        await apiRequest(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+        showToast("项目已更新", "success");
+        await loadGoals();
+      },
+    });
+  }
+
   async function handleAIDecompose(goal, button) {
     const prevText = button.textContent;
     button.disabled = true;
@@ -84,15 +160,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const goalTypes = window.GOAL_TYPES || [];
-    const typeOptions = (selected) =>
-      goalTypes
-        .map(
-          (t) =>
-            `<option value="${escapeHtml(t)}"${t === selected ? " selected" : ""}>${escapeHtml(t)}</option>`
-        )
-        .join("");
-
     goals.forEach((goal) => {
       const card = document.createElement("article");
       card.className = "entity-card";
@@ -104,10 +171,11 @@ document.addEventListener("DOMContentLoaded", () => {
         <div class="entity-header">
           <div>
             <h3 class="entity-title">${escapeHtml(goal.name)}</h3>
-            <select class="select goal-type-select" title="修改目标类型">${typeOptions(goal.type)}</select>
+            <select class="select goal-type-select" title="修改目标类型">${buildGoalTypeOptions(goal.type)}</select>
           </div>
           <div class="card-actions">
             <button type="button" class="btn btn-sm btn-ai">AI拆解</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-edit-goal">编辑</button>
             <button type="button" class="btn btn-sm btn-ghost btn-delete-goal">删除</button>
           </div>
         </div>
@@ -119,7 +187,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 (p) => `
               <li class="nested-item">
                 <span>${escapeHtml(p.name)}</span>
-                <button type="button" class="btn btn-sm btn-ghost btn-delete-project" data-project-id="${p.id}">删除</button>
+                <div class="nested-item-actions">
+                  <button type="button" class="btn btn-sm btn-ghost btn-edit-project" data-project-id="${p.id}">编辑</button>
+                  <button type="button" class="btn btn-sm btn-ghost btn-delete-project" data-project-id="${p.id}">删除</button>
+                </div>
               </li>`
               )
               .join("")}
@@ -135,6 +206,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const aiBtn = card.querySelector(".btn-ai");
       aiBtn.addEventListener("click", (e) => {
         handleAIDecompose(goal, e.currentTarget);
+      });
+
+      card.querySelector(".btn-edit-goal").addEventListener("click", () => {
+        openGoalEditModal(goal);
+      });
+
+      card.querySelectorAll(".btn-edit-project").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const projectId = parseInt(btn.dataset.projectId, 10);
+          const project = goalProjects.find((p) => p.id === projectId);
+          if (project) openProjectEditModal(project);
+        });
       });
 
       const deleteGoalBtn = card.querySelector(".btn-delete-goal");

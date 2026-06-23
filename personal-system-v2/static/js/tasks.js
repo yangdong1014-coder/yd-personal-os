@@ -32,6 +32,48 @@ document.addEventListener("DOMContentLoaded", () => {
     return task.today_progress === 1 && task.today_progress_date === today;
   }
 
+  function buildStatusOptions(selected) {
+    return (window.TASK_STATUSES || [])
+      .map(
+        (s) =>
+          `<option value="${escapeAttr(s)}"${s === selected ? " selected" : ""}>${escapeHtml(s)}</option>`
+      )
+      .join("");
+  }
+
+  function openTaskEditModal(task) {
+    showAIModal({
+      title: `编辑任务 — ${task.name}`,
+      bodyHtml: `
+        <div class="stacked-form">
+          <label class="form-row">
+            <span class="form-label">任务名称</span>
+            <input type="text" id="edit-task-name" class="input full-width" value="${escapeAttr(task.name)}" required>
+          </label>
+          <label class="form-row">
+            <span class="form-label">任务状态</span>
+            <select id="edit-task-status" class="select full-width">${buildStatusOptions(task.status)}</select>
+          </label>
+        </div>
+      `,
+      confirmLabel: "保存",
+      loadingLabel: "保存中…",
+      onConfirm: async () => {
+        const name = document.getElementById("edit-task-name").value.trim();
+        const status = document.getElementById("edit-task-status").value;
+        if (!name) {
+          throw new Error("任务名称不能为空");
+        }
+        await apiRequest(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name, status }),
+        });
+        showToast("任务已更新", "success");
+        await loadTasks();
+      },
+    });
+  }
+
   async function handleAIDecompose(button) {
     const projectId = parseInt(projectSelect.value, 10);
     if (!projectId) return;
@@ -113,7 +155,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadTasks() {
     const tasks = await apiRequest("/api/tasks");
-    const statuses = window.TASK_STATUSES || [];
 
     tasksList.innerHTML = "";
 
@@ -132,12 +173,7 @@ document.addEventListener("DOMContentLoaded", () => {
       row.className = "task-row";
       row.dataset.taskId = task.id;
 
-      const statusOptions = statuses
-        .map(
-          (s) =>
-            `<option value="${s}"${s === task.status ? " selected" : ""}>${s}</option>`
-        )
-        .join("");
+      const statusOptions = buildStatusOptions(task.status);
 
       const todayChecked = isTodayProgress(task) ? " checked" : "";
 
@@ -152,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <span>今日推进</span>
           </label>
           <select class="select status-select">${statusOptions}</select>
+          <button type="button" class="btn btn-sm btn-ghost btn-edit-task">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-delete-task">删除</button>
         </div>
       `;
@@ -168,6 +205,10 @@ document.addEventListener("DOMContentLoaded", () => {
           todayCheckbox.checked = !enabled;
           showToast(err.message, "error");
         }
+      });
+
+      row.querySelector(".btn-edit-task").addEventListener("click", () => {
+        openTaskEditModal(task);
       });
 
       const deleteBtn = row.querySelector(".btn-delete-task");

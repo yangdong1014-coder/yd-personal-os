@@ -186,11 +186,11 @@ def _format_dashboard_context():
 
     projects = dashboard.get("week_projects") or []
     if projects:
-        lines.append("本周进行中项目：" + "；".join(
+        lines.append("进行中的项目：" + "；".join(
             f"{p['name']}（所属：{p['goal_name']}）" for p in projects
         ))
     else:
-        lines.append("本周进行中项目：无")
+        lines.append("进行中的项目：无")
 
     tasks = dashboard.get("today_tasks") or []
     if tasks:

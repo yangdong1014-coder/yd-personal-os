@@ -339,18 +339,38 @@ def create_goal(name, goal_type):
     return _row_to_dict(row)
 
 
-def update_goal(goal_id, goal_type):
-    if goal_type not in GOAL_TYPES:
-        raise ValueError("无效的目标类型")
-
+def update_goal(goal_id, payload):
+    payload = payload or {}
     conn = get_connection()
-    existing = conn.execute("SELECT id FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    existing = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
     if not existing:
         conn.close()
         raise ValueError("目标不存在")
 
-    conn.execute("UPDATE goals SET type = ? WHERE id = ?", (goal_type, goal_id))
-    if goal_type == "当前主线":
+    updates = {}
+    if "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            conn.close()
+            raise ValueError("目标名称不能为空")
+        updates["name"] = name
+    if "type" in payload:
+        goal_type = payload.get("type")
+        if goal_type not in GOAL_TYPES:
+            conn.close()
+            raise ValueError("无效的目标类型")
+        updates["type"] = goal_type
+
+    if not updates:
+        conn.close()
+        raise ValueError("没有可更新的目标字段")
+
+    assignments = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE goals SET {assignments} WHERE id = ?",
+        (*updates.values(), goal_id),
+    )
+    if updates.get("type") == "当前主线":
         _demote_other_mainline_goals(conn, goal_id)
     conn.commit()
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
@@ -398,6 +418,40 @@ def create_project(goal_id, name):
 
 def get_project(project_id):
     conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT p.*, g.name AS goal_name, g.type AS goal_type
+        FROM projects p
+        JOIN goals g ON g.id = p.goal_id
+        WHERE p.id = ?
+        """,
+        (project_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def update_project(project_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT id FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("项目不存在")
+
+    if "name" not in payload:
+        conn.close()
+        raise ValueError("没有可更新的项目字段")
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        conn.close()
+        raise ValueError("项目名称不能为空")
+
+    conn.execute("UPDATE projects SET name = ? WHERE id = ?", (name, project_id))
+    conn.commit()
     row = conn.execute(
         """
         SELECT p.*, g.name AS goal_name, g.type AS goal_type
@@ -511,6 +565,43 @@ def list_tasks(project_id=None):
     return [_row_to_dict(r) for r in rows]
 
 
+def update_task(task_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("任务不存在")
+
+    updates = {}
+    if "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            conn.close()
+            raise ValueError("任务名称不能为空")
+        updates["name"] = name
+    if "status" in payload:
+        status = payload.get("status")
+        if status not in TASK_STATUSES:
+            conn.close()
+            raise ValueError("无效的任务状态")
+        updates["status"] = status
+
+    if not updates:
+        conn.close()
+        raise ValueError("没有可更新的任务字段")
+
+    assignments = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE tasks SET {assignments} WHERE id = ?",
+        (*updates.values(), task_id),
+    )
+    conn.commit()
+    row = _fetch_task(conn, task_id)
+    conn.close()
+    return _row_to_dict(row)
+
+
 def update_task_status(task_id, status):
     if status not in TASK_STATUSES:
         raise ValueError("无效的任务状态")
@@ -573,30 +664,39 @@ def get_mainline_goal():
     return _row_to_dict(row)
 
 
-def list_week_active_projects():
-    week_start = _week_start_local()
+def list_active_projects():
+    today = _today_local()
     conn = get_connection()
     rows = conn.execute(
         """
-        SELECT DISTINCT p.*, g.name AS goal_name
+        SELECT
+            p.*,
+            g.name AS goal_name,
+            MAX(
+                CASE
+                    WHEN t.today_progress = 1 AND t.today_progress_date = ? THEN 1
+                    ELSE 0
+                END
+            ) AS has_today_progress,
+            MAX(CASE WHEN t.status = '进行中' THEN 1 ELSE 0 END) AS has_doing_task,
+            SUM(
+                CASE
+                    WHEN t.status IN ('待处理', '进行中') THEN 1
+                    ELSE 0
+                END
+            ) AS active_task_count
         FROM projects p
         JOIN goals g ON g.id = p.goal_id
-        WHERE EXISTS (
-            SELECT 1 FROM tasks t
-            WHERE t.project_id = p.id
-            AND t.status IN ('待处理', '进行中')
-        )
-        AND (
-            date(p.created_at) >= ?
-            OR EXISTS (
-                SELECT 1 FROM tasks t2
-                WHERE t2.project_id = p.id
-                AND date(t2.created_at) >= ?
-            )
-        )
-        ORDER BY p.created_at DESC
+        JOIN tasks t ON t.project_id = p.id
+        GROUP BY p.id
+        HAVING active_task_count > 0
+        ORDER BY
+            has_today_progress DESC,
+            has_doing_task DESC,
+            active_task_count DESC,
+            p.created_at DESC
         """,
-        (week_start, week_start),
+        (today,),
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
@@ -623,7 +723,7 @@ def list_today_progress_tasks():
 def get_dashboard():
     return {
         "mainline_goal": get_mainline_goal(),
-        "week_projects": list_week_active_projects(),
+        "week_projects": list_active_projects(),
         "today_tasks": list_today_progress_tasks(),
     }
 

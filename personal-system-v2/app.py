@@ -209,7 +209,7 @@ def api_create_goal():
 def api_update_goal(goal_id):
     payload = request.get_json(silent=True) or {}
     try:
-        goal = database.update_goal(goal_id, payload.get("type", ""))
+        goal = database.update_goal(goal_id, payload)
         return jsonify({"ok": True, "data": goal})
     except ValueError as exc:
         return _error(str(exc))
@@ -255,6 +255,16 @@ def api_delete_project(project_id):
         return _error(str(exc), 409)
 
 
+@app.route("/api/projects/<int:project_id>", methods=["PATCH"])
+def api_update_project(project_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        project = database.update_project(project_id, payload)
+        return jsonify({"ok": True, "data": project})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
 @app.route("/api/tasks", methods=["GET"])
 def api_list_tasks():
     return jsonify({"ok": True, "data": database.list_tasks()})
@@ -287,6 +297,16 @@ def api_update_task_today_progress(task_id):
         task = database.update_task_today_progress(
             task_id, bool(payload.get("enabled"))
         )
+        return jsonify({"ok": True, "data": task})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/tasks/<int:task_id>", methods=["PATCH"])
+def api_update_task(task_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = database.update_task(task_id, payload)
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
         return _error(str(exc))

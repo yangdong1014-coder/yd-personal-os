@@ -51,8 +51,8 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
     } else {
       projectsEl.innerHTML = emptyState(
-        "暂无本周进行中项目",
-        "在目标下拆解项目，并确保有未完成任务"
+        "暂无进行中的项目",
+        "项目下有待处理或进行中任务时会出现在这里"
       );
     }
 
