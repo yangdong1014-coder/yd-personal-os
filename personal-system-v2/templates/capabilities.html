@@ -11,15 +11,46 @@
     </div>
     <button type="button" id="ai-diagnose-btn" class="btn btn-sm btn-ai">AI诊断</button>
   </div>
-  <span class="version-badge">{{ current_version }}</span>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
 </header>
 
+<section class="capability-dashboard">
+  <div class="section-card capability-overview-panel">
+    <div class="section-header-row">
+      <h2>能力总览</h2>
+      <span class="assets-list-count" id="capability-overview-meta"></span>
+    </div>
+    <div id="capability-overview" class="capability-overview-grid">
+      <div class="empty-state">
+        <strong>读取能力资产</strong>
+        正在汇总资产库与训练记录
+      </div>
+    </div>
+  </div>
+
+  <section class="section-card capability-detail-panel" id="capability-detail" hidden>
+    <div class="capability-detail-head">
+      <div>
+        <h2 id="capability-detail-title">能力详情</h2>
+        <p id="capability-detail-subtitle" class="form-hint"></p>
+      </div>
+      <span id="capability-detail-status" class="capability-status-badge"></span>
+    </div>
+    <div id="capability-detail-body" class="capability-detail-body"></div>
+  </section>
+</section>
+
+<div id="capability-practice-region" class="capability-practice-region"></div>
+
+<div class="capability-training-head">
+  <h2 id="capability-training-title">训练记录</h2>
+</div>
+
 <div id="capability-modules" class="capability-grid">
   {% for module in capability_modules %}
-  <section class="section-card module-panel" data-module="{{ module }}">
+  <section class="section-card module-panel capability-training-panel" data-module="{{ module }}">
     <div class="module-header">
       <h2>
         <span class="module-num">{{ "%02d"|format(loop.index) }}</span>
@@ -28,7 +59,7 @@
       <span class="tag tag-layer">{{ capability_layers[module] }}</span>
     </div>
 
-    <form class="entry-form stacked-form">
+    <form class="entry-form stacked-form capability-training-form">
       <div class="form-row-inline">
         <div class="form-row">
           <label class="form-label">日期</label>
@@ -59,7 +90,7 @@
       </div>
     </form>
 
-    <div class="entry-history">
+    <div class="entry-history capability-training-history">
       <h3 class="history-title">历史记录</h3>
       <div class="history-list"></div>
     </div>

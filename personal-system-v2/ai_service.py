@@ -595,50 +595,112 @@ def attribute_capability(module):
     }
 
 
-def diagnose_capabilities():
-    entries = database.list_capability_entries()
-    stats = {
-        m: {"能力层": 0, "应用层": 0, "total": 0}
-        for m in database.CAPABILITY_MODULES
-    }
-    for entry in entries:
-        module = entry.get("module")
-        level = entry.get("level_type")
-        if module not in stats:
-            continue
-        if level in stats[module]:
-            stats[module][level] += 1
-        stats[module]["total"] += 1
+def _format_capability_summary_context(summary):
+    overview = summary.get("overview", {})
+    lines = [
+        "能力资产看板总览：",
+        f"- 资产总数：{overview.get('total_assets', 0)}，已标记能力资产：{overview.get('tagged_assets', 0)}，训练记录：{overview.get('total_entries', 0)}",
+        f"- 当前优势能力：{'、'.join(overview.get('advantage_modules') or []) or '无'}",
+        f"- 薄弱能力：{'、'.join(overview.get('weak_modules') or []) or '无'}",
+    ]
 
-    lines = ["八模块记录统计："]
-    for module in database.CAPABILITY_MODULES:
-        s = stats[module]
+    record_asset_gaps = overview.get("record_asset_gaps") or []
+    if record_asset_gaps:
+        lines.append("记录多但资产少：")
+        for item in record_asset_gaps:
+            lines.append(
+                f"- {item['module']}：训练记录{item['entry_count']}条，资产{item['asset_count']}个"
+            )
+
+    low_reuse_modules = overview.get("low_reuse_modules") or []
+    if low_reuse_modules:
+        lines.append("资产多但复用少：")
+        for item in low_reuse_modules:
+            lines.append(
+                f"- {item['module']}：资产{item['asset_count']}个，可用/成熟{item['usable_asset_count']}个，复用{item['reuse_total']}次"
+            )
+
+    lines.append("八模块资产统计：")
+    for module in summary.get("modules", []):
+        type_text = "、".join(
+            f"{item['name']}×{item['count']}"
+            for item in module.get("asset_type_distribution", [])[:4]
+        ) or "无"
+        maturity_text = "、".join(
+            f"{item['name']}×{item['count']}"
+            for item in module.get("maturity_distribution", [])
+        )
+        recent_asset = (
+            module.get("recent_assets", [{}])[0].get("title")
+            if module.get("recent_assets")
+            else "无"
+        )
+        practice_text = " → ".join(
+            step.get("title", "")
+            for step in module.get("practice_steps", [])
+            if step.get("title")
+        ) or "未配置"
         lines.append(
-            f"- {module}：共{s['total']}条，能力层{s['能力层']}，应用层{s['应用层']}"
+            f"- {module['module']}：{module['status']}；资产{module['asset_count']}个，可用/成熟{module['usable_asset_count']}个，复用{module['reuse_total']}次，训练记录{module['entry_count']}条；类型：{type_text}；成熟度：{maturity_text}；最近资产：{recent_asset}；训练路径：{practice_text}；建议沉淀：{module['recommended_asset_type']}；下一步：{module['next_action']}"
         )
 
+    return "\n".join(lines)
+
+
+def _string_list(data, key, limit=3):
+    values = data.get(key) or []
+    if not isinstance(values, list):
+        return []
+    return [str(item).strip() for item in values if str(item).strip()][:limit]
+
+
+def diagnose_capabilities():
+    capability_summary = database.get_capability_summary()
+    stats = {
+        item["module"]: item["entry_level_counts"]
+        for item in capability_summary.get("modules", [])
+    }
     system_prompt = load_prompt("capabilities", "diagnose")
-    data = _chat_json(system_prompt, "\n".join(lines))
+    data = _chat_json(system_prompt, _format_capability_summary_context(capability_summary))
 
     summary = (data.get("summary") or "").strip()
     if not summary:
         raise AIServiceError("AI 未能生成有效诊断，请重试")
 
-    imbalances = data.get("imbalances") or []
-    if not isinstance(imbalances, list):
-        imbalances = []
-    imbalances = [str(i).strip() for i in imbalances if str(i).strip()][:3]
+    strengths = _string_list(data, "strengths")
+    weaknesses = _string_list(data, "weaknesses")
+    imbalances = _string_list(data, "imbalances") or weaknesses[:3]
+    record_asset_gaps = _string_list(data, "record_asset_gaps")
+    low_reuse_modules = _string_list(data, "low_reuse_modules")
+    suggested_asset_types = _string_list(data, "suggested_asset_types")
+    focus_modules = [
+        item
+        for item in _string_list(data, "focus_modules")
+        if item in database.CAPABILITY_MODULES
+    ][:3]
+    if not focus_modules:
+        focus_modules = [
+            item["module"]
+            for item in capability_summary.get("overview", {}).get("next_focus_modules", [])
+        ][:3]
 
     focus_module = (data.get("focus_module") or "").strip()
     if focus_module not in database.CAPABILITY_MODULES:
-        focus_module = ""
+        focus_module = focus_modules[0] if focus_modules else ""
 
     return {
         "summary": summary,
+        "strengths": strengths,
+        "weaknesses": weaknesses,
         "imbalances": imbalances,
+        "record_asset_gaps": record_asset_gaps,
+        "low_reuse_modules": low_reuse_modules,
+        "focus_modules": focus_modules,
+        "suggested_asset_types": suggested_asset_types,
         "focus_module": focus_module,
         "focus_action": (data.get("focus_action") or "").strip(),
         "stats": stats,
+        "asset_overview": capability_summary.get("overview", {}),
     }
 
 

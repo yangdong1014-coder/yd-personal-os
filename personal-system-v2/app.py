@@ -839,6 +839,65 @@ def api_save_prompt(module, scene):
         return _error(str(exc))
 
 
+@app.route("/api/capabilities/practice-paths", methods=["GET"])
+def api_list_capability_practice_paths():
+    return jsonify({"ok": True, "data": database.list_capability_practice_paths()})
+
+
+@app.route("/api/capabilities/<module>/practice-path", methods=["GET"])
+def api_get_capability_practice_path(module):
+    try:
+        return jsonify({
+            "ok": True,
+            "data": database.get_capability_practice_path(module),
+        })
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/capabilities/<module>/practice-steps", methods=["POST"])
+def api_create_capability_practice_step(module):
+    payload = request.get_json(silent=True) or {}
+    try:
+        step = database.create_capability_practice_step(
+            module,
+            payload.get("title", ""),
+            payload.get("description", ""),
+            payload.get("detail", ""),
+            payload.get("step_order"),
+        )
+        return jsonify({"ok": True, "data": step})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/capabilities/practice-steps/<int:step_id>", methods=["PATCH"])
+def api_update_capability_practice_step(step_id):
+    payload = request.get_json(silent=True) or {}
+    allowed = {"title", "description", "detail", "step_order"}
+    update_payload = {key: value for key, value in payload.items() if key in allowed}
+    try:
+        step = database.update_capability_practice_step(step_id, **update_payload)
+        return jsonify({"ok": True, "data": step})
+    except ValueError as exc:
+        status = 404 if "不存在" in str(exc) else 400
+        return _error(str(exc), status)
+
+
+@app.route("/api/capabilities/practice-steps/<int:step_id>", methods=["DELETE"])
+def api_delete_capability_practice_step(step_id):
+    try:
+        result = database.delete_capability_practice_step(step_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+
+
+@app.route("/api/capabilities/summary", methods=["GET"])
+def api_capabilities_summary():
+    return jsonify({"ok": True, "data": database.get_capability_summary()})
+
+
 @app.route("/api/capability-entries", methods=["GET"])
 def api_list_capability_entries():
     module = request.args.get("module") or None

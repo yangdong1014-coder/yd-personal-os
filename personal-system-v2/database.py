@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import asset_schemas
@@ -62,6 +63,197 @@ CAPABILITY_LAYERS = {
     "创造力": "系统创造层",
     "落地力": "结果放大层",
     "AI驾驭力": "结果放大层",
+}
+USABLE_MATURITY_LEVELS = ("可用", "稳定", "标准化")
+MATURE_MATURITY_LEVELS = ("稳定", "标准化")
+DISPLAY_MATURITY_BUCKETS = ("草稿", "可用", "成熟")
+RECOMMENDED_CAPABILITY_ASSET_TYPES = {
+    "本质力": "本质洞察",
+    "建模力": "模型",
+    "体系力": "SOP",
+    "产品力": "方法论",
+    "审美力": "案例复盘",
+    "创造力": "模板",
+    "落地力": "SOP",
+    "AI驾驭力": "提示词",
+}
+DEFAULT_CAPABILITY_PRACTICE_STEPS = {
+    "本质力": [
+        {
+            "title": "取样",
+            "description": "从真实业务、沟通、复盘、案例中抓一个具体问题。",
+            "detail": "训练目标是从现象看到底层规律。推荐输出资产：本质洞察、原则规则、判断清单。训练问题：这个问题表面是什么？真实矛盾是什么？如果换一个场景，规律还成立吗？",
+        },
+        {
+            "title": "追问",
+            "description": "连续追问为什么，拆掉表层说法。",
+            "detail": "识别表层理由背后的真实因果链，避免被现象牵引。",
+        },
+        {
+            "title": "抽象",
+            "description": "提炼背后的稳定结构、关键变量和主要矛盾。",
+            "detail": "把具体问题抽象成可迁移的结构，找到跨场景成立的规律。",
+        },
+        {
+            "title": "原则",
+            "description": "沉淀为一句可复用的判断原则。",
+            "detail": "把洞察压缩成未来能快速调用的判断规则。",
+        },
+    ],
+    "建模力": [
+        {
+            "title": "取样",
+            "description": "选择一个重复出现的问题或流程。",
+            "detail": "训练目标是把经验变成稳定模型。推荐输出资产：模型、方法论、流程图、判断框架。",
+        },
+        {
+            "title": "归因",
+            "description": "找出影响结果的关键因素。",
+            "detail": "拆出导致结果差异的关键变量，不停留在感受判断。",
+        },
+        {
+            "title": "变量",
+            "description": "把关键因素拆成可观察、可调整的变量。",
+            "detail": "让模型可以被检查、被调整、被复用。",
+        },
+        {
+            "title": "建模",
+            "description": "形成结构图、公式、SOP 或判断模型。",
+            "detail": "把经验固化成别人也能理解和复用的结构。",
+        },
+    ],
+    "体系力": [
+        {
+            "title": "拆链路",
+            "description": "把一个目标拆成完整链路。",
+            "detail": "训练目标是从单点动作升级为系统运转。推荐输出资产：系统结构、SOP、机制设计、流程闭环。",
+        },
+        {
+            "title": "分层级",
+            "description": "区分目标层、项目层、任务层、资产层。",
+            "detail": "让复杂系统分层清晰，避免所有事情混在一起。",
+        },
+        {
+            "title": "连关系",
+            "description": "找出模块之间的输入、输出和依赖。",
+            "detail": "明确每个模块如何相互影响，找到断点和卡点。",
+        },
+        {
+            "title": "闭循环",
+            "description": "形成可持续运转的反馈闭环。",
+            "detail": "让系统不是一次性动作，而是能持续迭代。",
+        },
+    ],
+    "产品力": [
+        {
+            "title": "定场景",
+            "description": "明确谁在什么场景下使用。",
+            "detail": "训练目标是把功能变成可用、好用、愿意用的产品。推荐输出资产：产品机制、用户路径、体验判断、MVP方案。",
+        },
+        {
+            "title": "找痛点",
+            "description": "识别用户真正卡住的地方。",
+            "detail": "判断用户不是“不想用”，还是“第一步太难、价值不清、路径太复杂”。",
+        },
+        {
+            "title": "设机制",
+            "description": "设计让用户更容易完成动作的机制。",
+            "detail": "用默认值、低阻力入口、反馈机制降低使用成本。",
+        },
+        {
+            "title": "验效果",
+            "description": "用真实使用反馈验证产品价值。",
+            "detail": "不要只看功能完成，要看用户是否真的愿意持续使用。",
+        },
+    ],
+    "审美力": [
+        {
+            "title": "收集",
+            "description": "收集高质量案例。",
+            "detail": "训练目标是形成可表达、可判断、可传递的审美标准。推荐输出资产：审美案例、设计原则、表达模板、风格标准。",
+        },
+        {
+            "title": "对比",
+            "description": "比较好与差的差异。",
+            "detail": "通过对比找到高级感、秩序感、表达力的来源。",
+        },
+        {
+            "title": "判断",
+            "description": "提炼审美判断标准。",
+            "detail": "把“感觉不错”转化成可以解释的标准。",
+        },
+        {
+            "title": "表达",
+            "description": "把审美标准转化为设计语言或修改意见。",
+            "detail": "让审美判断可以指导别人修改，而不是只停留在个人感受。",
+        },
+    ],
+    "创造力": [
+        {
+            "title": "重组",
+            "description": "把已有元素重新组合。",
+            "detail": "训练目标是从灵感式创造升级为可重复创造。推荐输出资产：创意模型、原型方案、案例复盘、表达模板。",
+        },
+        {
+            "title": "变体",
+            "description": "基于一个原型生成多个变化。",
+            "detail": "通过变体训练打开可能性，而不是只押注一个想法。",
+        },
+        {
+            "title": "原型",
+            "description": "快速做出可看、可测的小样。",
+            "detail": "用最小成本把想法变成可以被反馈的东西。",
+        },
+        {
+            "title": "验证",
+            "description": "用真实反馈判断是否值得继续。",
+            "detail": "用反馈筛选创意，把创造力接入现实结果。",
+        },
+    ],
+    "落地力": [
+        {
+            "title": "拆解",
+            "description": "把目标拆成具体任务。",
+            "detail": "训练目标是把想法变成真实结果。推荐输出资产：执行清单、SOP、复盘、项目推进模板。",
+        },
+        {
+            "title": "排期",
+            "description": "明确优先级、负责人和时间节点。",
+            "detail": "让任务进入真实时间和责任系统。",
+        },
+        {
+            "title": "执行",
+            "description": "推动任务进入真实动作。",
+            "detail": "把计划从文字变成动作，避免停留在想法层。",
+        },
+        {
+            "title": "复盘",
+            "description": "根据结果修正方法和机制。",
+            "detail": "用结果反馈优化下一轮行动。",
+        },
+    ],
+    "AI驾驭力": [
+        {
+            "title": "定场景",
+            "description": "找到适合 AI 介入的高频或高价值场景。",
+            "detail": "训练目标是从会用 AI 升级为用 AI 构建系统。推荐输出资产：提示词、AI流程、自动化组件、工具说明。",
+        },
+        {
+            "title": "写提示",
+            "description": "把任务目标、上下文、边界和输出格式说清楚。",
+            "detail": "让 AI 输入稳定，减少随机输出。",
+        },
+        {
+            "title": "建流程",
+            "description": "把单次 AI 使用固化为工作流。",
+            "detail": "从一次性问答升级为可重复流程。",
+        },
+        {
+            "title": "资产化",
+            "description": "把提示词、流程、模板沉淀为可复用资产。",
+            "detail": "让 AI 能力进入个人资产库，而不是停留在临时使用。",
+        },
+    ],
 }
 
 
@@ -182,11 +374,23 @@ def init_db():
             level_type TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS capability_practice_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            module TEXT NOT NULL,
+            step_order INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         """
     )
     _migrate_tasks_table(conn)
     _migrate_inbox_tables(conn)
     _migrate_assets_table(conn)
+    _ensure_default_capability_practice_steps(conn)
     _normalize_mainline_goals(conn)
     conn.commit()
     conn.close()
@@ -301,7 +505,35 @@ def _demote_other_mainline_goals(conn, keep_goal_id):
         WHERE type = '当前主线' AND id != ?
         """,
         (keep_goal_id,),
-    )
+        )
+
+
+def _ensure_default_capability_practice_steps(conn):
+    now = _now()
+    for module in CAPABILITY_MODULES:
+        existing = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM capability_practice_steps WHERE module = ?",
+            (module,),
+        ).fetchone()
+        if existing and existing["cnt"]:
+            continue
+        for index, step in enumerate(DEFAULT_CAPABILITY_PRACTICE_STEPS[module], start=1):
+            conn.execute(
+                """
+                INSERT INTO capability_practice_steps (
+                    module, step_order, title, description, detail, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    module,
+                    index,
+                    step["title"],
+                    step["description"],
+                    step["detail"],
+                    now,
+                    now,
+                ),
+            )
 
 
 def _normalize_mainline_goals(conn):
@@ -1127,6 +1359,449 @@ def list_capability_entries(module=None):
         ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
+
+
+def _practice_step_row(row):
+    data = _row_to_dict(row)
+    if not data:
+        return data
+    data["step_order"] = int(data.get("step_order") or 0)
+    return data
+
+
+def _normalize_practice_step_order(conn, module):
+    rows = conn.execute(
+        """
+        SELECT id FROM capability_practice_steps
+        WHERE module = ?
+        ORDER BY step_order ASC, id ASC
+        """,
+        (module,),
+    ).fetchall()
+    now = _now()
+    for index, row in enumerate(rows, start=1):
+        conn.execute(
+            """
+            UPDATE capability_practice_steps
+            SET step_order = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (index, now, row["id"]),
+        )
+
+
+def list_capability_practice_paths():
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM capability_practice_steps
+        ORDER BY module ASC, step_order ASC, id ASC
+        """
+    ).fetchall()
+    conn.close()
+    paths = {module: [] for module in CAPABILITY_MODULES}
+    for row in rows:
+        step = _practice_step_row(row)
+        if step["module"] in paths:
+            paths[step["module"]].append(step)
+    return paths
+
+
+def get_capability_practice_path(module):
+    if module not in CAPABILITY_MODULES:
+        raise ValueError("无效的能力模块")
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM capability_practice_steps
+        WHERE module = ?
+        ORDER BY step_order ASC, id ASC
+        """,
+        (module,),
+    ).fetchall()
+    conn.close()
+    return [_practice_step_row(row) for row in rows]
+
+
+def create_capability_practice_step(
+    module, title, description="", detail="", step_order=None
+):
+    if module not in CAPABILITY_MODULES:
+        raise ValueError("无效的能力模块")
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("步骤名称不能为空")
+    description = (description or "").strip()
+    detail = (detail or "").strip()
+
+    conn = get_connection()
+    if step_order is None:
+        row = conn.execute(
+            """
+            SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
+            FROM capability_practice_steps
+            WHERE module = ?
+            """,
+            (module,),
+        ).fetchone()
+        step_order = int(row["next_order"])
+    else:
+        try:
+            step_order = max(1, int(step_order))
+        except (TypeError, ValueError):
+            conn.close()
+            raise ValueError("步骤排序必须是正整数")
+        conn.execute(
+            """
+            UPDATE capability_practice_steps
+            SET step_order = step_order + 1
+            WHERE module = ? AND step_order >= ?
+            """,
+            (module, step_order),
+        )
+
+    now = _now()
+    cur = conn.execute(
+        """
+        INSERT INTO capability_practice_steps (
+            module, step_order, title, description, detail, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (module, step_order, title, description, detail, now, now),
+    )
+    _normalize_practice_step_order(conn, module)
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM capability_practice_steps WHERE id = ?",
+        (cur.lastrowid,),
+    ).fetchone()
+    conn.close()
+    return _practice_step_row(row)
+
+
+def update_capability_practice_step(step_id, **kwargs):
+    allowed = {"title", "description", "detail", "step_order"}
+    updates = {key: value for key, value in kwargs.items() if key in allowed}
+    if not updates:
+        raise ValueError("没有可更新的训练步骤字段")
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM capability_practice_steps WHERE id = ?",
+        (step_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("训练步骤不存在")
+    current = _practice_step_row(row)
+
+    title = updates.get("title", current["title"])
+    title = (title or "").strip()
+    if not title:
+        conn.close()
+        raise ValueError("步骤名称不能为空")
+
+    description = updates.get("description", current["description"])
+    detail = updates.get("detail", current["detail"])
+    step_order = updates.get("step_order", current["step_order"])
+    try:
+        step_order = max(1, int(step_order))
+    except (TypeError, ValueError):
+        conn.close()
+        raise ValueError("步骤排序必须是正整数")
+    current_order = current["step_order"]
+    if step_order < current_order:
+        conn.execute(
+            """
+            UPDATE capability_practice_steps
+            SET step_order = step_order + 1
+            WHERE module = ? AND id != ? AND step_order >= ? AND step_order < ?
+            """,
+            (current["module"], step_id, step_order, current_order),
+        )
+    elif step_order > current_order:
+        conn.execute(
+            """
+            UPDATE capability_practice_steps
+            SET step_order = step_order - 1
+            WHERE module = ? AND id != ? AND step_order <= ? AND step_order > ?
+            """,
+            (current["module"], step_id, step_order, current_order),
+        )
+
+    conn.execute(
+        """
+        UPDATE capability_practice_steps
+        SET title = ?, description = ?, detail = ?, step_order = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            title,
+            (description or "").strip(),
+            (detail or "").strip(),
+            step_order,
+            _now(),
+            step_id,
+        ),
+    )
+    _normalize_practice_step_order(conn, current["module"])
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM capability_practice_steps WHERE id = ?",
+        (step_id,),
+    ).fetchone()
+    conn.close()
+    return _practice_step_row(row)
+
+
+def delete_capability_practice_step(step_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM capability_practice_steps WHERE id = ?",
+        (step_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("训练步骤不存在")
+    module = row["module"]
+    conn.execute("DELETE FROM capability_practice_steps WHERE id = ?", (step_id,))
+    _normalize_practice_step_order(conn, module)
+    conn.commit()
+    conn.close()
+    return {"id": step_id, "deleted": True, "module": module}
+
+
+def _display_maturity(maturity):
+    if maturity in MATURE_MATURITY_LEVELS:
+        return "成熟"
+    if maturity == "可用":
+        return "可用"
+    return "草稿"
+
+
+def _asset_summary_item(asset):
+    return {
+        "id": asset.get("id"),
+        "title": asset.get("title", ""),
+        "asset_type": asset.get("asset_type", ""),
+        "maturity": asset.get("maturity", "草稿"),
+        "maturity_label": _display_maturity(asset.get("maturity")),
+        "reuse_count": int(asset.get("reuse_count") or 0),
+        "updated_at": asset.get("updated_at") or asset.get("created_at") or "",
+        "created_at": asset.get("created_at") or "",
+        "summary": asset.get("summary", ""),
+        "reusable_scenario": asset.get("reusable_scenario", ""),
+    }
+
+
+def _capability_status(asset_count, usable_asset_count, reuse_total):
+    if usable_asset_count >= 2 and reuse_total > 0:
+        return "有优势"
+    if asset_count <= 1:
+        return "薄弱"
+    return "积累中"
+
+
+def _capability_status_reason(asset_count, usable_asset_count, reuse_total):
+    if asset_count <= 1:
+        return "关联资产很少"
+    if usable_asset_count >= 2 and reuse_total > 0:
+        return "已有可用资产和复用记录"
+    if usable_asset_count == 0:
+        return "已有资产但成熟度不足"
+    return "已有资产沉淀，复用仍需验证"
+
+
+def _capability_next_action(module, asset_count, usable_asset_count, reuse_total, entry_count):
+    recommended_type = RECOMMENDED_CAPABILITY_ASSET_TYPES.get(module, "通用资产")
+    if asset_count == 0:
+        return f"先沉淀 1 个{recommended_type}，把最近一次训练转成可复用资产。"
+    if entry_count >= 2 and asset_count <= 1:
+        return f"把高频训练记录整理成{recommended_type}，补齐能力资产底座。"
+    if asset_count >= 3 and reuse_total == 0:
+        return "选择 1-2 个可用资产进入真实项目复用，记录复用次数和调整点。"
+    if usable_asset_count == 0:
+        return "优先补齐资产的使用场景、判断标准和适用边界，推进到可用。"
+    if usable_asset_count >= 2 and reuse_total > 0:
+        return f"把高复用资产标准化为{recommended_type}或模板，形成稳定调用流程。"
+    return f"围绕当前资产补一次应用层训练，并沉淀 1 个{recommended_type}。"
+
+
+def _module_priority(module_summary):
+    entry_count = module_summary["entry_count"]
+    asset_count = module_summary["asset_count"]
+    usable_count = module_summary["usable_asset_count"]
+    reuse_total = module_summary["reuse_total"]
+    status = module_summary["status"]
+    if entry_count >= 2 and asset_count <= 1:
+        return (0, -entry_count, asset_count)
+    if asset_count >= 3 and reuse_total == 0:
+        return (1, -asset_count, -usable_count)
+    if status == "薄弱":
+        return (2, asset_count, -entry_count)
+    if usable_count == 0 and asset_count > 0:
+        return (3, -asset_count, -entry_count)
+    return (4, -asset_count, -reuse_total)
+
+
+def get_capability_summary():
+    assets = list_assets()
+    entries = list_capability_entries()
+    practice_paths = list_capability_practice_paths()
+    entries_by_module = {module: [] for module in CAPABILITY_MODULES}
+    for entry in entries:
+        module = entry.get("module")
+        if module in entries_by_module:
+            entries_by_module[module].append(entry)
+
+    modules = []
+    assigned_asset_total = 0
+    for module in CAPABILITY_MODULES:
+        module_assets = [
+            asset
+            for asset in assets
+            if module in (asset.get("capability_tags") or [])
+        ]
+        assigned_asset_total += len(module_assets)
+        asset_count = len(module_assets)
+        usable_asset_count = sum(
+            1 for asset in module_assets if asset.get("maturity") in USABLE_MATURITY_LEVELS
+        )
+        mature_asset_count = sum(
+            1 for asset in module_assets if asset.get("maturity") in MATURE_MATURITY_LEVELS
+        )
+        reuse_total = sum(int(asset.get("reuse_count") or 0) for asset in module_assets)
+        recent_asset_updated_at = (
+            (module_assets[0].get("updated_at") or module_assets[0].get("created_at") or "")
+            if module_assets
+            else ""
+        )
+
+        type_counts = Counter(asset.get("asset_type") or "通用资产" for asset in module_assets)
+        maturity_counts = Counter(
+            _display_maturity(asset.get("maturity")) for asset in module_assets
+        )
+        module_entries = entries_by_module[module]
+        level_counts = Counter(entry.get("level_type") or "" for entry in module_entries)
+        status = _capability_status(asset_count, usable_asset_count, reuse_total)
+        recommended_type = RECOMMENDED_CAPABILITY_ASSET_TYPES.get(module, "通用资产")
+        high_reuse_assets = sorted(
+            [asset for asset in module_assets if int(asset.get("reuse_count") or 0) > 0],
+            key=lambda asset: (
+                -int(asset.get("reuse_count") or 0),
+                asset.get("updated_at") or asset.get("created_at") or "",
+            ),
+        )
+
+        modules.append(
+            {
+                "module": module,
+                "layer": CAPABILITY_LAYERS[module],
+                "asset_count": asset_count,
+                "usable_asset_count": usable_asset_count,
+                "mature_asset_count": mature_asset_count,
+                "reuse_total": reuse_total,
+                "recent_asset_updated_at": recent_asset_updated_at,
+                "status": status,
+                "status_reason": _capability_status_reason(
+                    asset_count, usable_asset_count, reuse_total
+                ),
+                "recommended_asset_type": recommended_type,
+                "next_action": _capability_next_action(
+                    module, asset_count, usable_asset_count, reuse_total, len(module_entries)
+                ),
+                "asset_type_distribution": [
+                    {"name": name, "count": count}
+                    for name, count in type_counts.most_common()
+                ],
+                "maturity_distribution": [
+                    {"name": name, "count": maturity_counts.get(name, 0)}
+                    for name in DISPLAY_MATURITY_BUCKETS
+                ],
+                "recent_assets": [
+                    _asset_summary_item(asset) for asset in module_assets[:3]
+                ],
+                "high_reuse_assets": [
+                    _asset_summary_item(asset) for asset in high_reuse_assets[:3]
+                ],
+                "recent_entries": module_entries[:3],
+                "entry_count": len(module_entries),
+                "entry_level_counts": {
+                    "能力层": level_counts.get("能力层", 0),
+                    "应用层": level_counts.get("应用层", 0),
+                    "total": len(module_entries),
+                },
+                "practice_steps": [
+                    {
+                        "id": step["id"],
+                        "step_order": step["step_order"],
+                        "title": step["title"],
+                        "description": step["description"],
+                    }
+                    for step in practice_paths.get(module, [])
+                ],
+            }
+        )
+
+    record_asset_gaps = [
+        item
+        for item in modules
+        if item["entry_count"] >= 2 and item["asset_count"] <= 1
+    ]
+    low_reuse_modules = [
+        item
+        for item in modules
+        if item["asset_count"] >= 3 and item["reuse_total"] == 0
+    ]
+    next_focus_modules = sorted(modules, key=_module_priority)[:3]
+
+    return {
+        "overview": {
+            "total_assets": len(assets),
+            "tagged_assets": sum(1 for asset in assets if asset.get("capability_tags")),
+            "assigned_asset_total": assigned_asset_total,
+            "total_entries": len(entries),
+            "advantage_modules": [
+                item["module"] for item in modules if item["status"] == "有优势"
+            ],
+            "weak_modules": [
+                item["module"] for item in modules if item["status"] == "薄弱"
+            ],
+            "record_asset_gaps": [
+                {
+                    "module": item["module"],
+                    "entry_count": item["entry_count"],
+                    "asset_count": item["asset_count"],
+                }
+                for item in record_asset_gaps
+            ],
+            "low_reuse_modules": [
+                {
+                    "module": item["module"],
+                    "asset_count": item["asset_count"],
+                    "usable_asset_count": item["usable_asset_count"],
+                    "reuse_total": item["reuse_total"],
+                }
+                for item in low_reuse_modules
+            ],
+            "next_focus_modules": [
+                {
+                    "module": item["module"],
+                    "status": item["status"],
+                    "next_action": item["next_action"],
+                    "recommended_asset_type": item["recommended_asset_type"],
+                }
+                for item in next_focus_modules
+            ],
+        },
+        "modules": modules,
+        "maturity_display": {
+            "raw_levels": list(MATURITY_LEVELS),
+            "display_buckets": list(DISPLAY_MATURITY_BUCKETS),
+            "usable_levels": list(USABLE_MATURITY_LEVELS),
+            "mature_levels": list(MATURE_MATURITY_LEVELS),
+        },
+    }
 
 
 class DeleteError(Exception):
