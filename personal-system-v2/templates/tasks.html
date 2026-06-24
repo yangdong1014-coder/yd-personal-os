@@ -4,47 +4,37 @@
 
 {% block content %}
 <header class="page-header">
-  <h1 class="page-title">任务系统</h1>
-  <p class="page-subtitle">在项目下新建任务，AI 辅助拆解与今日推荐</p>
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">任务执行视图</h1>
+      <p class="page-subtitle">先看今日行动，再按项目推进</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="create-task-btn" class="btn btn-sm">新建任务</button>
+      <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
+    </div>
+  </div>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
 </header>
 
-<div class="page-split">
-  <section class="section-card page-split-side">
-    <h2>新建任务</h2>
-    <form id="task-form" class="stacked-form inline-form-stacked">
-      <select id="task-project" class="select full-width" required>
-        <option value="">选择所属项目</option>
-      </select>
-      <input type="text" id="task-name" class="input full-width" placeholder="任务名称" required>
-      <div class="form-actions-row">
-        <button type="submit" class="btn">添加任务</button>
-        <button type="button" id="ai-decompose-btn" class="btn btn-sm btn-ai" disabled>AI拆任务</button>
-      </div>
-    </form>
-    <p class="form-hint" id="task-form-hint">请先在「目标」页创建目标与项目</p>
-  </section>
-
-  <section class="section-card page-split-main">
-    <div class="section-header-row">
-      <h2>任务列表</h2>
-      <button type="button" id="ai-recommend-btn" class="btn btn-sm btn-ai">AI今日推荐</button>
+<section class="section-card page-main-panel">
+  <div class="section-header-row">
+    <h2>任务执行列表</h2>
+  </div>
+  <div id="task-overview" class="task-overview" aria-live="polite"></div>
+  <div class="task-view-toggle" role="tablist" aria-label="任务视图">
+    <button type="button" class="btn btn-sm task-view-btn is-active" data-view="overview" aria-selected="true">总览模式</button>
+    <button type="button" class="btn btn-sm btn-ghost task-view-btn" data-view="project" aria-selected="false">按项目模式</button>
+  </div>
+  <div id="tasks-list" class="entity-list task-list">
+    <div class="empty-state" id="tasks-empty">
+      <strong>添加第一个任务</strong>
+      点击右上角「新建任务」开始
     </div>
-    <div id="task-overview" class="task-overview" aria-live="polite"></div>
-    <div class="task-view-toggle" role="tablist" aria-label="任务视图">
-      <button type="button" class="btn btn-sm task-view-btn is-active" data-view="overview" aria-selected="true">总览模式</button>
-      <button type="button" class="btn btn-sm btn-ghost task-view-btn" data-view="project" aria-selected="false">按项目模式</button>
-    </div>
-    <div id="tasks-list" class="entity-list task-list">
-      <div class="empty-state" id="tasks-empty">
-        <strong>添加第一个任务</strong>
-        选择项目并输入任务名称
-      </div>
-    </div>
-  </section>
-</div>
+  </div>
+</section>
 {% endblock %}
 
 {% block scripts %}

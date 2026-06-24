@@ -11,6 +11,9 @@ DB_PATH = os.environ.get("YD_OS_DB_PATH", _DEFAULT_DB_PATH)
 
 GOAL_TYPES = ("年度", "季度", "月度", "当前主线")
 TASK_STATUSES = ("待处理", "进行中", "完成")
+PRIORITY_LEVELS = ("high", "medium", "low")
+PRIORITY_LABELS = {"high": "高", "medium": "中", "low": "低"}
+PRIORITY_SCORES = {"high": 3, "medium": 2, "low": 1}
 REVIEW_TYPES = ("每日", "每周", "项目", "事件")
 ASSET_TYPES = asset_schemas.ASSET_TYPES
 MATURITY_LEVELS = asset_schemas.MATURITY_LEVELS
@@ -269,6 +272,38 @@ def _row_to_dict(row):
     return dict(row) if row else None
 
 
+def _normalize_priority(value, strict=False):
+    if value in PRIORITY_LEVELS:
+        return value
+    if value in (None, ""):
+        return "medium"
+    if strict:
+        raise ValueError("无效的优先级")
+    return "medium"
+
+
+def _priority_label(value):
+    return PRIORITY_LABELS[_normalize_priority(value)]
+
+
+def _priority_score(value):
+    return PRIORITY_SCORES[_normalize_priority(value)]
+
+
+def _project_row(row):
+    data = _row_to_dict(row)
+    if data:
+        data["priority"] = _normalize_priority(data.get("priority"))
+    return data
+
+
+def _task_row(row):
+    data = _row_to_dict(row)
+    if data:
+        data["priority"] = _normalize_priority(data.get("priority"))
+    return data
+
+
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -302,16 +337,30 @@ def _week_start_local():
     return monday.strftime("%Y-%m-%d")
 
 
+def _table_columns(conn, table):
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _migrate_projects_table(conn):
+    columns = _table_columns(conn, "projects")
+    if "priority" not in columns:
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"
+        )
+
+
 def _migrate_tasks_table(conn):
-    columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
-    }
+    columns = _table_columns(conn, "tasks")
     if "today_progress" not in columns:
         conn.execute(
             "ALTER TABLE tasks ADD COLUMN today_progress INTEGER NOT NULL DEFAULT 0"
         )
     if "today_progress_date" not in columns:
         conn.execute("ALTER TABLE tasks ADD COLUMN today_progress_date TEXT")
+    if "priority" not in columns:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"
+        )
 
 
 def init_db():
@@ -329,6 +378,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             goal_id INTEGER NOT NULL,
             name TEXT NOT NULL,
+            priority TEXT NOT NULL DEFAULT 'medium',
             created_at TEXT NOT NULL,
             FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
         );
@@ -338,6 +388,7 @@ def init_db():
             project_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT '待处理',
+            priority TEXT NOT NULL DEFAULT 'medium',
             created_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
@@ -387,6 +438,7 @@ def init_db():
         );
         """
     )
+    _migrate_projects_table(conn)
     _migrate_tasks_table(conn)
     _migrate_inbox_tables(conn)
     _migrate_assets_table(conn)
@@ -626,10 +678,11 @@ def get_goal(goal_id):
     return _row_to_dict(row)
 
 
-def create_project(goal_id, name):
+def create_project(goal_id, name, priority=None):
     name = name.strip()
     if not name:
         raise ValueError("项目名称不能为空")
+    priority = _normalize_priority(priority, strict=True)
 
     conn = get_connection()
     goal = conn.execute("SELECT id FROM goals WHERE id = ?", (goal_id,)).fetchone()
@@ -638,14 +691,14 @@ def create_project(goal_id, name):
         raise ValueError("目标不存在")
 
     cur = conn.execute(
-        "INSERT INTO projects (goal_id, name, created_at) VALUES (?, ?, ?)",
-        (goal_id, name, _now()),
+        "INSERT INTO projects (goal_id, name, priority, created_at) VALUES (?, ?, ?, ?)",
+        (goal_id, name, priority, _now()),
     )
     conn.commit()
     project_id = cur.lastrowid
     row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     conn.close()
-    return _row_to_dict(row)
+    return _project_row(row)
 
 
 def get_project(project_id):
@@ -660,7 +713,7 @@ def get_project(project_id):
         (project_id,),
     ).fetchone()
     conn.close()
-    return _row_to_dict(row)
+    return _project_row(row)
 
 
 def update_project(project_id, payload):
@@ -673,16 +726,25 @@ def update_project(project_id, payload):
         conn.close()
         raise ValueError("项目不存在")
 
-    if "name" not in payload:
+    updates = {}
+    if "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            conn.close()
+            raise ValueError("项目名称不能为空")
+        updates["name"] = name
+    if "priority" in payload:
+        updates["priority"] = _normalize_priority(payload.get("priority"), strict=True)
+
+    if not updates:
         conn.close()
         raise ValueError("没有可更新的项目字段")
 
-    name = (payload.get("name") or "").strip()
-    if not name:
-        conn.close()
-        raise ValueError("项目名称不能为空")
-
-    conn.execute("UPDATE projects SET name = ? WHERE id = ?", (name, project_id))
+    assignments = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE projects SET {assignments} WHERE id = ?",
+        (*updates.values(), project_id),
+    )
     conn.commit()
     row = conn.execute(
         """
@@ -694,7 +756,7 @@ def update_project(project_id, payload):
         (project_id,),
     ).fetchone()
     conn.close()
-    return _row_to_dict(row)
+    return _project_row(row)
 
 
 def list_projects(goal_id=None):
@@ -723,10 +785,11 @@ def list_projects(goal_id=None):
     return [_row_to_dict(r) for r in rows]
 
 
-def create_task(project_id, name):
+def create_task(project_id, name, priority=None):
     name = name.strip()
     if not name:
         raise ValueError("任务名称不能为空")
+    priority = _normalize_priority(priority, strict=True)
 
     conn = get_connection()
     project = conn.execute(
@@ -737,8 +800,8 @@ def create_task(project_id, name):
         raise ValueError("项目不存在")
 
     cur = conn.execute(
-        "INSERT INTO tasks (project_id, name, status, created_at) VALUES (?, ?, ?, ?)",
-        (project_id, name, "待处理", _now()),
+        "INSERT INTO tasks (project_id, name, status, priority, created_at) VALUES (?, ?, ?, ?, ?)",
+        (project_id, name, "待处理", priority, _now()),
     )
     conn.commit()
     task_id = cur.lastrowid
@@ -753,11 +816,11 @@ def create_task(project_id, name):
         (task_id,),
     ).fetchone()
     conn.close()
-    return _row_to_dict(row)
+    return _task_row(row)
 
 
 def _fetch_task(conn, task_id):
-    return conn.execute(
+    row = conn.execute(
         """
         SELECT t.*, p.name AS project_name, g.name AS goal_name
         FROM tasks t
@@ -767,6 +830,7 @@ def _fetch_task(conn, task_id):
         """,
         (task_id,),
     ).fetchone()
+    return _task_row(row)
 
 
 def list_tasks(project_id=None):
@@ -794,7 +858,7 @@ def list_tasks(project_id=None):
             """
         ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_task_row(r) for r in rows]
 
 
 def update_task(task_id, payload):
@@ -818,6 +882,8 @@ def update_task(task_id, payload):
             conn.close()
             raise ValueError("无效的任务状态")
         updates["status"] = status
+    if "priority" in payload:
+        updates["priority"] = _normalize_priority(payload.get("priority"), strict=True)
 
     if not updates:
         conn.close()
@@ -831,7 +897,7 @@ def update_task(task_id, payload):
     conn.commit()
     row = _fetch_task(conn, task_id)
     conn.close()
-    return _row_to_dict(row)
+    return row
 
 
 def update_task_status(task_id, status):
@@ -848,7 +914,7 @@ def update_task_status(task_id, status):
     conn.commit()
     row = _fetch_task(conn, task_id)
     conn.close()
-    return _row_to_dict(row)
+    return row
 
 
 def update_task_today_progress(task_id, enabled):
@@ -879,7 +945,7 @@ def update_task_today_progress(task_id, enabled):
     conn.commit()
     row = _fetch_task(conn, task_id)
     conn.close()
-    return _row_to_dict(row)
+    return row
 
 
 def get_mainline_goal():
@@ -949,15 +1015,247 @@ def list_today_progress_tasks():
         (today,),
     ).fetchall()
     conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_project_row(r) for r in rows]
+
+
+def _is_today_progress_record(record, today):
+    return (
+        int(record.get("today_progress") or 0) == 1
+        and record.get("today_progress_date") == today
+    )
+
+
+def _task_inferred_priority(task, today):
+    if _is_today_progress_record(task, today) or task.get("status") == "进行中":
+        return "高", 3
+    if task.get("status") == "待处理":
+        return "中", 2
+    return "低", 1
+
+
+def _project_inferred_priority(stats):
+    if stats["today"] > 0 or stats["doing"] > 0:
+        return "高", 3
+    if stats["pending"] > 0:
+        return "中", 2
+    return "低", 1
+
+
+def _task_sort_key(task):
+    status_rank = {"进行中": 3, "待处理": 2, "完成": 1}
+    return (
+        task.get("priority_score", 0),
+        1 if task.get("is_today_progress") else 0,
+        status_rank.get(task.get("status"), 0),
+        task.get("recent_activity_at") or task.get("created_at") or "",
+    )
+
+
+def _project_sort_key(project):
+    stats = project["stats"]
+    return (
+        project.get("priority_score", 0),
+        stats["today"],
+        stats["doing"],
+        stats["open"],
+        1 if stats["open"] > 0 else 0,
+        project.get("recent_activity_at") or "",
+    )
+
+
+def _goal_sort_key(group, mainline_goal_id):
+    return (
+        1 if group["id"] == mainline_goal_id else 0,
+        group["stats"]["today"],
+        group["stats"]["doing"],
+        group["stats"]["open"],
+        group.get("created_at") or "",
+    )
+
+
+def _goal_inferred_status(stats):
+    if stats["today"] > 0:
+        return "今日推进中"
+    if stats["doing"] > 0:
+        return "推进中"
+    if stats["pending"] > 0:
+        return "待推进"
+    if stats["total"] > 0:
+        return "已完成"
+    if stats["projects"] > 0:
+        return "暂无任务"
+    return "暂无项目"
+
+
+def _project_inferred_status(stats):
+    if stats["today"] > 0:
+        return "今日推进中"
+    if stats["doing"] > 0:
+        return "推进中"
+    if stats["pending"] > 0:
+        return "待推进"
+    if stats["total"] > 0:
+        return "已完成"
+    return "暂无任务"
+
+
+def _dashboard_task(task, today):
+    item = dict(task)
+    is_today = _is_today_progress_record(item, today)
+    priority = _normalize_priority(item.get("priority"))
+    inferred_priority, inferred_score = _task_inferred_priority(item, today)
+    item.update({
+        "priority": priority,
+        "priority_label": _priority_label(priority),
+        "priority_score": _priority_score(priority),
+        "is_today_progress": is_today,
+        "display_priority": _priority_label(priority),
+        "display_priority_score": _priority_score(priority),
+        "priority_source": "用户设置",
+        "inferred_priority": inferred_priority,
+        "inferred_priority_score": inferred_score,
+        "inferred_priority_source": "系统推导",
+        "recent_activity_at": item.get("created_at") or "",
+    })
+    return item
+
+
+def _dashboard_project(project, tasks):
+    item = dict(project)
+    stats = {
+        "total": len(tasks),
+        "pending": sum(1 for task in tasks if task.get("status") == "待处理"),
+        "doing": sum(1 for task in tasks if task.get("status") == "进行中"),
+        "done": sum(1 for task in tasks if task.get("status") == "完成"),
+        "today": sum(1 for task in tasks if task.get("is_today_progress")),
+    }
+    stats["open"] = stats["pending"] + stats["doing"]
+    recent_candidates = [item.get("created_at") or ""]
+    recent_candidates.extend(task.get("created_at") or "" for task in tasks)
+    recent_activity_at = max(recent_candidates) if recent_candidates else ""
+    priority = _normalize_priority(item.get("priority"))
+    inferred_priority, inferred_score = _project_inferred_priority(stats)
+
+    item.update({
+        "priority": priority,
+        "priority_label": _priority_label(priority),
+        "priority_score": _priority_score(priority),
+        "status": _project_inferred_status(stats),
+        "status_source": "系统推导",
+        "display_priority": _priority_label(priority),
+        "display_priority_score": _priority_score(priority),
+        "priority_source": "用户设置",
+        "inferred_priority": inferred_priority,
+        "inferred_priority_score": inferred_score,
+        "inferred_priority_source": "系统推导",
+        "stats": stats,
+        "task_total": stats["total"],
+        "pending_task_count": stats["pending"],
+        "doing_task_count": stats["doing"],
+        "done_task_count": stats["done"],
+        "today_task_count": stats["today"],
+        "open_task_count": stats["open"],
+        "recent_activity_at": recent_activity_at,
+        "is_focus_project": False,
+    })
+    return item
+
+
+def _build_dashboard_context():
+    today = _today_local()
+    goals = list_goals()
+    projects = list_projects()
+    tasks = [_dashboard_task(task, today) for task in list_tasks()]
+    mainline_goal = get_mainline_goal()
+    mainline_goal_id = mainline_goal["id"] if mainline_goal else None
+
+    tasks_by_project = {}
+    for task in tasks:
+        tasks_by_project.setdefault(task.get("project_id"), []).append(task)
+    for project_tasks in tasks_by_project.values():
+        project_tasks.sort(key=_task_sort_key, reverse=True)
+
+    project_views = [
+        _dashboard_project(project, tasks_by_project.get(project["id"], []))
+        for project in projects
+    ]
+    project_views.sort(key=_project_sort_key, reverse=True)
+
+    focus_project = next(
+        (project for project in project_views if project["stats"]["open"] > 0),
+        project_views[0] if project_views else None,
+    )
+    if focus_project:
+        focus_project["is_focus_project"] = True
+
+    projects_by_goal = {}
+    for project in project_views:
+        projects_by_goal.setdefault(project.get("goal_id"), []).append(project)
+
+    goal_groups = []
+    summary = {
+        "goal_count": len(goals),
+        "project_count": len(projects),
+        "task_count": len(tasks),
+        "open_task_count": 0,
+        "today_task_count": 0,
+        "mainline_goal_id": mainline_goal_id,
+        "focus_project_id": focus_project["id"] if focus_project else None,
+    }
+
+    for goal in goals:
+        goal_projects = projects_by_goal.get(goal["id"], [])
+        stats = {
+            "projects": len(goal_projects),
+            "total": sum(project["stats"]["total"] for project in goal_projects),
+            "pending": sum(project["stats"]["pending"] for project in goal_projects),
+            "doing": sum(project["stats"]["doing"] for project in goal_projects),
+            "done": sum(project["stats"]["done"] for project in goal_projects),
+            "today": sum(project["stats"]["today"] for project in goal_projects),
+            "open": sum(project["stats"]["open"] for project in goal_projects),
+        }
+        summary["open_task_count"] += stats["open"]
+        summary["today_task_count"] += stats["today"]
+        group = dict(goal)
+        group.update({
+            "status": _goal_inferred_status(stats),
+            "status_source": "系统推导",
+            "stats": stats,
+            "project_count": stats["projects"],
+            "task_total": stats["total"],
+            "open_task_count": stats["open"],
+            "today_task_count": stats["today"],
+            "projects": goal_projects,
+        })
+        goal_groups.append(group)
+
+    goal_groups.sort(key=lambda group: _goal_sort_key(group, mainline_goal_id), reverse=True)
+
+    enriched_mainline = None
+    if mainline_goal:
+        enriched_mainline = next(
+            (group for group in goal_groups if group["id"] == mainline_goal_id),
+            dict(mainline_goal),
+        )
+
+    today_tasks = [task for task in tasks if task.get("is_today_progress")]
+    today_tasks.sort(key=_task_sort_key, reverse=True)
+
+    return {
+        "mainline_goal": enriched_mainline,
+        "week_projects": [
+            project for project in project_views if project["stats"]["open"] > 0
+        ],
+        "today_tasks": today_tasks,
+        "goal_groups": goal_groups,
+        "project_focus": focus_project,
+        "today_task_context": today_tasks,
+        "dashboard_summary": summary,
+    }
 
 
 def get_dashboard():
-    return {
-        "mainline_goal": get_mainline_goal(),
-        "week_projects": list_active_projects(),
-        "today_tasks": list_today_progress_tasks(),
-    }
+    return _build_dashboard_context()
 
 
 def _parse_tags(raw):
@@ -1830,12 +2128,13 @@ IMPORT_TABLES = (
 
 _TABLE_FIELDS = {
     "goals": ("id", "name", "type", "created_at"),
-    "projects": ("id", "goal_id", "name", "created_at"),
+    "projects": ("id", "goal_id", "name", "priority", "created_at"),
     "tasks": (
         "id",
         "project_id",
         "name",
         "status",
+        "priority",
         "created_at",
         "today_progress",
         "today_progress_date",
@@ -2032,6 +2331,8 @@ def _normalize_import_record(table, raw):
         if key not in raw:
             if key == "today_progress":
                 record[key] = 0
+            elif key == "priority":
+                record[key] = "medium"
             elif key in _OPTIONAL_IMPORT_FIELDS:
                 record[key] = None
             else:
@@ -2086,6 +2387,8 @@ def _normalize_import_record(table, raw):
 
     if table == "goals" and record["type"] not in GOAL_TYPES:
         raise ValueError("无效的目标类型")
+    if table in {"projects", "tasks"}:
+        record["priority"] = _normalize_priority(record.get("priority"), strict=True)
     if table == "tasks" and record["status"] not in TASK_STATUSES:
         raise ValueError("无效的任务状态")
     if table == "reviews" and record["type"] not in REVIEW_TYPES:

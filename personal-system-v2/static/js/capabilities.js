@@ -525,11 +525,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <button type="button" class="btn btn-sm btn-ghost btn-delete-entry">删除</button>
         </div>
         <p class="history-content">${formatText(entry.content)}</p>
-        ${
-          entry.source_project
-            ? `<p class="history-meta">来源：${escapeHtml(entry.source_project)}</p>`
-            : ""
-        }
+        ${buildSourceRelationLine("来源项目", entry.source_project)}
       `;
 
       item.querySelector(".btn-delete-entry").addEventListener("click", async () => {

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 import pytest
 
@@ -81,10 +82,15 @@ def _seed_dashboard_project(
     name,
     task_specs,
     project_created_at="2026-01-01 00:00:00",
+    project_priority=None,
 ):
     project = client.post(
         "/api/projects",
-        json={"goal_id": goal_id, "name": name},
+        json={
+            "goal_id": goal_id,
+            "name": name,
+            **({"priority": project_priority} if project_priority else {}),
+        },
     ).get_json()["data"]
     _set_created_at("projects", project["id"], project_created_at)
 
@@ -92,7 +98,11 @@ def _seed_dashboard_project(
     for index, spec in enumerate(task_specs, start=1):
         task = client.post(
             "/api/tasks",
-            json={"project_id": project["id"], "name": f"{name}任务{index}"},
+            json={
+                "project_id": project["id"],
+                "name": f"{name}任务{index}",
+                **({"priority": spec["priority"]} if spec.get("priority") else {}),
+            },
         ).get_json()["data"]
         _set_created_at(
             "tasks",
@@ -113,6 +123,59 @@ def _seed_dashboard_project(
         tasks.append(task)
 
     return project, tasks
+
+
+def test_init_db_migrates_legacy_project_and_task_priority(tmp_path, monkeypatch):
+    db_path = tmp_path / "legacy.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            goal_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
+        );
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待处理',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        INSERT INTO goals (id, name, type, created_at)
+        VALUES (1, '旧目标', '年度', '2026-01-01 00:00:00');
+        INSERT INTO projects (id, goal_id, name, created_at)
+        VALUES (1, 1, '旧项目', '2026-01-01 00:00:00');
+        INSERT INTO tasks (id, project_id, name, status, created_at)
+        VALUES (1, 1, '旧任务', '待处理', '2026-01-01 00:00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    database.init_db()
+
+    conn = sqlite3.connect(db_path)
+    project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+    task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    project_priority = conn.execute("SELECT priority FROM projects WHERE id = 1").fetchone()[0]
+    task_priority = conn.execute("SELECT priority FROM tasks WHERE id = 1").fetchone()[0]
+    conn.close()
+
+    assert "priority" in project_columns
+    assert "priority" in task_columns
+    assert project_priority == "medium"
+    assert task_priority == "medium"
 
 
 def test_delete_project_success(client):
@@ -188,6 +251,40 @@ def test_update_goal_project_task_preserves_relations_and_system_fields(client):
     assert updated_task["project_name"] == "迭代项目"
 
 
+def test_project_and_task_priority_defaults_and_updates(client):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "优先级目标", "type": "年度"},
+    ).get_json()["data"]
+    project = client.post(
+        "/api/projects",
+        json={"goal_id": goal["id"], "name": "默认项目"},
+    ).get_json()["data"]
+    task = client.post(
+        "/api/tasks",
+        json={"project_id": project["id"], "name": "默认任务"},
+    ).get_json()["data"]
+
+    assert project["priority"] == "medium"
+    assert task["priority"] == "medium"
+    assert client.get("/api/projects").get_json()["data"][0]["priority"] == "medium"
+    assert client.get("/api/tasks").get_json()["data"][0]["priority"] == "medium"
+
+    updated_project = client.patch(
+        f"/api/projects/{project['id']}",
+        json={"priority": "high"},
+    ).get_json()["data"]
+    updated_task = client.patch(
+        f"/api/tasks/{task['id']}",
+        json={"priority": "low"},
+    ).get_json()["data"]
+
+    assert updated_project["name"] == "默认项目"
+    assert updated_project["priority"] == "high"
+    assert updated_task["name"] == "默认任务"
+    assert updated_task["priority"] == "low"
+
+
 def test_update_task_rejects_invalid_status(client):
     _goal, _project, task = _seed_hierarchy(client)
     response = client.patch(
@@ -198,6 +295,30 @@ def test_update_task_rejects_invalid_status(client):
     payload = response.get_json()
     assert payload["ok"] is False
     assert "无效的任务状态" in payload["error"]
+
+
+def test_task_status_and_today_progress_endpoints_still_work(client):
+    _goal, _project, task = _seed_hierarchy(client)
+
+    status_response = client.patch(
+        f"/api/tasks/{task['id']}/status",
+        json={"status": "进行中"},
+    )
+    assert status_response.status_code == 200
+    status_task = status_response.get_json()["data"]
+    assert status_task["status"] == "进行中"
+    assert status_task["priority"] == "medium"
+
+    today_response = client.patch(
+        f"/api/tasks/{task['id']}/today-progress",
+        json={"enabled": True},
+    )
+    assert today_response.status_code == 200
+    today_task = today_response.get_json()["data"]
+    assert today_task["today_progress"] == 1
+    assert today_task["priority"] == "medium"
+    assert today_task["goal_name"] == "级联目标"
+    assert today_task["project_name"] == "级联项目"
 
 
 def test_dashboard_active_projects_include_old_projects_with_open_tasks(client):
@@ -277,6 +398,141 @@ def test_dashboard_active_projects_ordering_and_completed_filter(client):
         many_project["id"],
         recent_project["id"],
     ]
+
+
+def test_dashboard_sorting_uses_manual_priority_before_activity_signals(client):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "手动优先级排序", "type": "年度"},
+    ).get_json()["data"]
+    high_project, _ = _seed_dashboard_project(
+        client,
+        goal["id"],
+        "手动高优先项目",
+        [{"status": "待处理", "created_at": "2026-01-01 00:00:00"}],
+        project_created_at="2026-01-01 00:00:00",
+        project_priority="high",
+    )
+    medium_today_project, high_today_tasks = _seed_dashboard_project(
+        client,
+        goal["id"],
+        "中优先今日任务",
+        [{"status": "待处理", "today": True, "priority": "high", "created_at": "2026-01-03 00:00:00"}],
+        project_created_at="2026-01-03 00:00:00",
+        project_priority="medium",
+    )
+    low_today_project, low_today_tasks = _seed_dashboard_project(
+        client,
+        goal["id"],
+        "低优先今日任务",
+        [{"status": "待处理", "today": True, "priority": "low", "created_at": "2026-01-04 00:00:00"}],
+        project_created_at="2026-01-04 00:00:00",
+        project_priority="low",
+    )
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    project_ids = [item["id"] for item in data["week_projects"]]
+    today_task_ids = [item["id"] for item in data["today_tasks"]]
+    assert project_ids[:3] == [
+        high_project["id"],
+        medium_today_project["id"],
+        low_today_project["id"],
+    ]
+    assert today_task_ids[:2] == [
+        high_today_tasks[0]["id"],
+        low_today_tasks[0]["id"],
+    ]
+
+
+def test_dashboard_relationship_empty_state(client):
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["mainline_goal"] is None
+    assert data["week_projects"] == []
+    assert data["today_tasks"] == []
+    assert data["goal_groups"] == []
+    assert data["today_task_context"] == []
+    assert data["project_focus"] is None
+    assert data["dashboard_summary"]["goal_count"] == 0
+    assert data["dashboard_summary"]["project_count"] == 0
+    assert data["dashboard_summary"]["task_count"] == 0
+
+
+def test_dashboard_relationship_fields_and_project_stats(client):
+    mainline = client.post(
+        "/api/goals",
+        json={"name": "主线目标", "type": "当前主线"},
+    ).get_json()["data"]
+    client.post(
+        "/api/goals",
+        json={"name": "空目标", "type": "年度"},
+    )
+    active_project, _ = _seed_dashboard_project(
+        client,
+        mainline["id"],
+        "重点项目",
+        [
+            {"status": "进行中", "today": True, "priority": "high", "created_at": "2026-01-05 00:00:00"},
+            {"status": "待处理", "created_at": "2026-01-04 00:00:00"},
+            {"status": "完成", "created_at": "2026-01-03 00:00:00"},
+        ],
+        project_created_at="2026-01-01 00:00:00",
+        project_priority="high",
+    )
+    empty_project = client.post(
+        "/api/projects",
+        json={"goal_id": mainline["id"], "name": "无任务项目"},
+    ).get_json()["data"]
+    _set_created_at("projects", empty_project["id"], "2026-01-06 00:00:00")
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert {"mainline_goal", "week_projects", "today_tasks"} <= set(data)
+    assert {"goal_groups", "project_focus", "today_task_context", "dashboard_summary"} <= set(data)
+    assert data["mainline_goal"]["id"] == mainline["id"]
+    assert data["mainline_goal"]["status_source"] == "系统推导"
+    assert data["mainline_goal"]["project_count"] == 2
+    assert data["mainline_goal"]["open_task_count"] == 2
+    assert data["mainline_goal"]["today_task_count"] == 1
+    assert data["project_focus"]["id"] == active_project["id"]
+    assert data["project_focus"]["is_focus_project"] is True
+
+    groups_by_name = {group["name"]: group for group in data["goal_groups"]}
+    assert {"主线目标", "空目标"} <= set(groups_by_name)
+    assert groups_by_name["空目标"]["project_count"] == 0
+    assert groups_by_name["空目标"]["status"] == "暂无项目"
+
+    mainline_group = groups_by_name["主线目标"]
+    projects_by_name = {project["name"]: project for project in mainline_group["projects"]}
+    assert projects_by_name["重点项目"]["display_priority"] == "高"
+    assert projects_by_name["重点项目"]["priority_source"] == "用户设置"
+    assert projects_by_name["重点项目"]["priority"] == "high"
+    assert projects_by_name["重点项目"]["inferred_priority_source"] == "系统推导"
+    assert projects_by_name["重点项目"]["stats"] == {
+        "total": 3,
+        "pending": 1,
+        "doing": 1,
+        "done": 1,
+        "today": 1,
+        "open": 2,
+    }
+    assert projects_by_name["无任务项目"]["display_priority"] == "中"
+    assert projects_by_name["无任务项目"]["status"] == "暂无任务"
+    assert projects_by_name["无任务项目"]["stats"]["total"] == 0
+
+    today_task = data["today_task_context"][0]
+    assert today_task["goal_name"] == "主线目标"
+    assert today_task["project_name"] == "重点项目"
+    assert today_task["display_priority"] == "高"
+    assert today_task["priority"] == "high"
+    assert today_task["is_today_progress"] is True
 
 
 def test_delete_review_success(client):

@@ -7,7 +7,7 @@
   <div class="page-header-row">
     <div>
       <h1 class="page-title">指挥部总览</h1>
-      <p class="page-subtitle">当前最重要的目标、项目与任务</p>
+      <p class="page-subtitle">先看今日行动，再看重点项目</p>
     </div>
     <div class="header-actions">
       <button type="button" id="ai-briefing-btn" class="btn btn-sm btn-ai">AI 今日简报</button>
@@ -19,23 +19,30 @@
   {% endif %}
 </header>
 
-<div class="dashboard-layout">
-  <section class="section-card dashboard-span-full" id="dashboard-goal">
-    <h2>当前主线目标</h2>
+<div class="dashboard-layout dashboard-workbench dashboard-stack">
+  <section class="section-card dashboard-span-full dashboard-section-goal" id="dashboard-goal">
+    <div class="section-header-row">
+      <h2>当前主线目标</h2>
+      <span class="section-kicker">最重要方向</span>
+    </div>
     <div id="dashboard-goal-content"></div>
   </section>
 
-  <div class="dashboard-grid">
-    <section class="section-card" id="dashboard-projects">
-      <h2>进行中的项目</h2>
-      <div id="dashboard-projects-content"></div>
-    </section>
+  <section class="section-card dashboard-span-full dashboard-section-today" id="dashboard-tasks">
+    <div class="section-header-row">
+      <h2>今日行动</h2>
+      <span class="section-kicker">今天必须先做</span>
+    </div>
+    <div id="dashboard-tasks-content"></div>
+  </section>
 
-    <section class="section-card" id="dashboard-tasks">
-      <h2>今日必须推进的任务</h2>
-      <div id="dashboard-tasks-content"></div>
-    </section>
-  </div>
+  <section class="section-card dashboard-span-full dashboard-section-projects" id="dashboard-projects">
+    <div class="section-header-row">
+      <h2>重点项目</h2>
+      <span class="section-kicker">当前最该推进的项目</span>
+    </div>
+    <div id="dashboard-projects-content"></div>
+  </section>
 </div>
 {% endblock %}
 

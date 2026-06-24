@@ -1,5 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const assetForm = document.getElementById("asset-form");
+  const assetFormHost = document.getElementById("asset-form-host");
+  const createAssetBtn = document.getElementById("create-asset-btn");
   const assetsList = document.getElementById("assets-list");
   const assetsCount = document.getElementById("assets-count");
   const typeFilter = document.getElementById("type-filter");
@@ -13,6 +15,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const assetTypes = window.ASSET_TYPES || [];
   const fieldSchemas = window.ASSET_FIELD_SCHEMAS || {};
   const maturityLevels = window.MATURITY_LEVELS || [];
+
+  const PREVIEW_PRIORITY_KEYS = [
+    "底层本质",
+    "现象",
+    "核心内容",
+    "执行步骤",
+    "核心原则",
+    "解决的问题",
+    "可复用场景",
+  ];
 
   if (!assetForm || !assetsList) return;
 
@@ -356,37 +368,77 @@ document.addEventListener("DOMContentLoaded", () => {
     return entries;
   }
 
-  function renderAssetSummary(asset, fieldEntries) {
-    const summary = (asset.summary || "").trim();
-    const fallback = !summary ? fieldEntries[0]?.[1] || "" : "";
-    const text = summary || fallback;
-    if (!text) return "";
-
-    const repeatedWithFields =
-      Boolean(summary) &&
-      fieldEntries.some(([, value]) => isRepeatedContent(summary, value));
-    const collapsedOnly = repeatedWithFields || Boolean(fallback);
-    const className = collapsedOnly
-      ? "asset-summary asset-summary-collapsed-only"
-      : "asset-summary";
-    return `<p class="${className}">${formatText(text)}</p>`;
+  function truncatePreview(text, max = 36) {
+    const normalized = String(text || "")
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!normalized) return "";
+    return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
   }
 
-  function renderFieldPreview(asset, entries, hasSummary) {
+  function buildCompactPreviewParts(asset, fieldEntries) {
+    const fields = asset.fields || {};
+    const parts = [];
+    const seen = new Set();
+
+    const summary = (asset.summary || "").trim();
+    if (summary) {
+      parts.push({ label: "摘要", text: summary });
+      seen.add(normalizeComparableText(summary));
+    }
+
+    PREVIEW_PRIORITY_KEYS.forEach((key) => {
+      const text = (fields[key] || "").trim();
+      if (!text) return;
+      const comparable = normalizeComparableText(text);
+      if (seen.has(comparable)) return;
+      if (parts.some((part) => isRepeatedContent(part.text, text))) return;
+      parts.push({ label: key, text });
+      seen.add(comparable);
+    });
+
+    if (!parts.length) {
+      fieldEntries.slice(0, 3).forEach(([key, value]) => {
+        const text = (value || "").trim();
+        if (!text) return;
+        if (parts.some((part) => isRepeatedContent(part.text, text))) return;
+        parts.push({ label: key, text });
+      });
+    }
+
+    return parts.slice(0, 3);
+  }
+
+  function buildCompactPreviewLine(asset, fieldEntries) {
+    const parts = buildCompactPreviewParts(asset, fieldEntries);
+    if (!parts.length) return "";
+
+    const fullTitle = parts.map((part) => `${part.label}：${part.text}`).join(" · ");
+    const line = parts
+      .map(
+        (part) =>
+          `<span class="asset-preview-part"><span class="asset-preview-label">${escapeHtml(part.label)}：</span>${escapeHtml(truncatePreview(part.text))}</span>`
+      )
+      .join('<span class="asset-preview-sep"> · </span>');
+
+    return `<p class="asset-archive-preview-line" title="${escapeAttr(fullTitle)}">${line}</p>`;
+  }
+
+  function renderFieldPreview(asset, entries) {
     if (!entries.length) {
-      const fallback = hasSummary ? "" : asset.summary || asset.core_content;
+      const fallback = (asset.summary || asset.core_content || "").trim();
       return fallback
-        ? `<p class="asset-preview-text">${formatText(fallback)}</p>`
+        ? `<p class="asset-preview-text asset-detail-fallback">${formatText(fallback)}</p>`
         : "";
     }
     return `
-      <dl class="asset-field-preview">
+      <dl class="asset-field-preview asset-field-preview-grid">
         ${entries
           .map(
             ([key, value]) =>
-              `<div><dt>${escapeHtml(key)}</dt><dd>${formatText(value)}</dd></div>`
+              `<div class="asset-field-preview-cell"><dt>${escapeHtml(key)}</dt><dd>${formatText(value)}</dd></div>`
           )
-        .join("")}
+          .join("")}
       </dl>`;
   }
 
@@ -424,26 +476,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderAssetArchiveItem(asset) {
     const tagsHtml = (asset.capability_tags || [])
-      .map((tag) => `<span class="tag tag-cap">${escapeHtml(tag)}</span>`)
+      .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
       .join("");
     const maturityClass = MATURITY_CLASS[asset.maturity] || "maturity-draft";
     const fieldPreviewEntries = getFieldPreviewEntries(asset);
-    const summaryHtml = renderAssetSummary(asset, fieldPreviewEntries);
+    const previewLine = buildCompactPreviewLine(asset, fieldPreviewEntries);
 
     return `
       <article class="asset-archive-item" data-asset-id="${asset.id}">
         <div class="asset-archive-item-head">
           <div class="asset-archive-item-main">
-            <div class="asset-archive-item-title-row">
+            <div class="asset-archive-item-topline">
               <h3 class="asset-archive-item-title">${escapeHtml(asset.title)}</h3>
               <span class="tag asset-maturity ${maturityClass}">${escapeHtml(asset.maturity || "草稿")}</span>
+              ${tagsHtml ? `<span class="asset-archive-tags-inline">${tagsHtml}</span>` : ""}
+              <span class="asset-meta-chip">复用 ${asset.reuse_count || 0}</span>
+              <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
             </div>
-            ${tagsHtml ? `<div class="asset-card-tags-row asset-archive-tags">${tagsHtml}</div>` : ""}
-            ${summaryHtml}
-            <div class="asset-archive-item-meta">
-              <span>复用 ${asset.reuse_count || 0}</span>
-              <span>更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
-            </div>
+            ${previewLine}
           </div>
           <div class="asset-archive-item-actions">
             <button type="button" class="btn btn-sm btn-ghost btn-edit-asset">编辑</button>
@@ -452,9 +502,9 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
         </div>
         <div class="asset-card-details" hidden>
-          ${renderFieldPreview(asset, fieldPreviewEntries, Boolean(summaryHtml))}
+          ${renderFieldPreview(asset, fieldPreviewEntries)}
           <div class="asset-card-meta-grid asset-detail-meta-grid">
-            <div><span class="meta-label">复用场景</span><span class="meta-value">${formatInline(asset.reusable_scenario)}</span></div>
+            <div><span class="meta-label">复用场景</span><span class="meta-value">${formatText(asset.reusable_scenario)}</span></div>
           </div>
           <div class="asset-ai-actions">
             <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
@@ -534,7 +584,7 @@ document.addEventListener("DOMContentLoaded", () => {
       assetsList.innerHTML = `
         <div class="empty-state assets-empty-state">
           <strong>${activeType || activeTag ? "暂无匹配资产" : "添加第一条可复用资产"}</strong>
-          ${activeType || activeTag ? "调整筛选条件或新建资产" : "填写左侧表单，或从复盘 / 智能归档生成"}
+          ${activeType || activeTag ? "调整筛选条件或新建资产" : "点击右上角「新建资产」，或从复盘 / 智能归档生成"}
         </div>`;
       return;
     }
@@ -578,6 +628,97 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function resetAssetCreateForm() {
+    assetForm.reset();
+    sourceReviewInput.value = "";
+    if (prefillHint) prefillHint.hidden = true;
+    assetTypeSelect.value = "本质洞察";
+    maturitySelect.value = "草稿";
+    renderDynamicFields("本质洞察");
+  }
+
+  function restoreAssetFormHost() {
+    if (!assetFormHost) return;
+    if (assetForm && assetForm.parentElement !== assetFormHost) {
+      assetFormHost.appendChild(assetForm);
+    }
+    if (prefillHint && prefillHint.parentElement !== assetFormHost) {
+      assetFormHost.appendChild(prefillHint);
+    }
+  }
+
+  function closeAssetCreateModal() {
+    restoreAssetFormHost();
+    const modal = document.getElementById("ai-modal");
+    if (modal) modal.classList.remove("ai-modal-asset-create");
+    hideAIModal();
+  }
+
+  function openAssetCreateModal() {
+    restoreAssetFormHost();
+    const modal = ensureAIModal();
+    const body = modal.querySelector("#ai-modal-body");
+    modal.querySelector("#ai-modal-title").textContent = "新建资产";
+    body.innerHTML = "";
+    while (assetFormHost.firstChild) {
+      body.appendChild(assetFormHost.firstChild);
+    }
+    modal.classList.add("ai-modal-asset-create");
+
+    const confirmBtn = modal.querySelector("#ai-modal-confirm");
+    const cancelBtn = modal.querySelector("#ai-modal-cancel");
+    confirmBtn.style.display = "";
+    confirmBtn.textContent = "保存资产";
+
+    const newConfirm = confirmBtn.cloneNode(true);
+    const newCancel = cancelBtn.cloneNode(true);
+    confirmBtn.replaceWith(newConfirm);
+    cancelBtn.replaceWith(newCancel);
+
+    newCancel.addEventListener("click", closeAssetCreateModal);
+    newConfirm.addEventListener("click", async () => {
+      newConfirm.disabled = true;
+      newConfirm.textContent = "保存中…";
+      try {
+        await submitNewAsset();
+        closeAssetCreateModal();
+      } catch (err) {
+        showToast(err.message || "保存失败", "error");
+      } finally {
+        newConfirm.disabled = false;
+        newConfirm.textContent = "保存资产";
+      }
+    });
+
+    modal.classList.remove("hidden");
+    document.getElementById("asset-title")?.focus();
+  }
+
+  async function submitNewAsset() {
+    const title = document.getElementById("asset-title").value.trim();
+    if (!title) {
+      throw new Error("标题不能为空");
+    }
+    const sourceId = sourceReviewInput.value
+      ? parseInt(sourceReviewInput.value, 10)
+      : null;
+    const payload = {
+      title,
+      asset_type: assetTypeSelect.value,
+      maturity: maturitySelect.value,
+      fields: readDynamicFields(),
+      capability_tags: getSelectedTags(),
+      source_review_id: sourceId,
+    };
+    await apiRequest("/api/assets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    resetAssetCreateForm();
+    showToast("资产已保存", "success");
+    await loadAssets();
+  }
+
   async function applyPrefillFromReview(reviewId) {
     const review = await apiRequest(`/api/reviews/${reviewId}`);
     document.getElementById("asset-title").value = `${review.type}复盘 · ${review.review_date}`;
@@ -588,8 +729,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     sourceReviewInput.value = review.id;
     prefillHint.hidden = false;
-    assetForm.scrollIntoView({ behavior: "smooth" });
+    openAssetCreateModal();
   }
+
+  createAssetBtn?.addEventListener("click", openAssetCreateModal);
 
   assetTypeSelect.addEventListener("change", () => {
     renderDynamicFields(assetTypeSelect.value);
@@ -597,32 +740,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   assetForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const sourceId = sourceReviewInput.value
-      ? parseInt(sourceReviewInput.value, 10)
-      : null;
-    const payload = {
-      title: document.getElementById("asset-title").value,
-      asset_type: assetTypeSelect.value,
-      maturity: maturitySelect.value,
-      fields: readDynamicFields(),
-      capability_tags: getSelectedTags(),
-      source_review_id: sourceId,
-    };
     try {
-      await apiRequest("/api/assets", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      assetForm.reset();
-      sourceReviewInput.value = "";
-      prefillHint.hidden = true;
-      assetTypeSelect.value = "本质洞察";
-      maturitySelect.value = "草稿";
-      renderDynamicFields("本质洞察");
-      showToast("资产已保存", "success");
-      await loadAssets();
+      await submitNewAsset();
+      closeAssetCreateModal();
     } catch (err) {
       showToast(err.message, "error");
+    }
+  });
+
+  const assetCreateModal = ensureAIModal();
+  assetCreateModal.querySelector(".ai-modal-backdrop")?.addEventListener("click", () => {
+    if (assetCreateModal.classList.contains("ai-modal-asset-create")) {
+      closeAssetCreateModal();
+    }
+  });
+  assetCreateModal.querySelector(".ai-modal-close")?.addEventListener("click", () => {
+    if (assetCreateModal.classList.contains("ai-modal-asset-create")) {
+      closeAssetCreateModal();
     }
   });
 

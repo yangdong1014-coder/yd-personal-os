@@ -237,7 +237,7 @@ def api_create_project():
     payload = request.get_json(silent=True) or {}
     try:
         project = database.create_project(
-            payload.get("goal_id"), payload.get("name", "")
+            payload.get("goal_id"), payload.get("name", ""), payload.get("priority")
         )
         return jsonify({"ok": True, "data": project})
     except (ValueError, TypeError) as exc:
@@ -274,7 +274,9 @@ def api_list_tasks():
 def api_create_task():
     payload = request.get_json(silent=True) or {}
     try:
-        task = database.create_task(payload.get("project_id"), payload.get("name", ""))
+        task = database.create_task(
+            payload.get("project_id"), payload.get("name", ""), payload.get("priority")
+        )
         return jsonify({"ok": True, "data": task})
     except (ValueError, TypeError) as exc:
         return _error(str(exc) if str(exc) else "参数无效")

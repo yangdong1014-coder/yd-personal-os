@@ -192,7 +192,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const parentRef = (payload.parent_ref || "").trim();
     const batchProject = parentRef ? findBatchProjectByRef(parentRef) : null;
     if (batchProject) {
-      return `<p class="form-hint inbox-batch-hint">将归属同批项目：${escapeHtml(batchProject.title)}</p>`;
+      return buildSourceRelationLine("将归属同批项目", batchProject.title);
     }
     const selected = payload.project_id || "";
     const options = ['<option value="">选择归属项目</option>']
@@ -208,6 +208,28 @@ document.addEventListener("DOMContentLoaded", () => {
         <label class="form-label">选择归属项目</label>
         <select class="select inbox-project-select" data-id="${suggestion.id}">${options}</select>
       </div>`;
+  }
+
+  function renderRelationSummary(suggestion) {
+    const payload = getEffectivePayload(suggestion);
+    if (suggestion.target_type === "project") {
+      const goalId = Number(payload.goal_id);
+      const goal = goals.find((item) => item.id === goalId);
+      if (goal) {
+        return `<p class="task-context-line relation-line muted-relation item-context">${buildInlineGoalContext(goal.name)}</p>`;
+      }
+    }
+    if (suggestion.target_type === "task") {
+      const projectId = Number(payload.project_id);
+      const project = projects.find((item) => item.id === projectId);
+      if (project) return buildTaskContextLine(project.name, project.goal_name);
+      const parentRef = (payload.parent_ref || "").trim();
+      const batchProject = parentRef ? findBatchProjectByRef(parentRef) : null;
+      if (batchProject) {
+        return buildSourceRelationLine("归属项目", batchProject.title);
+      }
+    }
+    return "";
   }
 
   function renderRelationControls(suggestion) {
@@ -336,6 +358,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   ${statusTag}
                 </div>
                 <h3 class="entity-title">${escapeHtml(suggestion.title)}</h3>
+                ${renderRelationSummary(suggestion)}
                 <p class="inbox-summary">${escapeHtml(summarize(suggestion.content))}</p>
                 <p class="inbox-reason"><strong>归档理由</strong> ${escapeHtml(suggestion.reason || "—")}</p>
                 ${renderRelationControls(suggestion)}

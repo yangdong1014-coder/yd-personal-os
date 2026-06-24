@@ -174,7 +174,8 @@ function buildTodayRecommendHtml(recommendations) {
           <input type="checkbox" class="recommend-check" data-task-id="${t.task_id}" checked>
           <div class="project-draft-fields">
             <strong class="recommend-name">${escapeHtml(t.name)}</strong>
-            <span class="form-hint">${escapeHtml(t.goal_name)} / ${escapeHtml(t.project_name)} · ${escapeHtml(t.status)}</span>
+            ${buildTaskContextLine(t.project_name, t.goal_name)}
+            <span class="form-hint muted-relation">状态 · ${escapeHtml(t.status)}</span>
             ${t.reason ? `<span class="form-hint">${escapeHtml(t.reason)}</span>` : ""}
           </div>
         </label>
@@ -453,7 +454,7 @@ function buildDispatchActionsHtml(data) {
       <input type="checkbox" class="dispatch-mark-check" data-task-id="${item.task_id}" checked>
       <div class="project-draft-fields">
         <strong class="recommend-name">标记今日推进 · ${escapeHtml(item.name)}</strong>
-        <span class="form-hint">${escapeHtml(item.goal_name)} / ${escapeHtml(item.project_name)}</span>
+        ${buildTaskContextLine(item.project_name, item.goal_name)}
         ${item.reason ? `<span class="form-hint">${escapeHtml(item.reason)}</span>` : ""}
       </div>
     </label>
@@ -468,7 +469,7 @@ function buildDispatchActionsHtml(data) {
       <input type="checkbox" class="dispatch-new-check" data-project-id="${item.project_id}" checked>
       <div class="project-draft-fields">
         <input type="text" class="input full-width dispatch-new-name" data-project-id="${item.project_id}" value="${escapeAttr(item.name)}">
-        <span class="form-hint">新建任务 · ${escapeHtml(item.goal_name)} / ${escapeHtml(item.project_name)}</span>
+        ${buildTaskContextLine(item.project_name, item.goal_name)}
         ${item.reason ? `<span class="form-hint">${escapeHtml(item.reason)}</span>` : ""}
       </div>
     </label>

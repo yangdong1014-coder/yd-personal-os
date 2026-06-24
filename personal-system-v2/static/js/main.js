@@ -406,6 +406,41 @@ async function handleExport() {
   }
 }
 
+function buildInlineGoalContext(goalName) {
+  const goal = goalName || "未归属目标";
+  return `<span class="inline-parent-context muted-context relation-parent title-context" title="${escapeHtml(goal)}">（${escapeHtml(goal)}）</span>`;
+}
+
+function buildProjectTitleWithGoal(projectName, goalName) {
+  const project = projectName || "未命名项目";
+  return `<span class="title-with-context">${escapeHtml(project)}${buildInlineGoalContext(goalName)}</span>`;
+}
+
+function buildTaskContextLine(projectName, goalName) {
+  const project = projectName || "未归属项目";
+  return `<p class="task-context-line relation-line muted-relation item-context"><span>${escapeHtml(project)}${buildInlineGoalContext(goalName)}</span></p>`;
+}
+
+function buildTaskContextGoalOnly(goalName) {
+  return `<p class="task-context-line relation-line muted-relation item-context">${buildInlineGoalContext(goalName)}</p>`;
+}
+
+function buildProjectRelationLine(goalName) {
+  const goal = goalName || "未归属目标";
+  return `<p class="relation-line meta-line muted-relation item-context"><span>目标 · ${escapeHtml(goal)}</span></p>`;
+}
+
+function buildTaskRelationLine(goalName, projectName) {
+  return buildTaskContextLine(projectName, goalName);
+}
+
+function buildSourceRelationLine(label, value) {
+  const text = (value || "").trim();
+  if (!text) return "";
+  const prefix = label || "来源";
+  return `<p class="relation-line meta-line muted-relation item-context"><span>${escapeHtml(prefix)} · ${escapeHtml(text)}</span></p>`;
+}
+
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
