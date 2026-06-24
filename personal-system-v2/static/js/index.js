@@ -8,8 +8,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!goalEl || !projectsEl || !tasksEl) return;
 
   const TODAY_TASK_LIMIT = 3;
-  const FOCUS_PROJECT_LIMIT = 5;
+  const FOCUS_PROJECT_LIMIT = 6;
   const expandedProjectIds = new Set();
+  let cachedFocusProjects = [];
+  let focusProjectsExpanded = false;
   let tasksByProject = {};
   let mainlineExpandMode = null;
   let currentMainlineGoal = null;
@@ -118,10 +120,8 @@ document.addEventListener("DOMContentLoaded", () => {
     return projects;
   }
 
-  function isKeyProject(project) {
-    const stats = projectStats(project);
-    const isHigh = project.priority === "high" || priorityScore(project) >= 3;
-    return isHigh || stats.today > 0 || stats.doing > 0 || stats.open > 0;
+  function isHighPriorityProject(project) {
+    return project.priority === "high";
   }
 
   function compareProjects(a, b) {
@@ -148,8 +148,34 @@ document.addEventListener("DOMContentLoaded", () => {
     return 0;
   }
 
-  function selectKeyProjects(data) {
-    return collectProjects(data).filter(isKeyProject).sort(compareProjects);
+  function compareFocusProjects(a, b) {
+    const aStats = projectStats(a);
+    const bStats = projectStats(b);
+    const aKey = [
+      (aStats.today || 0) > 0 ? 1 : 0,
+      aStats.open || 0,
+      a.recent_activity_at || "",
+      a.created_at || "",
+      -(Number(a.id) || 0),
+    ];
+    const bKey = [
+      (bStats.today || 0) > 0 ? 1 : 0,
+      bStats.open || 0,
+      b.recent_activity_at || "",
+      b.created_at || "",
+      -(Number(b.id) || 0),
+    ];
+    for (let i = 0; i < aKey.length; i += 1) {
+      if (aKey[i] > bKey[i]) return -1;
+      if (aKey[i] < bKey[i]) return 1;
+    }
+    return 0;
+  }
+
+  function selectFocusProjects(data) {
+    return collectProjects(data)
+      .filter(isHighPriorityProject)
+      .sort(compareFocusProjects);
   }
 
   function renderMainlineStatusHint(goal) {
@@ -377,7 +403,7 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
-  function renderProjectCard(project, index) {
+  function renderProjectCard(project, index, collapsedHidden = false) {
     const stats = projectStats(project);
     const projectId = Number(project.id);
     const isExpanded = expandedProjectIds.has(projectId);
@@ -387,6 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <article
         class="dashboard-project-card dashboard-project-card--compact ${projectPriorityClasses(project.priority || project.display_priority)}${project.is_focus_project ? " is-focus" : ""}"
         data-project-id="${project.id || index}"
+        ${collapsedHidden ? " hidden" : ""}
         title="项目优先级：${escapeHtml(priorityHint)}"
         aria-label="项目 ${escapeHtml(project.name || "未命名项目")}，项目优先级 ${escapeHtml(priorityHint)}"
       >
@@ -437,45 +464,41 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderKeyProjects(projects) {
     if (!projects.length) {
       projectsEl.innerHTML = emptyState(
-        "暂无重点项目",
-        "为高优先级项目添加任务，或标记今日推进后会出现在这里"
+        "暂无高优先级项目",
+        "在目标页将项目设置为高优先级后会出现在这里"
       );
       return;
     }
 
-    const visible = projects.slice(0, FOCUS_PROJECT_LIMIT);
     const hiddenCount = Math.max(projects.length - FOCUS_PROJECT_LIMIT, 0);
+    const showToggle = hiddenCount > 0;
 
     projectsEl.innerHTML = `
-      <div class="dashboard-project-grid">
-        ${visible.map((project, index) => renderProjectCard(project, index)).join("")}
+      <div class="dashboard-project-grid dashboard-focus-project-grid">
+        ${projects
+          .map((project, index) =>
+            renderProjectCard(
+              project,
+              index,
+              showToggle && !focusProjectsExpanded && index >= FOCUS_PROJECT_LIMIT
+            )
+          )
+          .join("")}
       </div>
       ${
-        hiddenCount > 0
-          ? `
-            <div id="dashboard-more-projects" class="dashboard-project-grid dashboard-more-projects" hidden>
-              ${projects
-                .slice(FOCUS_PROJECT_LIMIT)
-                .map((project, index) => renderProjectCard(project, index + FOCUS_PROJECT_LIMIT))
-                .join("")}
-            </div>
-            <button type="button" id="dashboard-show-more-projects" class="btn btn-sm btn-ghost btn-show-more">
-              展开更多项目（${hiddenCount}）
-            </button>
-          `
+        showToggle
+          ? `<button type="button" id="dashboard-show-more-projects" class="btn btn-sm btn-ghost btn-show-more">${
+              focusProjectsExpanded ? "收起" : `展开更多（剩余${hiddenCount}）`
+            }</button>`
           : ""
       }
     `;
 
     const showMoreBtn = document.getElementById("dashboard-show-more-projects");
-    const morePanel = document.getElementById("dashboard-more-projects");
-    if (showMoreBtn && morePanel) {
+    if (showMoreBtn) {
       showMoreBtn.addEventListener("click", () => {
-        const expanded = morePanel.hidden;
-        morePanel.hidden = !expanded;
-        showMoreBtn.textContent = expanded
-          ? "收起更多项目"
-          : `展开更多项目（${hiddenCount}）`;
+        focusProjectsExpanded = !focusProjectsExpanded;
+        renderKeyProjects(cachedFocusProjects);
       });
     }
   }
@@ -544,7 +567,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const todayTasks = data.today_task_context || data.today_tasks || [];
     renderMainlineGoal(data.mainline_goal, todayTasks);
     renderTodayTasks(todayTasks);
-    renderKeyProjects(selectKeyProjects(data));
+    focusProjectsExpanded = false;
+    cachedFocusProjects = selectFocusProjects(data);
+    renderKeyProjects(cachedFocusProjects);
   }
 
   const goalSection = document.getElementById("dashboard-goal");
