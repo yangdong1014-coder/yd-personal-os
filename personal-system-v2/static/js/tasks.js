@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentView = "overview";
   let cachedTasks = [];
   let cachedProjects = [];
+  const projectGroupExpandState = new Map();
 
   const PRIORITY_LABELS = { high: "高", medium: "中", low: "低" };
   const PRIORITY_SCORES = { high: 3, medium: 2, low: 1 };
@@ -681,6 +682,35 @@ document.addEventListener("DOMContentLoaded", () => {
     tasksList.appendChild(shell);
   }
 
+  function isProjectGroupExpanded(group) {
+    const projectId = Number(group.projectId);
+    if (projectGroupExpandState.has(projectId)) {
+      return projectGroupExpandState.get(projectId);
+    }
+    return Boolean(group.shouldExpand);
+  }
+
+  function handleProjectGroupToggle(event) {
+    if (currentView !== "project") return;
+
+    const button = event.target.closest(".btn-toggle-task-project");
+    if (!button || !tasksList.contains(button)) return;
+
+    const groupEl = button.closest(".task-project-group");
+    const groupBody = groupEl?.querySelector(".task-project-group-body");
+    if (!groupBody) return;
+
+    const projectId = Number(groupEl.dataset.projectId);
+    if (!Number.isFinite(projectId)) return;
+
+    const expanded = groupBody.hidden;
+    groupBody.hidden = !expanded;
+    groupEl.classList.toggle("task-project-group-expanded", expanded);
+    projectGroupExpandState.set(projectId, expanded);
+    button.textContent = expanded ? "收起" : "展开";
+    button.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+
   function renderProjectView(tasks) {
     tasksList.innerHTML = "";
 
@@ -701,8 +731,7 @@ document.addEventListener("DOMContentLoaded", () => {
         "aria-label",
         `项目 ${group.projectName}，项目优先级 ${projectPriorityLabel(group.priority || group.displayPriority)}`
       );
-      const detailId = `task-project-detail-${group.projectId || group.key}`;
-      const shouldExpand = group.shouldExpand;
+      const isExpanded = isProjectGroupExpanded(group);
 
       groupEl.innerHTML = `
         <div class="task-project-group-head task-project-group-head--compact">
@@ -724,55 +753,22 @@ document.addEventListener("DOMContentLoaded", () => {
             <button
               type="button"
               class="btn btn-sm btn-ghost btn-toggle-task-project"
-              aria-expanded="${shouldExpand ? "true" : "false"}"
-            >${shouldExpand ? "收起" : "展开"}</button>
-            <button
-              type="button"
-              class="btn btn-sm btn-ghost btn-expand-detail"
-              data-target="${detailId}"
-              aria-expanded="false"
-            >详情</button>
+              data-project-id="${group.projectId || ""}"
+              aria-expanded="${isExpanded ? "true" : "false"}"
+            >${isExpanded ? "收起" : "展开"}</button>
           </div>
         </div>
-        <div id="${detailId}" class="expand-detail" hidden>
-          <div class="expand-detail-panel">
-            <div class="expand-detail-grid">
-              <span>全部 ${groupStats.total}</span>
-              <span>待处理 ${groupStats.pending}</span>
-              <span>进行中 ${groupStats.doing}</span>
-              <span>已完成 ${groupStats.done}</span>
-              <span>最近活动 ${escapeHtml(formatActivity(group.recentActivityAt))}</span>
-            </div>
-          </div>
-        </div>
-        <div class="task-project-group-body"${shouldExpand ? "" : " hidden"}>
+        <div class="task-project-group-body"${isExpanded ? "" : " hidden"}>
           <div class="task-project-group-tasks"></div>
         </div>
       `;
 
-      const body = groupEl.querySelector(".task-project-group-tasks");
+      const tasksHost = groupEl.querySelector(".task-project-group-tasks");
       group.tasks.forEach((task) => {
-        body.appendChild(renderTaskRow(task, "project"));
+        tasksHost.appendChild(renderTaskRow(task, "project"));
       });
 
-      const toggleBtn = groupEl.querySelector(".btn-toggle-task-project");
-      toggleBtn.addEventListener("click", () => {
-        const expanded = groupEl.classList.toggle("task-project-group-expanded");
-        body.hidden = !expanded;
-        toggleBtn.textContent = expanded ? "收起" : "展开";
-        toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
-      });
-
-      const detailBtn = groupEl.querySelector(".btn-expand-detail");
-      const detailPanel = groupEl.querySelector(`#${detailId}`);
-      detailBtn.addEventListener("click", () => {
-        const expanded = detailPanel.hidden;
-        detailPanel.hidden = !expanded;
-        detailBtn.textContent = expanded ? "收起详情" : "详情";
-        detailBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
-      });
-
-      if (shouldExpand) {
+      if (isExpanded) {
         groupEl.classList.add("task-project-group-expanded");
       }
 
@@ -807,6 +803,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     renderCurrentView();
   }
+
+  tasksList.addEventListener("click", handleProjectGroupToggle);
 
   viewButtons.forEach((button) => {
     button.addEventListener("click", () => setTaskView(button.dataset.view));

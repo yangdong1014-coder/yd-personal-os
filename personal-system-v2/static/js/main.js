@@ -1,3 +1,39 @@
+const UI_THEME_STORAGE_KEY = "personal-os-ui-theme";
+
+const UI_THEMES = [
+  { id: "theme-dark-warm", label: "外观：深色暖色" },
+  { id: "theme-dark-cool", label: "外观：深色冷色" },
+  { id: "theme-light-warm", label: "外观：浅色暖色" },
+  { id: "theme-light-cool", label: "外观：浅色冷色" },
+];
+
+function getStoredUiTheme() {
+  const saved = localStorage.getItem(UI_THEME_STORAGE_KEY);
+  return UI_THEMES.some((theme) => theme.id === saved) ? saved : UI_THEMES[0].id;
+}
+
+function applyUiTheme(themeId) {
+  const theme =
+    UI_THEMES.find((item) => item.id === themeId) || UI_THEMES[0];
+  const root = document.documentElement;
+
+  UI_THEMES.forEach((item) => root.classList.remove(item.id));
+  root.classList.add(theme.id);
+  localStorage.setItem(UI_THEME_STORAGE_KEY, theme.id);
+
+  const label = document.getElementById("theme-toggle-label");
+  if (label) {
+    label.textContent = theme.label;
+  }
+}
+
+function cycleUiTheme() {
+  const current = getStoredUiTheme();
+  const index = UI_THEMES.findIndex((item) => item.id === current);
+  const next = UI_THEMES[(index + 1) % UI_THEMES.length];
+  applyUiTheme(next.id);
+}
+
 function authFetchOptions(options = {}) {
   return {
     credentials: "same-origin",
@@ -10,6 +46,13 @@ function authFetchOptions(options = {}) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  applyUiTheme(getStoredUiTheme());
+
+  const themeBtn = document.getElementById("theme-toggle-btn");
+  if (themeBtn) {
+    themeBtn.addEventListener("click", cycleUiTheme);
+  }
+
   const path = window.location.pathname;
   document.querySelectorAll(".nav-link").forEach((link) => {
     if (
