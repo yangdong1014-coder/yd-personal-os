@@ -1,6 +1,22 @@
 {
-  "current": "v1.18.2",
+  "current": "v1.19.0",
   "entries": [
+    {
+      "version": "v1.19.0",
+      "date": "2026-06-26",
+      "title": "战略定位模块",
+      "type": "feature",
+      "items": [
+        "新增战略定位校准层：定位锚 / 校准轨迹 / 待确认目标变更三区页面（/positioning）",
+        "新增三张表 positioning_anchor、positioning_calibration、positioning_goal_action",
+        "goals 表新增 status 字段（默认 active，支持已淘汰归档），为校准确认写目标预留",
+        "定位锚与校准 CRUD API；手填 pending 目标变更建议 API",
+        "半自动目标变更 confirm/reject 闭环待 commit-3，当前 pending 只读展示",
+        "导航「定位」入口；态势面板默认态 + 因果链流向箭头 + 时间轴校准轨迹",
+        "锚区/校准填写态网格对齐（positioning-form-fix）",
+        "pytest 新增 test_positioning.py；全量测试使用临时库"
+      ]
+    },
     {
       "version": "v1.18.2",
       "date": "2026-06-24",

@@ -12,6 +12,7 @@ asset_schemas.py — 资产类型与动态字段 schema
 access_control.py — 家庭服务器远程 token 鉴权
 ai_service.py — DeepSeek（可选）
 inbox_service.py — 智能归档解析与确认入库
+positioning_service.py — 战略定位锚/校准/目标变更建议
 obsidian_export.py — Obsidian Markdown zip 导出
 prompts/loader.py — 场景提示词加载
 changelog.py — 版本日志
@@ -22,7 +23,7 @@ changelog.py — 版本日志
 ## 后端（Flask）
 
 - 入口：`personal-system-v2/app.py`
-- 页面路由：首页、目标、任务、复盘、资产、能力、智能归档、AI 管理、版本日志
+- 页面路由：首页、定位、目标、任务、复盘、资产、能力、智能归档、AI 管理、版本日志
 - JSON API：CRUD、导入/导出、AI 代理、changelog
 - 全局注入：`current_version`（来自 changelog）、`ai_enabled`
 
@@ -61,10 +62,46 @@ changelog.py — 版本日志
 ## 个人 OS 闭环
 
 ```
+战略定位（校准层）— 半自动增删改目标（建议 → 确认）
+        ↓
 目标 → 项目 → 任务 → 复盘 → 资产 → 能力
+        ↑___________________________|
+              运转数据反哺校准
 ```
 
 资产系统处于复盘与能力之间：将执行与复盘中的经验沉淀为**可复用作战资产**，再通过能力标签关联到八能力模块。
+
+## v1.19 新增：战略定位模块
+
+**定位**：凌驾于目标之上的方向校准层，回答「此刻该往哪走、什么不该做」。默认态为态势面板（看战局），非空表单填写。
+
+```
+定位锚（positioning_anchor）
+        ↓ 向下约束
+校准轨迹（positioning_calibration）
+        ↓ 产出建议
+待确认目标变更（positioning_goal_action · pending）
+        ↓ confirm（后续版本）
+goals 表真实增删改（status 归档 / type 调整）
+```
+
+| 组件 | 职责 |
+|------|------|
+| `templates/positioning.html` + `static/js/positioning.js` | 三区页面：锚 / 轨迹 / pending |
+| `positioning_service.py` | 业务封装，错误转 PositioningServiceError |
+| `database.py` | 三表迁移、CRUD、goals.status 迁移 |
+| `app.py` | `/positioning` 页面 + `/api/positioning/*` 路由 |
+
+**API（v1.19.0）**：
+
+- `GET/PUT /api/positioning/anchor`
+- `GET/POST /api/positioning/calibrations`
+- `GET /api/positioning/calibrations/<id>`
+- `POST /api/positioning/calibrations/<id>/actions`（手填 pending）
+
+**半自动范式**：复用 v1.11 inbox「AI/手填建议 → 人工确认 → 入库」；v1.19.0 仅 pending 只读展示，confirm/reject 与 AI suggest-actions 延后。
+
+**导出**：JSON / Obsidian 含 positioning 数据 — 待后续版本补全（当前文档先行，实现见后续 commit）。
 
 ## v1.12 新增：可复用资产库
 

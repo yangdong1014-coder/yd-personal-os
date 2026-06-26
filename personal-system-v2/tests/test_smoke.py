@@ -39,7 +39,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v1.18.2"
+    assert payload["data"]["current"] == "v1.19.0"
     assert isinstance(payload["data"]["entries"], list)
 
 
