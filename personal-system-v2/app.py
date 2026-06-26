@@ -28,6 +28,7 @@ def inject_globals():
 
 NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},
+    {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
     {"endpoint": "goals", "label": "目标", "path": "/goals"},
     {"endpoint": "tasks", "label": "任务", "path": "/tasks"},
     {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
@@ -94,6 +95,18 @@ def api_health():
 @app.route("/")
 def index():
     return render_template("index.html", active_page="index", nav_items=NAV_ITEMS)
+
+
+@app.route("/positioning")
+def positioning_page():
+    return render_template(
+        "positioning.html",
+        active_page="positioning",
+        nav_items=NAV_ITEMS,
+        goal_types=database.GOAL_TYPES,
+        positioning_cycles=database.POSITIONING_CYCLES,
+        positioning_action_types=database.POSITIONING_ACTION_TYPES,
+    )
 
 
 @app.route("/goals")
@@ -772,6 +785,16 @@ def api_get_positioning_calibration(calibration_id):
         return jsonify({"ok": True, "data": detail})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc), 404)
+
+
+@app.route("/api/positioning/calibrations/<int:calibration_id>/actions", methods=["POST"])
+def api_create_positioning_action(calibration_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        action = positioning_service.create_goal_action(calibration_id, payload)
+        return jsonify({"ok": True, "data": action})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
 
 
 @app.route("/api/changelog", methods=["GET"])

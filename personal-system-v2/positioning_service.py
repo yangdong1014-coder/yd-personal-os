@@ -33,3 +33,10 @@ def get_calibration_detail(calibration_id):
         raise PositioningServiceError("校准记录不存在")
     actions = database.list_positioning_goal_actions(calibration_id)
     return {"calibration": calibration, "actions": actions}
+
+
+def create_goal_action(calibration_id, payload):
+    try:
+        return database.create_positioning_goal_action(calibration_id, payload)
+    except ValueError as exc:
+        raise PositioningServiceError(str(exc)) from exc

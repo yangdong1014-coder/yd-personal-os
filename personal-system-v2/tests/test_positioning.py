@@ -137,3 +137,35 @@ def test_api_positioning_calibration_validation(client):
     response = client.post("/api/positioning/calibrations", json={"cycle": "月度"})
     assert response.status_code == 400
     assert response.get_json()["ok"] is False
+
+
+def test_positioning_page_loads(client):
+    response = client.get("/positioning")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "战略定位" in html
+    assert "定位锚" in html
+    assert "新建校准" in html
+    assert "目标变更确认" in html
+    assert 'href="/positioning"' in html or "positioning.js" in html
+
+
+def test_api_create_positioning_action(client):
+    calibration = database.create_positioning_calibration(
+        {"calibrated_at": "2026-06-26", "conclusion": "测试"}
+    )
+    goal = database.create_goal("待降级目标", "当前主线")
+
+    response = client.post(
+        f"/api/positioning/calibrations/{calibration['id']}/actions",
+        json={
+            "action_type": "降级目标",
+            "target_goal_id": goal["id"],
+            "payload": {"type": "月度"},
+            "reason": "与北极星不对齐",
+        },
+    )
+    assert response.status_code == 200
+    action = response.get_json()["data"]
+    assert action["status"] == "pending"
+    assert action["payload"]["type"] == "月度"
