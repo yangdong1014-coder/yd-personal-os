@@ -11,6 +11,7 @@ import config
 import database
 import inbox_service
 import obsidian_export
+import positioning_service
 import prompt_specs
 import settings_store
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
@@ -727,6 +728,50 @@ def api_inbox_reject_suggestion(suggestion_id):
         return jsonify({"ok": True, "data": suggestion})
     except inbox_service.InboxServiceError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/positioning/anchor", methods=["GET"])
+def api_get_positioning_anchor():
+    anchor = positioning_service.get_anchor()
+    return jsonify({"ok": True, "data": anchor})
+
+
+@app.route("/api/positioning/anchor", methods=["PUT"])
+def api_update_positioning_anchor():
+    payload = request.get_json(silent=True) or {}
+    try:
+        anchor = positioning_service.update_anchor(payload)
+        return jsonify({"ok": True, "data": anchor})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/positioning/calibrations", methods=["GET"])
+def api_list_positioning_calibrations():
+    limit = request.args.get("limit", default=50, type=int)
+    return jsonify({
+        "ok": True,
+        "data": positioning_service.list_calibrations(limit),
+    })
+
+
+@app.route("/api/positioning/calibrations", methods=["POST"])
+def api_create_positioning_calibration():
+    payload = request.get_json(silent=True) or {}
+    try:
+        calibration = positioning_service.create_calibration(payload)
+        return jsonify({"ok": True, "data": calibration})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/positioning/calibrations/<int:calibration_id>", methods=["GET"])
+def api_get_positioning_calibration(calibration_id):
+    try:
+        detail = positioning_service.get_calibration_detail(calibration_id)
+        return jsonify({"ok": True, "data": detail})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc), 404)
 
 
 @app.route("/api/changelog", methods=["GET"])

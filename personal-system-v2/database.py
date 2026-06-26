@@ -57,6 +57,10 @@ INBOX_COMMIT_ORDER = {
     "capability_entry": 4,
     "task": 5,
 }
+POSITIONING_CYCLES = ("月度", "季度", "触发式")
+POSITIONING_ACTION_TYPES = ("新建目标", "淘汰目标", "降级目标", "升级为主线")
+POSITIONING_ACTION_STATUSES = ("pending", "confirmed", "rejected")
+GOAL_STATUSES = ("active", "已淘汰")
 CAPABILITY_LAYERS = {
     "本质力": "基础认知层",
     "建模力": "基础认知层",
@@ -442,10 +446,60 @@ def init_db():
     _migrate_tasks_table(conn)
     _migrate_inbox_tables(conn)
     _migrate_assets_table(conn)
+    _migrate_positioning_tables(conn)
+    _migrate_goals_status(conn)
     _ensure_default_capability_practice_steps(conn)
     _normalize_mainline_goals(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_positioning_tables(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS positioning_anchor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_principle TEXT NOT NULL DEFAULT '',
+            identity_core TEXT NOT NULL DEFAULT '',
+            flywheel_def TEXT NOT NULL DEFAULT '',
+            current_stage TEXT NOT NULL DEFAULT '',
+            north_star TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS positioning_calibration (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            calibrated_at TEXT NOT NULL,
+            cycle TEXT NOT NULL DEFAULT '触发式',
+            primary_contradiction TEXT NOT NULL DEFAULT '',
+            doing_but_shouldnt TEXT NOT NULL DEFAULT '',
+            should_but_not_doing TEXT NOT NULL DEFAULT '',
+            alignment_review TEXT NOT NULL DEFAULT '',
+            conclusion TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS positioning_goal_action (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            calibration_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            target_goal_id INTEGER,
+            payload TEXT NOT NULL DEFAULT '{}',
+            reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (calibration_id) REFERENCES positioning_calibration(id) ON DELETE CASCADE
+        );
+        """
+    )
+
+
+def _migrate_goals_status(conn):
+    columns = _table_columns(conn, "goals")
+    if "status" not in columns:
+        conn.execute(
+            "ALTER TABLE goals ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+        )
 
 
 def _migrate_inbox_tables(conn):
@@ -3378,3 +3432,248 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
         raise InboxError(message, {"created": created, "skipped": skipped, "errors": errors}) from exc
     finally:
         conn.close()
+
+
+class PositioningError(Exception):
+    pass
+
+
+def _parse_positioning_payload(raw):
+    if isinstance(raw, dict):
+        return raw
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _positioning_action_row(row):
+    data = _row_to_dict(row)
+    if data:
+        data["payload"] = _parse_positioning_payload(data.get("payload"))
+    return data
+
+
+def get_positioning_anchor():
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM positioning_anchor ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def upsert_positioning_anchor(payload):
+    payload = payload or {}
+    field_names = (
+        "first_principle",
+        "identity_core",
+        "flywheel_def",
+        "current_stage",
+        "north_star",
+    )
+    now = _now()
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT * FROM positioning_anchor ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if existing:
+        fields = {}
+        for name in field_names:
+            if name in payload:
+                fields[name] = _as_text(payload.get(name))
+            else:
+                fields[name] = existing[name] or ""
+        conn.execute(
+            """
+            UPDATE positioning_anchor
+            SET first_principle = ?, identity_core = ?, flywheel_def = ?,
+                current_stage = ?, north_star = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                fields["first_principle"],
+                fields["identity_core"],
+                fields["flywheel_def"],
+                fields["current_stage"],
+                fields["north_star"],
+                now,
+                existing["id"],
+            ),
+        )
+        anchor_id = existing["id"]
+    else:
+        fields = {name: _as_text(payload.get(name)) for name in field_names}
+        cur = conn.execute(
+            """
+            INSERT INTO positioning_anchor (
+                first_principle, identity_core, flywheel_def,
+                current_stage, north_star, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fields["first_principle"],
+                fields["identity_core"],
+                fields["flywheel_def"],
+                fields["current_stage"],
+                fields["north_star"],
+                now,
+            ),
+        )
+        anchor_id = cur.lastrowid
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM positioning_anchor WHERE id = ?", (anchor_id,)
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def create_positioning_calibration(payload):
+    payload = payload or {}
+    calibrated_at = _as_text(payload.get("calibrated_at"))
+    if not calibrated_at:
+        raise ValueError("校准日期不能为空")
+    cycle = _as_text(payload.get("cycle"), "触发式")
+    if cycle not in POSITIONING_CYCLES:
+        raise ValueError("无效的校准周期")
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO positioning_calibration (
+            calibrated_at, cycle, primary_contradiction,
+            doing_but_shouldnt, should_but_not_doing,
+            alignment_review, conclusion, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            calibrated_at,
+            cycle,
+            _as_text(payload.get("primary_contradiction")),
+            _as_text(payload.get("doing_but_shouldnt")),
+            _as_text(payload.get("should_but_not_doing")),
+            _as_text(payload.get("alignment_review")),
+            _as_text(payload.get("conclusion")),
+            _now(),
+        ),
+    )
+    conn.commit()
+    calibration_id = cur.lastrowid
+    row = conn.execute(
+        "SELECT * FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def list_positioning_calibrations(limit=50):
+    limit = max(1, min(int(limit or 50), 100))
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM positioning_calibration
+        ORDER BY calibrated_at DESC, id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_positioning_calibration(calibration_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def list_positioning_goal_actions(calibration_id):
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM positioning_goal_action
+        WHERE calibration_id = ?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (calibration_id,),
+    ).fetchall()
+    conn.close()
+    return [_positioning_action_row(r) for r in rows]
+
+
+def create_positioning_goal_action(calibration_id, payload):
+    payload = payload or {}
+    calibration = get_positioning_calibration(calibration_id)
+    if not calibration:
+        raise ValueError("校准记录不存在")
+
+    action_type = _as_text(payload.get("action_type"))
+    if action_type not in POSITIONING_ACTION_TYPES:
+        raise ValueError("无效的目标变更类型")
+
+    target_goal_id = payload.get("target_goal_id")
+    if target_goal_id is not None and target_goal_id != "":
+        try:
+            target_goal_id = int(target_goal_id)
+        except (TypeError, ValueError):
+            raise ValueError("无效的目标 id")
+        goal = get_goal(target_goal_id)
+        if not goal:
+            raise ValueError("目标不存在")
+    else:
+        target_goal_id = None
+
+    if action_type == "新建目标" and target_goal_id is not None:
+        raise ValueError("新建目标不应指定 target_goal_id")
+
+    if action_type != "新建目标" and target_goal_id is None:
+        raise ValueError("该变更类型必须指定 target_goal_id")
+
+    action_payload = _parse_positioning_payload(payload.get("payload"))
+    if action_type == "新建目标":
+        name = _as_text(action_payload.get("name"))
+        goal_type = _as_text(action_payload.get("type"))
+        if not name:
+            raise ValueError("新建目标必须提供 payload.name")
+        if goal_type not in GOAL_TYPES:
+            raise ValueError("无效的目标类型")
+    elif action_type == "降级目标":
+        goal_type = _as_text(action_payload.get("type"))
+        if goal_type not in GOAL_TYPES:
+            raise ValueError("降级目标必须提供 payload.type")
+
+    reason = _as_text(payload.get("reason"))
+    if not reason:
+        raise ValueError("变更理由不能为空")
+
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        INSERT INTO positioning_goal_action (
+            calibration_id, action_type, target_goal_id,
+            payload, reason, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        """,
+        (
+            calibration_id,
+            action_type,
+            target_goal_id,
+            json.dumps(action_payload, ensure_ascii=False),
+            reason,
+            _now(),
+        ),
+    )
+    conn.commit()
+    action_id = cur.lastrowid
+    row = conn.execute(
+        "SELECT * FROM positioning_goal_action WHERE id = ?", (action_id,)
+    ).fetchone()
+    conn.close()
+    return _positioning_action_row(row)
