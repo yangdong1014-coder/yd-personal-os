@@ -3,11 +3,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const anchorForm = document.getElementById("anchor-form");
   const anchorEditBtn = document.getElementById("anchor-edit-btn");
   const anchorCancelBtn = document.getElementById("anchor-cancel-btn");
+  const anchorEmptyGuide = document.getElementById("anchor-empty-guide");
+  const anchorSection = document.getElementById("positioning-anchor-section");
   const calibrationForm = document.getElementById("calibration-form");
+  const calibrationFormPanel = document.getElementById("calibration-form-panel");
+  const newCalibrationBtn = document.getElementById("new-calibration-btn");
+  const calibrationCancelBtn = document.getElementById("calibration-cancel-btn");
   const historyListEl = document.getElementById("calibration-history-list");
   const actionsListEl = document.getElementById("positioning-actions-list");
   const actionsContextHint = document.getElementById("actions-context-hint");
   const handfillForm = document.getElementById("action-handfill-form");
+  const handfillDetails = document.getElementById("action-handfill-details");
   const actionTypeSelect = document.getElementById("action-type");
   const actionTargetGoalField = document.getElementById("action-target-goal-field");
   const actionNewGoalNameField = document.getElementById("action-new-goal-name-field");
@@ -42,9 +48,13 @@ document.addEventListener("DOMContentLoaded", () => {
       .replace(/"/g, "&quot;");
   }
 
-  function displayValue(value) {
+  function hasText(value) {
+    return Boolean((value || "").trim());
+  }
+
+  function displayValue(value, fallback = "—") {
     const text = (value || "").trim();
-    return text ? escapeHtml(text) : "—";
+    return text ? escapeHtml(text) : fallback;
   }
 
   function todayInputValue() {
@@ -54,17 +64,55 @@ document.addEventListener("DOMContentLoaded", () => {
     return `${now.getFullYear()}-${month}-${day}`;
   }
 
+  function isAnchorEmpty(anchor) {
+    const data = anchor || {};
+    return ![
+      data.first_principle,
+      data.identity_core,
+      data.flywheel_def,
+      data.current_stage,
+      data.north_star,
+    ].some(hasText);
+  }
+
   function setAnchorDisplay(anchor) {
     const data = anchor || {};
-    Object.keys(displayFields).forEach((key) => {
-      if (displayFields[key]) {
-        displayFields[key].innerHTML = displayValue(data[key]);
-      }
-    });
+    const empty = isAnchorEmpty(data);
+
+    if (anchorSection) {
+      anchorSection.classList.toggle("is-anchor-empty", empty);
+    }
+    if (anchorEmptyGuide) {
+      anchorEmptyGuide.hidden = !empty;
+    }
+
+    if (displayFields.first_principle) {
+      displayFields.first_principle.innerHTML = displayValue(data.first_principle);
+    }
+    if (displayFields.identity_core) {
+      displayFields.identity_core.innerHTML = displayValue(data.identity_core);
+    }
+    if (displayFields.flywheel_def) {
+      displayFields.flywheel_def.innerHTML = displayValue(data.flywheel_def);
+    }
+    if (displayFields.current_stage) {
+      displayFields.current_stage.innerHTML = displayValue(data.current_stage);
+    }
+    if (displayFields.north_star) {
+      const northStarText = hasText(data.north_star)
+        ? escapeHtml(data.north_star)
+        : "尚未设定北极星";
+      displayFields.north_star.innerHTML = northStarText;
+      displayFields.north_star.classList.toggle(
+        "is-placeholder",
+        !hasText(data.north_star)
+      );
+    }
+
     if (anchorUpdatedAtEl) {
       anchorUpdatedAtEl.textContent = data.updated_at
         ? `最近更新：${data.updated_at}`
-        : "尚未设置定位锚";
+        : "";
     }
   }
 
@@ -82,6 +130,15 @@ document.addEventListener("DOMContentLoaded", () => {
     anchorForm.hidden = !show;
     anchorDisplay.hidden = show;
     anchorEditBtn.hidden = show;
+    if (anchorEmptyGuide) anchorEmptyGuide.hidden = show || !anchorSection?.classList.contains("is-anchor-empty");
+  }
+
+  function showCalibrationForm(show) {
+    if (!calibrationFormPanel) return;
+    calibrationFormPanel.hidden = !show;
+    if (newCalibrationBtn) {
+      newCalibrationBtn.textContent = show ? "收起表单" : "+ 新建校准";
+    }
   }
 
   function statusLabel(status) {
@@ -93,77 +150,100 @@ document.addEventListener("DOMContentLoaded", () => {
     return labels[status] || status;
   }
 
+  function actionTargetLabel(action) {
+    const payload = action.payload || {};
+    if (hasText(payload.name)) return payload.name;
+    if (action.target_goal_id) return `目标 #${action.target_goal_id}`;
+    return "";
+  }
+
+  function setHandfillVisible(visible) {
+    if (handfillDetails) handfillDetails.hidden = !visible;
+  }
+
   function renderActions(actions) {
-    const pending = (actions || []).filter((item) => item.status === "pending");
     if (!activeCalibrationId) {
-      actionsListEl.innerHTML = `
-        <div class="empty-state">
-          <strong>暂无待确认变更</strong>
-          先提交校准并在历史中选中一条记录
-        </div>`;
-      if (handfillForm) handfillForm.hidden = true;
+      actionsListEl.innerHTML =
+        '<p class="positioning-inline-empty">先选择校准轨迹中的记录</p>';
+      setHandfillVisible(false);
       return;
     }
 
-    if (handfillForm) handfillForm.hidden = false;
+    setHandfillVisible(true);
 
     if (!actions || !actions.length) {
-      actionsListEl.innerHTML = `
-        <div class="empty-state">
-          <strong>本条校准尚无变更建议</strong>
-          可手填 pending 建议，或使用后续 AI 生成（commit-3 前仅展示）
-        </div>`;
+      actionsListEl.innerHTML =
+        '<p class="positioning-inline-empty">本条校准暂无变更建议</p>';
       return;
     }
 
     actionsListEl.innerHTML = actions
       .map((action) => {
-        const payloadText = JSON.stringify(action.payload || {}, null, 0);
         const statusClass =
           action.status === "pending"
             ? "is-pending"
             : action.status === "confirmed"
               ? "is-confirmed"
               : "is-rejected";
+        const targetLabel = actionTargetLabel(action);
+        const targetHtml = targetLabel
+          ? `<span class="positioning-action-target">${escapeHtml(targetLabel)}</span>`
+          : "";
+        const badgeClass =
+          action.status === "pending"
+            ? "positioning-action-badge is-pending"
+            : "positioning-action-badge";
         return `
           <article class="positioning-action-item ${statusClass}">
             <div class="positioning-action-head">
-              <span class="positioning-action-type">${escapeHtml(action.action_type)}</span>
-              <span class="positioning-action-status">${escapeHtml(statusLabel(action.status))}</span>
+              <div class="positioning-action-head-main">
+                <span class="positioning-action-type">${escapeHtml(action.action_type)}</span>
+                ${targetHtml}
+              </div>
+              <span class="${badgeClass}">${escapeHtml(statusLabel(action.status))}</span>
             </div>
             <p class="positioning-action-reason">${escapeHtml(action.reason)}</p>
-            <dl class="positioning-action-meta">
-              ${action.target_goal_id ? `<div><dt>目标 ID</dt><dd>${action.target_goal_id}</dd></div>` : ""}
-              <div><dt>payload</dt><dd><code>${escapeHtml(payloadText)}</code></dd></div>
-            </dl>
           </article>`;
       })
       .join("");
   }
 
+  function summarizeLine(text, fallback) {
+    const value = (text || "").trim();
+    return value || fallback;
+  }
+
   function renderHistory() {
     if (!calibrations.length) {
-      historyListEl.innerHTML = `
-        <div class="empty-state">
-          <strong>尚无校准记录</strong>
-          完成第一次校准后显示在这里
-        </div>`;
+      historyListEl.innerHTML =
+        '<p class="positioning-inline-empty">尚无校准记录</p>';
       return;
     }
 
     historyListEl.innerHTML = calibrations
-      .map((item) => {
+      .map((item, index) => {
         const active = item.id === activeCalibrationId ? " is-active" : "";
-        const summary = (item.conclusion || item.primary_contradiction || "未填写结论").trim();
+        const latest = index === 0 ? " is-latest" : "";
+        const contradiction = summarizeLine(
+          item.primary_contradiction,
+          "未记录主要矛盾"
+        );
+        const conclusion = summarizeLine(item.conclusion, "未记录结论");
         return `
           <button
             type="button"
-            class="positioning-history-item${active}"
+            class="positioning-timeline-item${active}${latest}"
             data-calibration-id="${item.id}"
           >
-            <span class="positioning-history-date">${escapeHtml(item.calibrated_at)}</span>
-            <span class="positioning-history-cycle">${escapeHtml(item.cycle)}</span>
-            <span class="positioning-history-summary">${escapeHtml(summary)}</span>
+            <span class="positioning-timeline-rail" aria-hidden="true"></span>
+            <span class="positioning-timeline-body">
+              <span class="positioning-timeline-meta">
+                <span class="positioning-history-date">${escapeHtml(item.calibrated_at)}</span>
+                <span class="positioning-history-cycle">${escapeHtml(item.cycle)}</span>
+              </span>
+              <span class="positioning-timeline-contradiction">${escapeHtml(contradiction)}</span>
+              <span class="positioning-timeline-conclusion">${escapeHtml(conclusion)}</span>
+            </span>
           </button>`;
       })
       .join("");
@@ -182,7 +262,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const detail = await apiRequest(`/api/positioning/calibrations/${calibrationId}`);
     if (actionsContextHint) {
       const date = detail.calibration?.calibrated_at || "";
-      actionsContextHint.textContent = `当前选中：${date} 校准 · pending 建议只读展示 · 确认 / 拒绝将在下一版本开放`;
+      actionsContextHint.textContent = `当前选中：${date} 校准 · 目标变更确认区只读展示 pending · 确认 / 拒绝将在下一版本开放`;
     }
     renderActions(detail.actions || []);
   }
@@ -208,9 +288,9 @@ document.addEventListener("DOMContentLoaded", () => {
       renderActions([]);
       if (actionsContextHint) {
         actionsContextHint.textContent =
-          "选择下方校准历史后，此处只读展示 pending 建议。确认 / 拒绝将在下一版本开放。";
+          "选择校准轨迹中的记录后，目标变更确认区只读展示 pending 建议。确认 / 拒绝将在下一版本开放。";
       }
-      if (handfillForm) handfillForm.hidden = true;
+      setHandfillVisible(false);
     }
   }
 
@@ -232,6 +312,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   anchorCancelBtn?.addEventListener("click", () => {
     showAnchorForm(false);
+  });
+
+  newCalibrationBtn?.addEventListener("click", () => {
+    const willShow = calibrationFormPanel?.hidden !== false;
+    showCalibrationForm(willShow);
+  });
+
+  calibrationCancelBtn?.addEventListener("click", () => {
+    showCalibrationForm(false);
   });
 
   anchorForm?.addEventListener("submit", async (event) => {
@@ -283,6 +372,7 @@ document.addEventListener("DOMContentLoaded", () => {
       calibrationForm.reset();
       const dateInput = document.getElementById("calibration-date");
       if (dateInput) dateInput.value = todayInputValue();
+      showCalibrationForm(false);
       await loadCalibrations(true);
       showToast("校准记录已保存");
     } catch (error) {
@@ -342,6 +432,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const dateInput = document.getElementById("calibration-date");
   if (dateInput) dateInput.value = todayInputValue();
   updateHandfillFields();
+  showCalibrationForm(false);
 
   Promise.all([loadAnchor(), loadCalibrations()]).catch((error) => {
     showToast(error.message || "加载定位页失败", "error");

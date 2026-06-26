@@ -3,187 +3,249 @@
 {% block title %}定位 · 个人能力操作系统{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <div class="page-header-row">
-    <div>
-      <h1 class="page-title">战略定位</h1>
-      <p class="page-subtitle">方向校准层 — 锚定不动点，周期性审视目标是否仍对齐北极星</p>
+<div class="positioning-page">
+  <header class="page-header positioning-page-header">
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">战略定位</h1>
+        <p class="page-subtitle">方向校准层 — 默认看战局，拿锚审视当下，决定是否调整目标</p>
+      </div>
     </div>
-  </div>
-</header>
+  </header>
 
-<section class="section-card positioning-anchor-card" id="positioning-anchor-section">
-  <div class="positioning-section-head">
-    <div>
-      <h2>定位锚</h2>
-      <p class="form-hint section-hint">作战方针 — 低频修订，校准时用来量一切的尺子</p>
+  <!-- 一层 · 定位锚 -->
+  <section class="section-card positioning-anchor-card" id="positioning-anchor-section">
+    <div class="positioning-anchor-accent-bar" aria-hidden="true"></div>
+    <div class="positioning-section-head">
+      <h2 class="positioning-layer-title">
+        <span class="positioning-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m16 8-4 4-2-2"/><path d="M12 3v2"/><path d="M12 19v2"/><path d="M3 12h2"/><path d="M19 12h2"/></svg>
+        </span>
+        定位锚
+      </h2>
+      <button type="button" id="anchor-edit-btn" class="btn btn-sm btn-ghost">编辑</button>
     </div>
-    <button type="button" id="anchor-edit-btn" class="btn btn-sm btn-ghost">编辑锚点</button>
-  </div>
 
-  <div id="anchor-display" class="positioning-anchor-display">
-    <div class="positioning-anchor-grid">
-      <div class="positioning-field">
-        <span class="positioning-label">第一性原理</span>
-        <p id="anchor-display-first-principle" class="positioning-value">—</p>
-      </div>
-      <div class="positioning-field">
-        <span class="positioning-label">身份内核</span>
-        <p id="anchor-display-identity-core" class="positioning-value">—</p>
-      </div>
-      <div class="positioning-field">
-        <span class="positioning-label">飞轮定义</span>
-        <p id="anchor-display-flywheel-def" class="positioning-value">—</p>
-      </div>
-      <div class="positioning-field">
-        <span class="positioning-label">当前战略阶段</span>
-        <p id="anchor-display-current-stage" class="positioning-value">—</p>
-      </div>
-      <div class="positioning-field positioning-field-wide">
-        <span class="positioning-label">北极星指标</span>
-        <p id="anchor-display-north-star" class="positioning-value positioning-value-emphasis">—</p>
-      </div>
-    </div>
-    <p class="form-hint" id="anchor-updated-at"></p>
-  </div>
+    <p class="positioning-anchor-guide" id="anchor-empty-guide">点击编辑，设定你的定位锚</p>
 
-  <form id="anchor-form" class="positioning-anchor-form" hidden>
-    <div class="positioning-form-grid">
-      <label class="form-field">
-        <span class="form-label">第一性原理</span>
-        <textarea id="anchor-first-principle" class="textarea" rows="2"></textarea>
-      </label>
-      <label class="form-field">
-        <span class="form-label">身份内核</span>
-        <textarea id="anchor-identity-core" class="textarea" rows="2"></textarea>
-      </label>
-      <label class="form-field">
-        <span class="form-label">飞轮定义</span>
-        <textarea id="anchor-flywheel-def" class="textarea" rows="2"></textarea>
-      </label>
-      <label class="form-field">
-        <span class="form-label">当前战略阶段</span>
-        <input id="anchor-current-stage" class="input" type="text" placeholder="自我验证 / 外化企业 / 更广">
-      </label>
-      <label class="form-field positioning-field-wide">
-        <span class="form-label">北极星指标</span>
-        <textarea id="anchor-north-star" class="textarea" rows="2"></textarea>
-      </label>
-    </div>
-    <div class="form-actions-row">
-      <button type="submit" class="btn">保存锚点</button>
-      <button type="button" id="anchor-cancel-btn" class="btn btn-ghost">取消</button>
-    </div>
-  </form>
-</section>
+    <div id="anchor-display" class="positioning-anchor-display">
+      <div class="positioning-north-star-block">
+        <div class="positioning-north-star-label">
+          <span class="positioning-field-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 2.4 7.4H22l-6 4.6 2.3 7-6.3-4.6L5.7 21l2.3-7-6-4.6h7.6Z"/></svg>
+          </span>
+          北极星指标
+        </div>
+        <p id="anchor-display-north-star" class="positioning-north-star-value">尚未设定北极星</p>
+        <div class="positioning-north-star-rule" aria-hidden="true"></div>
+      </div>
 
-<div class="positioning-work-grid">
-  <section class="section-card positioning-calibration-card">
-    <h2>新建校准</h2>
-    <p class="form-hint section-hint">记录本期主要矛盾与对齐审查，提交后写入校准历史</p>
-    <form id="calibration-form" class="positioning-calibration-form">
-      <div class="positioning-form-grid">
-        <label class="form-field">
-          <span class="form-label">校准日期</span>
-          <input id="calibration-date" class="input" type="date" required>
-        </label>
-        <label class="form-field">
-          <span class="form-label">校准周期</span>
-          <select id="calibration-cycle" class="input">
-            {% for cycle in positioning_cycles %}
-            <option value="{{ cycle }}"{% if cycle == '触发式' %} selected{% endif %}>{{ cycle }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="form-field positioning-field-wide">
-          <span class="form-label">当前主要矛盾</span>
-          <textarea id="calibration-contradiction" class="textarea" rows="2"></textarea>
-        </label>
-        <label class="form-field">
-          <span class="form-label">在做但不该做的</span>
-          <textarea id="calibration-doing-shouldnt" class="textarea" rows="3"></textarea>
-        </label>
-        <label class="form-field">
-          <span class="form-label">该做但没做的</span>
-          <textarea id="calibration-should-not-doing" class="textarea" rows="3"></textarea>
-        </label>
-        <label class="form-field positioning-field-wide">
-          <span class="form-label">目标对齐审查</span>
-          <textarea id="calibration-alignment-review" class="textarea" rows="3"></textarea>
-        </label>
-        <label class="form-field positioning-field-wide">
-          <span class="form-label">本期校准结论</span>
-          <textarea id="calibration-conclusion" class="textarea" rows="3"></textarea>
-        </label>
+      <div class="positioning-anchor-instrument-grid">
+        <div class="positioning-anchor-cell">
+          <span class="positioning-label">
+            <span class="positioning-field-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><ellipse cx="12" cy="12" rx="9" ry="3.5"/><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(120 12 12)"/></svg>
+            </span>
+            第一性原理
+          </span>
+          <p id="anchor-display-first-principle" class="positioning-value">—</p>
+        </div>
+        <div class="positioning-anchor-cell">
+          <span class="positioning-label">
+            <span class="positioning-field-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3c0 2 1 3 3 4-2 1-3 2-3 4"/><path d="M12 3v18"/><path d="M17 3c0 2-1 3-3 4 2 1 3 2 3 4"/></svg>
+            </span>
+            身份内核
+          </span>
+          <p id="anchor-display-identity-core" class="positioning-value">—</p>
+        </div>
+        <div class="positioning-anchor-cell">
+          <span class="positioning-label">
+            <span class="positioning-field-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg>
+            </span>
+            飞轮定义
+          </span>
+          <p id="anchor-display-flywheel-def" class="positioning-value">—</p>
+        </div>
+        <div class="positioning-anchor-cell positioning-stage-cell">
+          <span class="positioning-label">
+            <span class="positioning-field-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16"/><path d="M4 4h12l-3 4 3 4H4"/></svg>
+            </span>
+            当前战略阶段
+          </span>
+          <p id="anchor-display-current-stage" class="positioning-value">—</p>
+        </div>
+      </div>
+      <p class="positioning-anchor-meta" id="anchor-updated-at"></p>
+    </div>
+
+    <form id="anchor-form" class="positioning-anchor-form" hidden>
+      <div class="anchor-edit">
+        <div class="ns-block">
+          <div class="ns-label">北极星指标 · 全页基准</div>
+          <textarea id="anchor-north-star" class="textarea ns-input" rows="2"></textarea>
+          <div class="ns-hint">北极星 = 当前阶段唯一最重要的、可衡量的成功标准</div>
+        </div>
+        <div class="anchor-rows">
+          <div class="row">
+            <span class="row-label">第一性原理</span>
+            <textarea id="anchor-first-principle" class="textarea" rows="2"></textarea>
+          </div>
+          <div class="row">
+            <span class="row-label">身份内核</span>
+            <textarea id="anchor-identity-core" class="textarea" rows="2"></textarea>
+          </div>
+          <div class="row">
+            <span class="row-label">飞轮定义</span>
+            <textarea id="anchor-flywheel-def" class="textarea" rows="2"></textarea>
+          </div>
+          <div class="row">
+            <span class="row-label">当前阶段</span>
+            <input id="anchor-current-stage" class="input" type="text" placeholder="自我验证 / 外化企业 / 更广">
+          </div>
+        </div>
       </div>
       <div class="form-actions-row">
-        <button type="submit" class="btn">提交校准</button>
+        <button type="submit" class="btn">保存锚点</button>
+        <button type="button" id="anchor-cancel-btn" class="btn btn-ghost">取消</button>
       </div>
     </form>
   </section>
 
-  <section class="section-card positioning-actions-card">
-    <h2>目标变更确认</h2>
-    <p class="form-hint section-hint" id="actions-context-hint">
-      选择下方校准历史后，此处只读展示 pending 建议。确认 / 拒绝将在下一版本开放。
+  <div class="positioning-flow-connector" aria-hidden="true">
+    <span class="positioning-flow-arrow">↓</span>
+    <span class="positioning-flow-label">向下约束 · 拿锚当尺子审视当下</span>
+  </div>
+
+  <!-- 二层 · 校准轨迹 -->
+  <section class="section-card positioning-trajectory-card">
+    <div class="positioning-section-head">
+      <h2 class="positioning-layer-title">
+        <span class="positioning-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h14"/><circle cx="19" cy="12" r="2"/></svg>
+        </span>
+        校准轨迹
+      </h2>
+      <button type="button" id="new-calibration-btn" class="btn btn-sm">+ 新建校准</button>
+    </div>
+
+    <div id="calibration-history-list" class="positioning-timeline">
+      <p class="positioning-inline-empty">尚无校准记录</p>
+    </div>
+
+    <div id="calibration-form-panel" class="positioning-calibration-form-panel" hidden>
+      <form id="calibration-form" class="positioning-calibration-form">
+        <div class="cal-form">
+          <div class="cal-meta">
+            <div class="field">
+              <label for="calibration-date">校准日期</label>
+              <input id="calibration-date" class="input" type="date" required>
+            </div>
+            <div class="field">
+              <label for="calibration-cycle">校准周期</label>
+              <select id="calibration-cycle" class="input">
+                {% for cycle in positioning_cycles %}
+                <option value="{{ cycle }}"{% if cycle == '触发式' %} selected{% endif %}>{{ cycle }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="cal-grid">
+            <div class="field">
+              <label for="calibration-contradiction">当前主要矛盾</label>
+              <textarea id="calibration-contradiction" class="textarea"></textarea>
+            </div>
+            <div class="field">
+              <label for="calibration-alignment-review">目标对齐审查</label>
+              <textarea id="calibration-alignment-review" class="textarea"></textarea>
+            </div>
+            <div class="field">
+              <label for="calibration-doing-shouldnt">在做但不该做的</label>
+              <textarea id="calibration-doing-shouldnt" class="textarea"></textarea>
+            </div>
+            <div class="field">
+              <label for="calibration-should-not-doing">该做但没做的</label>
+              <textarea id="calibration-should-not-doing" class="textarea"></textarea>
+            </div>
+          </div>
+          <div class="field cal-conclusion">
+            <label for="calibration-conclusion">本期校准结论</label>
+            <textarea id="calibration-conclusion" class="textarea"></textarea>
+          </div>
+          <div class="cal-actions">
+            <button type="submit" class="btn">提交校准</button>
+            <button type="button" id="calibration-cancel-btn" class="btn btn-ghost">取消</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <div class="positioning-flow-connector" aria-hidden="true">
+    <span class="positioning-flow-arrow">↓</span>
+    <span class="positioning-flow-label">产出 · 校准结论转为目标变更建议</span>
+  </div>
+
+  <!-- 三层 · 待确认的目标变更 -->
+  <section class="section-card positioning-pending-card">
+    <h2 class="positioning-layer-title">
+      <span class="positioning-title-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>
+      </span>
+      待确认的目标变更
+    </h2>
+    <p class="positioning-status-line" id="actions-context-hint">
+      选择校准轨迹中的记录后，目标变更确认区只读展示 pending 建议。确认 / 拒绝将在下一版本开放。
     </p>
 
-    <form id="action-handfill-form" class="positioning-handfill-form" hidden>
-      <p class="form-hint">手填一条 pending 建议（用于验证半自动闭环，不直接改目标表）</p>
-      <div class="positioning-handfill-grid">
-        <label class="form-field">
-          <span class="form-label">变更类型</span>
-          <select id="action-type" class="input">
-            {% for action_type in positioning_action_types %}
-            <option value="{{ action_type }}">{{ action_type }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="form-field" id="action-target-goal-field">
-          <span class="form-label">目标 ID</span>
-          <input id="action-target-goal-id" class="input" type="number" min="1" placeholder="既有目标 id">
-        </label>
-        <label class="form-field" id="action-new-goal-name-field" hidden>
-          <span class="form-label">新目标名称</span>
-          <input id="action-new-goal-name" class="input" type="text">
-        </label>
-        <label class="form-field" id="action-goal-type-field">
-          <span class="form-label">目标类型</span>
-          <select id="action-goal-type" class="input">
-            {% for goal_type in goal_types %}
-            <option value="{{ goal_type }}">{{ goal_type }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="form-field positioning-field-wide">
-          <span class="form-label">变更理由</span>
-          <textarea id="action-reason" class="textarea" rows="2" required></textarea>
-        </label>
-      </div>
-      <div class="form-actions-row">
-        <button type="submit" class="btn btn-sm">添加 pending 建议</button>
-      </div>
-    </form>
+    <details id="action-handfill-details" class="positioning-handfill-details" hidden>
+      <summary class="positioning-handfill-summary">手填 pending 建议（验证用，不直接改目标表）</summary>
+      <form id="action-handfill-form" class="positioning-handfill-form">
+        <div class="positioning-handfill-inline">
+          <label class="form-field">
+            <span class="form-label">变更类型</span>
+            <select id="action-type" class="input">
+              {% for action_type in positioning_action_types %}
+              <option value="{{ action_type }}">{{ action_type }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="form-field" id="action-target-goal-field">
+            <span class="form-label">目标 ID</span>
+            <input id="action-target-goal-id" class="input" type="number" min="1" placeholder="id">
+          </label>
+          <label class="form-field" id="action-new-goal-name-field" hidden>
+            <span class="form-label">新目标名称</span>
+            <input id="action-new-goal-name" class="input" type="text">
+          </label>
+          <label class="form-field" id="action-goal-type-field">
+            <span class="form-label">目标类型</span>
+            <select id="action-goal-type" class="input">
+              {% for goal_type in goal_types %}
+              <option value="{{ goal_type }}">{{ goal_type }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="form-field positioning-handfill-reason">
+            <span class="form-label">变更理由</span>
+            <input id="action-reason" class="input" type="text" required>
+          </label>
+          <button type="submit" class="btn btn-sm positioning-handfill-submit">添加</button>
+        </div>
+      </form>
+    </details>
 
     <div id="positioning-actions-list" class="positioning-actions-list">
-      <div class="empty-state">
-        <strong>暂无待确认变更</strong>
-        先提交校准并在历史中选中一条记录
-      </div>
+      <p class="positioning-inline-empty">先选择校准轨迹中的记录</p>
     </div>
+
+    <p class="positioning-causal-footer">
+      确认后真实改写目标系统（既有六模块）→ 运转结果反哺下次校准
+    </p>
   </section>
 </div>
-
-<section class="section-card positioning-history-card">
-  <h2>校准历史</h2>
-  <p class="form-hint section-hint">按时间倒序；点击一条加载其目标变更建议</p>
-  <div id="calibration-history-list" class="positioning-history-list">
-    <div class="empty-state">
-      <strong>尚无校准记录</strong>
-      完成第一次校准后显示在这里
-    </div>
-  </div>
-</section>
 {% endblock %}
 
 {% block scripts %}
