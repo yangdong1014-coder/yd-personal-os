@@ -3569,6 +3569,91 @@ def create_positioning_calibration(payload):
     return _row_to_dict(row)
 
 
+def update_positioning_calibration(calibration_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT * FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("校准记录不存在")
+
+    calibrated_at = (
+        _as_text(payload.get("calibrated_at"))
+        if "calibrated_at" in payload
+        else existing["calibrated_at"]
+    )
+    if not calibrated_at:
+        conn.close()
+        raise ValueError("校准日期不能为空")
+
+    cycle = (
+        _as_text(payload.get("cycle"), existing["cycle"])
+        if "cycle" in payload
+        else existing["cycle"]
+    )
+    if cycle not in POSITIONING_CYCLES:
+        conn.close()
+        raise ValueError("无效的校准周期")
+
+    conn.execute(
+        """
+        UPDATE positioning_calibration
+        SET calibrated_at = ?, cycle = ?, primary_contradiction = ?,
+            doing_but_shouldnt = ?, should_but_not_doing = ?,
+            alignment_review = ?, conclusion = ?
+        WHERE id = ?
+        """,
+        (
+            calibrated_at,
+            cycle,
+            _as_text(payload.get("primary_contradiction"))
+            if "primary_contradiction" in payload
+            else existing["primary_contradiction"],
+            _as_text(payload.get("doing_but_shouldnt"))
+            if "doing_but_shouldnt" in payload
+            else existing["doing_but_shouldnt"],
+            _as_text(payload.get("should_but_not_doing"))
+            if "should_but_not_doing" in payload
+            else existing["should_but_not_doing"],
+            _as_text(payload.get("alignment_review"))
+            if "alignment_review" in payload
+            else existing["alignment_review"],
+            _as_text(payload.get("conclusion"))
+            if "conclusion" in payload
+            else existing["conclusion"],
+            calibration_id,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    ).fetchone()
+    conn.close()
+    return _row_to_dict(row)
+
+
+def delete_positioning_calibration(calibration_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("校准记录不存在")
+    conn.execute(
+        "DELETE FROM positioning_calibration WHERE id = ?",
+        (calibration_id,),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
 def list_positioning_calibrations(limit=50):
     limit = max(1, min(int(limit or 50), 100))
     conn = get_connection()
@@ -3608,17 +3693,114 @@ def list_positioning_goal_actions(calibration_id):
     return [_positioning_action_row(r) for r in rows]
 
 
-def create_positioning_goal_action(calibration_id, payload):
-    payload = payload or {}
-    calibration = get_positioning_calibration(calibration_id)
-    if not calibration:
-        raise ValueError("校准记录不存在")
+def get_positioning_goal_action(action_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    ).fetchone()
+    conn.close()
+    return _positioning_action_row(row)
 
-    action_type = _as_text(payload.get("action_type"))
+
+def update_positioning_goal_action(action_id, payload):
+    payload = payload or {}
+    existing = get_positioning_goal_action(action_id)
+    if not existing:
+        raise ValueError("变更记录不存在")
+
+    action_type = _as_text(payload.get("action_type")) or existing["action_type"]
+    target_goal_id, action_payload = _validate_positioning_goal_action_fields(
+        action_type,
+        payload.get("target_goal_id")
+        if "target_goal_id" in payload
+        else existing.get("target_goal_id"),
+        payload.get("payload")
+        if "payload" in payload
+        else existing.get("payload"),
+    )
+
+    reason = (
+        _as_text(payload.get("reason"))
+        if "reason" in payload
+        else existing.get("reason") or ""
+    )
+    if not reason:
+        raise ValueError("变更理由不能为空")
+
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE positioning_goal_action
+        SET action_type = ?, target_goal_id = ?, payload = ?, reason = ?
+        WHERE id = ?
+        """,
+        (
+            action_type,
+            target_goal_id,
+            json.dumps(action_payload, ensure_ascii=False),
+            reason,
+            action_id,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    ).fetchone()
+    conn.close()
+    return _positioning_action_row(row)
+
+
+def delete_positioning_goal_action(action_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("变更记录不存在")
+    conn.execute(
+        "DELETE FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def update_positioning_goal_action_status(action_id, status):
+    status = _as_text(status)
+    if status not in POSITIONING_ACTION_STATUSES:
+        raise ValueError("无效的 status")
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("变更记录不存在")
+
+    conn.execute(
+        "UPDATE positioning_goal_action SET status = ? WHERE id = ?",
+        (status, action_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM positioning_goal_action WHERE id = ?",
+        (action_id,),
+    ).fetchone()
+    conn.close()
+    return _positioning_action_row(row)
+
+
+def _validate_positioning_goal_action_fields(action_type, target_goal_id, action_payload):
     if action_type not in POSITIONING_ACTION_TYPES:
         raise ValueError("无效的目标变更类型")
 
-    target_goal_id = payload.get("target_goal_id")
     if target_goal_id is not None and target_goal_id != "":
         try:
             target_goal_id = int(target_goal_id)
@@ -3636,7 +3818,7 @@ def create_positioning_goal_action(calibration_id, payload):
     if action_type != "新建目标" and target_goal_id is None:
         raise ValueError("该变更类型必须指定 target_goal_id")
 
-    action_payload = _parse_positioning_payload(payload.get("payload"))
+    action_payload = _parse_positioning_payload(action_payload)
     if action_type == "新建目标":
         name = _as_text(action_payload.get("name"))
         goal_type = _as_text(action_payload.get("type"))
@@ -3648,6 +3830,22 @@ def create_positioning_goal_action(calibration_id, payload):
         goal_type = _as_text(action_payload.get("type"))
         if goal_type not in GOAL_TYPES:
             raise ValueError("降级目标必须提供 payload.type")
+
+    return target_goal_id, action_payload
+
+
+def create_positioning_goal_action(calibration_id, payload):
+    payload = payload or {}
+    calibration = get_positioning_calibration(calibration_id)
+    if not calibration:
+        raise ValueError("校准记录不存在")
+
+    action_type = _as_text(payload.get("action_type"))
+    target_goal_id, action_payload = _validate_positioning_goal_action_fields(
+        action_type,
+        payload.get("target_goal_id"),
+        payload.get("payload"),
+    )
 
     reason = _as_text(payload.get("reason"))
     if not reason:

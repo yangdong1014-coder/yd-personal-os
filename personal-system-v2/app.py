@@ -787,11 +787,62 @@ def api_get_positioning_calibration(calibration_id):
         return _error(str(exc), 404)
 
 
+@app.route("/api/positioning/calibrations/<int:calibration_id>", methods=["PUT"])
+def api_update_positioning_calibration(calibration_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        calibration = positioning_service.update_calibration(calibration_id, payload)
+        return jsonify({"ok": True, "data": calibration})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/positioning/calibrations/<int:calibration_id>", methods=["DELETE"])
+def api_delete_positioning_calibration(calibration_id):
+    try:
+        positioning_service.delete_calibration(calibration_id)
+        return jsonify({"ok": True, "data": None})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc), 404)
+
+
 @app.route("/api/positioning/calibrations/<int:calibration_id>/actions", methods=["POST"])
 def api_create_positioning_action(calibration_id):
     payload = request.get_json(silent=True) or {}
     try:
         action = positioning_service.create_goal_action(calibration_id, payload)
+        return jsonify({"ok": True, "data": action})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/positioning/actions/<int:action_id>", methods=["PUT"])
+def api_update_positioning_action(action_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        action = positioning_service.update_goal_action(action_id, payload)
+        return jsonify({"ok": True, "data": action})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/positioning/actions/<int:action_id>", methods=["DELETE"])
+def api_delete_positioning_action(action_id):
+    try:
+        positioning_service.delete_goal_action(action_id)
+        return jsonify({"ok": True, "data": None})
+    except positioning_service.PositioningServiceError as exc:
+        return _error(str(exc), 404)
+
+
+@app.route("/api/positioning/actions/<int:action_id>/status", methods=["PATCH"])
+def api_update_positioning_action_status(action_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        action = positioning_service.update_goal_action_status(
+            action_id,
+            payload.get("status"),
+        )
         return jsonify({"ok": True, "data": action})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc))

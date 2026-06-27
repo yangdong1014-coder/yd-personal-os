@@ -7360,7 +7360,6 @@ html.theme-light-cool textarea {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: inherit;
-  cursor: pointer;
   font: inherit;
 }
 
@@ -7393,11 +7392,39 @@ html.theme-light-cool textarea {
   min-width: 0;
 }
 
+.positioning-timeline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.positioning-timeline-select-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+}
+
+.positioning-timeline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+
 .positioning-timeline-meta {
   display: flex;
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
+  width: 100%;
 }
 
 .positioning-history-date {
@@ -7565,6 +7592,13 @@ html.theme-light-cool textarea {
   margin-bottom: 0.2rem;
 }
 
+.positioning-action-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
 .positioning-action-head-main {
   display: flex;
   align-items: center;
@@ -7599,6 +7633,14 @@ html.theme-light-cool textarea {
   border-color: var(--accent-border);
   color: var(--chip-active-color);
   background: var(--accent-soft);
+}
+
+.positioning-action-badge.is-clickable {
+  cursor: pointer;
+}
+
+.positioning-action-badge.is-clickable:hover {
+  border-color: var(--accent-border);
 }
 
 .positioning-action-reason {

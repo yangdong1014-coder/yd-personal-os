@@ -1,6 +1,21 @@
 {
-  "current": "v1.19.0",
+  "current": "v1.19.1",
   "entries": [
+    {
+      "version": "v1.19.1",
+      "date": "2026-06-27",
+      "title": "战略定位模块使用修复",
+      "type": "fix",
+      "items": [
+        "目标变更模块降级为「意图记录」：positioning_goal_action 纯记录，绝不联动 goals 表",
+        "status（待确认/已确认/已拒绝）改为纯人工备注标签，点击切换，不触发副作用",
+        "校准轨迹支持编辑与删除（PUT/DELETE API + 前端操作入口）",
+        "目标变更手填区：目标 ID 改为下拉选择（仅 active 目标），新建目标时显示名称输入",
+        "变更意图记录支持编辑、删除与 status 切换（PUT/DELETE/PATCH API）",
+        "底部说明改为「记录意图，请手动前往目标模块执行对应变更」",
+        "pytest 补充校准/变更 CRUD 与 goals 表不被写入的断言"
+      ]
+    },
     {
       "version": "v1.19.0",
       "date": "2026-06-26",

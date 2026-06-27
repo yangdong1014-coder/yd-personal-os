@@ -137,6 +137,7 @@
 
     <div id="calibration-form-panel" class="positioning-calibration-form-panel" hidden>
       <form id="calibration-form" class="positioning-calibration-form">
+        <input type="hidden" id="calibration-id" value="">
         <div class="cal-form">
           <div class="cal-meta">
             <div class="field">
@@ -175,7 +176,7 @@
             <textarea id="calibration-conclusion" class="textarea"></textarea>
           </div>
           <div class="cal-actions">
-            <button type="submit" class="btn">提交校准</button>
+            <button type="submit" id="calibration-submit-btn" class="btn">提交校准</button>
             <button type="button" id="calibration-cancel-btn" class="btn btn-ghost">取消</button>
           </div>
         </div>
@@ -185,7 +186,7 @@
 
   <div class="positioning-flow-connector" aria-hidden="true">
     <span class="positioning-flow-arrow">↓</span>
-    <span class="positioning-flow-label">产出 · 校准结论转为目标变更建议</span>
+    <span class="positioning-flow-label">产出 · 校准结论转为目标变更意图</span>
   </div>
 
   <!-- 三层 · 待确认的目标变更 -->
@@ -194,14 +195,14 @@
       <span class="positioning-title-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>
       </span>
-      待确认的目标变更
+      目标变更意图
     </h2>
     <p class="positioning-status-line" id="actions-context-hint">
-      选择校准轨迹中的记录后，目标变更确认区只读展示 pending 建议。确认 / 拒绝将在下一版本开放。
+      选择校准轨迹中的记录后，在此记录目标变更意图。status 仅为人工备注标签，不会改写目标模块。
     </p>
 
     <details id="action-handfill-details" class="positioning-handfill-details" hidden>
-      <summary class="positioning-handfill-summary">手填 pending 建议（验证用，不直接改目标表）</summary>
+      <summary class="positioning-handfill-summary" id="action-handfill-summary">手填变更意图（仅记录，不联动目标表）</summary>
       <form id="action-handfill-form" class="positioning-handfill-form">
         <div class="positioning-handfill-inline">
           <label class="form-field">
@@ -213,8 +214,10 @@
             </select>
           </label>
           <label class="form-field" id="action-target-goal-field">
-            <span class="form-label">目标 ID</span>
-            <input id="action-target-goal-id" class="input" type="number" min="1" placeholder="id">
+            <span class="form-label">关联目标</span>
+            <select id="action-target-goal-select" class="input">
+              <option value="">请选择目标</option>
+            </select>
           </label>
           <label class="form-field" id="action-new-goal-name-field" hidden>
             <span class="form-label">新目标名称</span>
@@ -232,7 +235,8 @@
             <span class="form-label">变更理由</span>
             <input id="action-reason" class="input" type="text" required>
           </label>
-          <button type="submit" class="btn btn-sm positioning-handfill-submit">添加</button>
+          <button type="submit" id="action-handfill-submit" class="btn btn-sm positioning-handfill-submit">添加</button>
+          <button type="button" id="action-handfill-cancel" class="btn btn-sm btn-ghost" hidden>取消编辑</button>
         </div>
       </form>
     </details>
@@ -242,7 +246,7 @@
     </div>
 
     <p class="positioning-causal-footer">
-      确认后真实改写目标系统（既有六模块）→ 运转结果反哺下次校准
+      记录意图，请手动前往目标模块执行对应变更
     </p>
   </section>
 </div>
