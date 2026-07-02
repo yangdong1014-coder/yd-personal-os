@@ -231,6 +231,41 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function openCreateProjectModal(goal) {
+    showAIModal({
+      title: `添加项目 — ${goal.name}`,
+      bodyHtml: `
+        <div class="stacked-form create-entity-form">
+          <label class="form-row">
+            <span class="form-label">项目名称</span>
+            <input type="text" id="create-project-name" class="input full-width" placeholder="新建项目名称" required>
+          </label>
+          <label class="form-row">
+            <span class="form-label">项目优先级</span>
+            <select id="create-project-priority" class="select full-width">${buildPriorityOptions("medium")}</select>
+          </label>
+        </div>
+      `,
+      confirmLabel: "添加项目",
+      loadingLabel: "添加中…",
+      onConfirm: async () => {
+        const name = document.getElementById("create-project-name").value.trim();
+        const priority = document.getElementById("create-project-priority").value;
+        if (!name) {
+          throw new Error("项目名称不能为空");
+        }
+        await apiRequest("/api/projects", {
+          method: "POST",
+          body: JSON.stringify({ goal_id: goal.id, name, priority }),
+        });
+        showToast("项目已添加", "success");
+        await loadGoals();
+      },
+    });
+
+    document.getElementById("create-project-name")?.focus();
+  }
+
   async function handleAIDecompose(goal, button) {
     const prevText = button.textContent;
     button.disabled = true;
@@ -504,6 +539,13 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
+    const createProjectBtn = card.querySelector(".btn-create-project");
+    if (createProjectBtn) {
+      createProjectBtn.addEventListener("click", () => {
+        openCreateProjectModal(goal);
+      });
+    }
+
     const deleteGoalBtn = card.querySelector(".btn-delete-goal");
     if (deleteGoalBtn) {
       deleteGoalBtn.addEventListener("click", async () => {
@@ -575,31 +617,6 @@ document.addEventListener("DOMContentLoaded", () => {
         await loadGoals();
       } catch (err) {
         typeSelect.value = prev;
-        showToast(err.message, "error");
-      }
-      });
-    }
-
-    const projectForm = card.querySelector(".project-form");
-    if (projectForm) {
-      projectForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = projectForm.querySelector(".project-name");
-      const prioritySelect = projectForm.querySelector(".project-priority");
-      const name = input.value.trim();
-      const priority = prioritySelect ? prioritySelect.value : "medium";
-      if (!name) return;
-
-      try {
-        await apiRequest("/api/projects", {
-          method: "POST",
-          body: JSON.stringify({ goal_id: goal.id, name, priority }),
-        });
-        input.value = "";
-        if (prioritySelect) prioritySelect.value = "medium";
-        showToast("项目已添加", "success");
-        await loadGoals();
-      } catch (err) {
         showToast(err.message, "error");
       }
       });
@@ -690,18 +707,23 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
         <div class="goal-projects-block">
           <div class="goal-projects-block-head">
-            <h4 class="nested-title">重点项目</h4>
-            ${
-              hiddenCount > 0
-                ? `<button
-                    type="button"
-                    class="btn btn-sm btn-ghost btn-toggle-goal-projects goal-projects-toggle"
-                    data-goal-id="${goal.id}"
-                    data-collapsed-label="展开全部（${goalProjects.length}）"
-                    aria-expanded="${isExpanded ? "true" : "false"}"
-                  >${isExpanded ? "收起" : `展开全部（${goalProjects.length}）`}</button>`
-                : ""
-            }
+            <div class="goal-projects-title-row">
+              <h4 class="nested-title">重点项目</h4>
+            </div>
+            <div class="goal-projects-actions">
+              ${
+                hiddenCount > 0
+                  ? `<button
+                      type="button"
+                      class="btn btn-sm btn-ghost btn-toggle-goal-projects goal-projects-toggle"
+                      data-goal-id="${goal.id}"
+                      data-collapsed-label="展开全部（${goalProjects.length}）"
+                      aria-expanded="${isExpanded ? "true" : "false"}"
+                    >${isExpanded ? "收起" : `展开全部（${goalProjects.length}）`}</button>`
+                  : ""
+              }
+              <button type="button" class="btn btn-sm btn-create-project">添加项目</button>
+            </div>
           </div>
           <ul class="goal-project-list">
             ${
@@ -721,13 +743,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 </ul>`
               : ""
           }
-          <form class="inline-form nested-form project-form">
-            <input type="text" class="input project-name" placeholder="新建项目名称" required>
-            <select class="select project-priority" title="项目优先级">
-              ${buildPriorityOptions("medium")}
-            </select>
-            <button type="submit" class="btn btn-sm">添加项目</button>
-          </form>
         </div>
       `;
 

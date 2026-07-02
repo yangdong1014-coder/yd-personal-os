@@ -6368,6 +6368,29 @@ a:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.goal-projects-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.goal-projects-title-row .nested-title {
+  margin-bottom: 0;
+}
+
+.goal-projects-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .goal-project-list {
