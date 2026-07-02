@@ -1,6 +1,27 @@
 {
-  "current": "v1.19.3",
+  "current": "v1.19.4",
   "entries": [
+    {
+      "version": "v1.19.4",
+      "date": "2026-07-02",
+      "title": "智能归档结构化落位优化",
+      "type": "feat",
+      "items": [
+        "智能归档 asset 建议从泛化总结升级为字段级结构化落位，AI 分析结果支持 action、asset_type、summary、maturity、reusable_scenario、fields、unmatched_fragments",
+        "使用现有 assets.fields JSON 承接资产子模块，不新增数据库表",
+        "AI prompt 强化资产类型判断和字段级拆解，fields 必须匹配 asset_schemas.py 中对应资产类型的合法字段",
+        "从 asset_schemas.py 自动生成 asset_field_schema，并在 prompt 中明确告知不同 asset_type 可用字段",
+        "修复 asset_field_schema 模板变量缺失问题，prompts/loader.py 增加兜底补齐，避免未来漏传导致 KeyError",
+        "JSON 示例大括号完成转义，避免 format 渲染错误",
+        "inbox_service 对 asset payload 做结构化归一化：过滤非法 fields key、清理空字段、保留 unmatched_fragments、action 缺失默认 create",
+        "保持旧格式 asset payload 兼容，不影响 project、task、review、capability_entry、uncertain 等其他归档类型",
+        "智能归档确认后可写入 assets.fields，并同步保存 summary、reusable_scenario、maturity 等资产字段",
+        "保持 trigger_context、core_content、asset_type、capability_tags 兼容，不新增数据库结构",
+        "/inbox 新增资产落位预览卡，用户确认前可以看到资产类型、标题、标签、复用场景、字段落位与未匹配片段",
+        "raw payload 改为折叠查看，勾选确认 / 拒绝流程保持不变，/assets 继续使用现有 fields 展示能力",
+        "不新增 API、不新增外部依赖、不破坏旧资产；云端部署后建议执行 init_db，保持迁移流程一致"
+      ]
+    },
     {
       "version": "v1.19.3",
       "date": "2026-07-02",

@@ -3,6 +3,7 @@ import json
 import ai_service
 import database
 import inbox_service
+from prompts import load as load_prompt
 
 
 def _mock_ai_items():
@@ -79,6 +80,39 @@ def test_inbox_analyze_invalid_ai_response_no_dirty_suggestions(client, monkeypa
     assert len(entries) == 1
     assert entries[0]["status"] == "failed"
     assert len(suggestions) == 0
+
+
+def test_analyze_inbox_text_renders_asset_field_schema(monkeypatch):
+    captured = {}
+
+    def _fake_chat_json(system_prompt, user_prompt):
+        captured["system_prompt"] = system_prompt
+        captured["user_prompt"] = user_prompt
+        return {"items": []}
+
+    monkeypatch.setattr(ai_service, "_chat_json", _fake_chat_json)
+
+    result = ai_service.analyze_inbox_text("沉淀一个方法论：先定位问题，再拆操作流程。")
+
+    assert result == {"items": []}
+    assert "{asset_field_schema}" not in captured["system_prompt"]
+    assert "方法论: 解决的问题, 核心原则, 操作流程, 判断标准, 案例验证, 可复用场景" in captured["system_prompt"]
+    assert '"target_type": "asset"' in captured["system_prompt"]
+    assert "{raw_text}" not in captured["user_prompt"]
+
+
+def test_inbox_prompt_loader_backfills_asset_field_schema():
+    system_prompt = load_prompt(
+        "inbox",
+        "analyze",
+        capability_list=ai_service.CAPABILITY_LIST,
+        goal_types="、".join(database.GOAL_TYPES),
+        review_types="、".join(database.REVIEW_TYPES),
+        asset_types=ai_service.ASSET_TYPE_LIST,
+    )
+
+    assert "{asset_field_schema}" not in system_prompt
+    assert "本质洞察: 现象, 表层问题, 底层本质, 推导过程, 适用边界, 可迁移场景" in system_prompt
 
 
 def test_inbox_get_detail(client, monkeypatch):
@@ -502,6 +536,174 @@ def test_inbox_normalize_low_confidence_to_uncertain():
         ]
     )
     assert items[0]["target_type"] == "uncertain"
+
+
+def test_inbox_normalize_asset_fields_and_filters_invalid_keys():
+    items = inbox_service._normalize_ai_items(
+        [
+            {
+                "target_type": "asset",
+                "title": "复盘方法论",
+                "content": "先定位问题，再拆流程，最后复用。",
+                "summary": "结构化复盘方法",
+                "confidence": 0.92,
+                "reason": "可沉淀为方法论",
+                "action": "create",
+                "suggested_payload": {
+                    "asset_type": "方法论",
+                    "title": "复盘方法论",
+                    "summary": "结构化复盘方法",
+                    "capability_tags": ["体系力", "不存在"],
+                    "reusable_scenario": "项目复盘",
+                    "maturity": "draft",
+                    "fields": {
+                        "解决的问题": "复盘只停留在描述",
+                        "核心原则": "先定位再抽象",
+                        "非法字段": "不应写入资产字段",
+                    },
+                    "unmatched_fragments": ["一段未落位内容"],
+                },
+            }
+        ]
+    )
+
+    payload = items[0]["suggested_payload"]
+    assert payload["action"] == "create"
+    assert payload["asset_type"] == "方法论"
+    assert payload["maturity"] == "草稿"
+    assert payload["capability_tags"] == ["体系力"]
+    assert payload["fields"] == {
+        "解决的问题": "复盘只停留在描述",
+        "核心原则": "先定位再抽象",
+    }
+    assert any("非法字段" in fragment for fragment in payload["unmatched_fragments"])
+
+
+def test_inbox_commit_asset_with_fields_writes_asset_fields(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "asset",
+                    "title": "复盘方法论",
+                    "content": "先定位问题，再拆流程，最后复用。",
+                    "summary": "结构化复盘方法",
+                    "confidence": 0.95,
+                    "reason": "可复用",
+                    "action": "create",
+                    "suggested_payload": {
+                        "asset_type": "方法论",
+                        "title": "复盘方法论",
+                        "trigger_context": "项目复盘混乱",
+                        "core_content": "先定位问题，再拆流程，最后复用。",
+                        "summary": "结构化复盘方法",
+                        "capability_tags": ["体系力", "落地力"],
+                        "reusable_scenario": "项目复盘与方法沉淀",
+                        "maturity": "可用",
+                        "fields": {
+                            "解决的问题": "复盘只停留在描述",
+                            "核心原则": "先定位再抽象",
+                            "操作流程": "定位问题 -> 拆流程 -> 提炼复用",
+                            "判断标准": "能否被下次项目直接复用",
+                        },
+                    },
+                }
+            ]
+        },
+    )
+
+    analyze = client.post(
+        "/api/inbox/analyze",
+        json={"text": "复盘方法论测试"},
+    ).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    assert response.get_json()["data"]["created"]["assets"] == 1
+
+    assets = client.get("/api/assets").get_json()["data"]
+    asset = next(item for item in assets if item["title"] == "复盘方法论")
+    assert asset["asset_type"] == "方法论"
+    assert asset["summary"] == "结构化复盘方法"
+    assert asset["reusable_scenario"] == "项目复盘与方法沉淀"
+    assert asset["maturity"] == "可用"
+    assert asset["capability_tags"] == ["体系力", "落地力"]
+    assert asset["fields"]["解决的问题"] == "复盘只停留在描述"
+    assert asset["fields"]["操作流程"] == "定位问题 -> 拆流程 -> 提炼复用"
+
+
+def test_inbox_commit_asset_filters_invalid_fields_before_write(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "asset",
+                    "title": "字段过滤资产",
+                    "content": "用字段白名单控制落位。",
+                    "confidence": 0.93,
+                    "reason": "可复用",
+                    "suggested_payload": {
+                        "asset_type": "方法论",
+                        "fields": {
+                            "解决的问题": "字段漂移",
+                            "非法字段": "不能写入",
+                        },
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "字段过滤"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+
+    assets = client.get("/api/assets").get_json()["data"]
+    asset = next(item for item in assets if item["title"] == "字段过滤资产")
+    assert asset["fields"]["解决的问题"] == "字段漂移"
+    assert "非法字段" not in asset["fields"]
+
+
+def test_inbox_commit_legacy_asset_payload_without_fields_still_works(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "asset",
+                    "title": "旧格式知识卡片",
+                    "content": "旧格式核心内容",
+                    "confidence": 0.9,
+                    "reason": "可沉淀",
+                    "suggested_payload": {
+                        "asset_type": "知识卡片",
+                        "trigger_context": "旧格式触发",
+                        "core_content": "旧格式核心内容",
+                        "capability_tags": ["本质力"],
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "旧格式资产"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    assert response.get_json()["data"]["created"]["assets"] == 1
+
+    assets = client.get("/api/assets").get_json()["data"]
+    asset = next(item for item in assets if item["title"] == "旧格式知识卡片")
+    assert asset["asset_type"] == "本质洞察"
+    assert asset["fields"]["现象"] == "旧格式触发"
+    assert asset["fields"]["底层本质"] == "旧格式核心内容"
 
 
 def test_inbox_commit_review_with_boolean_depositable(client, monkeypatch):

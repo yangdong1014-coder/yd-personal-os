@@ -3992,6 +3992,110 @@ a {
   font-weight: 500;
 }
 
+.inbox-asset-placement {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.85rem 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(212, 168, 75, 0.28);
+  border-radius: var(--radius-sm);
+  background: rgba(212, 168, 75, 0.08);
+}
+
+.inbox-asset-placement-head,
+.inbox-asset-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.inbox-asset-action {
+  background: rgba(212, 168, 75, 0.18);
+  color: #d4a84b;
+}
+
+.inbox-asset-type {
+  border-color: rgba(212, 168, 75, 0.36);
+}
+
+.inbox-asset-placement-title {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.inbox-asset-summary,
+.inbox-asset-reuse {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.inbox-asset-reuse strong {
+  margin-right: 0.45rem;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.inbox-asset-field-wrap h4,
+.inbox-asset-unmatched h4 {
+  margin: 0 0 0.45rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.inbox-asset-fields {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.inbox-asset-field {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 8rem) minmax(0, 1fr);
+  gap: 0.55rem;
+  padding: 0.52rem 0.6rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.inbox-asset-field dt {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.inbox-asset-field dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.inbox-asset-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.inbox-asset-unmatched ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 .inbox-payload-details {
   margin-top: 0.35rem;
 }

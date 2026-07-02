@@ -6,6 +6,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI
 
 import config
 import database
+import asset_schemas
 import prompt_specs
 from prompts import load as load_prompt
 
@@ -15,6 +16,14 @@ _META_GENERATE_PROMPT_PATH = (
 
 CAPABILITY_LIST = "、".join(database.CAPABILITY_MODULES)
 ASSET_TYPE_LIST = "、".join(database.ASSET_TYPES)
+
+
+def _format_asset_field_schema():
+    lines = []
+    for asset_type in database.ASSET_TYPES:
+        field_names = [name for name, _ in asset_schemas.get_field_defs(asset_type)]
+        lines.append(f"- {asset_type}: {', '.join(field_names)}")
+    return "\n".join(lines)
 
 
 class AIServiceError(Exception):
@@ -915,6 +924,7 @@ def analyze_inbox_text(raw_text):
         goal_types="、".join(database.GOAL_TYPES),
         review_types="、".join(database.REVIEW_TYPES),
         asset_types=ASSET_TYPE_LIST,
+        asset_field_schema=_format_asset_field_schema(),
     )
     user_prompt = load_prompt("inbox", "analyze", kind="user", raw_text=text)
     data = _chat_json(system_prompt, user_prompt)

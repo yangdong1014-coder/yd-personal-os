@@ -57,6 +57,30 @@ INBOX_COMMIT_ORDER = {
     "capability_entry": 4,
     "task": 5,
 }
+ASSET_ACTIONS = ("create", "append", "merge", "stash")
+ASSET_TYPE_ALIASES = {
+    "insight": "本质洞察",
+    "essence": "本质洞察",
+    "methodology": "方法论",
+    "method": "方法论",
+    "model": "模型",
+    "sop": "SOP",
+    "template": "模板",
+    "prompt": "提示词",
+    "case": "案例复盘",
+    "checklist": "清单",
+    "principle": "原则规则",
+    "tool": "工具组件",
+    "generic": "通用资产",
+}
+MATURITY_ALIASES = {
+    "draft": "草稿",
+    "ready": "可用",
+    "usable": "可用",
+    "stable": "稳定",
+    "standard": "标准化",
+    "standardized": "标准化",
+}
 POSITIONING_CYCLES = ("月度", "季度", "触发式")
 POSITIONING_ACTION_TYPES = ("新建目标", "淘汰目标", "降级目标", "升级为主线")
 POSITIONING_ACTION_STATUSES = ("pending", "confirmed", "rejected")
@@ -2995,6 +3019,33 @@ def _coerce_positive_int(value):
     return None
 
 
+def _normalize_asset_type_for_inbox(value, title="", content=""):
+    raw = _as_text(value)
+    alias = ASSET_TYPE_ALIASES.get(raw.lower())
+    if alias:
+        return alias
+    return asset_schemas.normalize_asset_type(raw, title, content)
+
+
+def _map_asset_maturity(raw, default="可用"):
+    value = _as_text(raw)
+    if value in MATURITY_LEVELS:
+        return value
+    return MATURITY_ALIASES.get(value.lower(), default)
+
+
+def _clean_asset_fields_for_type(asset_type, raw_fields):
+    fields = asset_schemas.parse_fields(raw_fields)
+    if not fields:
+        return {}
+    allowed = {key for key, _ in asset_schemas.get_field_defs(asset_type)}
+    return {
+        key: _as_text(value)
+        for key, value in fields.items()
+        if key in allowed and _as_text(value)
+    }
+
+
 def _parse_override_payloads(override_list):
     result = {}
     if not override_list:
@@ -3126,10 +3177,10 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
 
     if target_type == "asset":
         asset_title = (payload.get("title") or title).strip()
-        asset_type = asset_schemas.normalize_asset_type(
+        asset_type = _normalize_asset_type_for_inbox(
             payload.get("asset_type") or "通用资产", asset_title, content
         )
-        fields = asset_schemas.parse_fields(payload.get("fields"))
+        fields = _clean_asset_fields_for_type(asset_type, payload.get("fields"))
         if not fields:
             fields = asset_schemas.build_fields_from_legacy(
                 asset_type,
@@ -3235,10 +3286,10 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
 
     if target_type == "asset":
         asset_title = (payload.get("title") or title).strip()
-        asset_type = asset_schemas.normalize_asset_type(
+        asset_type = _normalize_asset_type_for_inbox(
             payload.get("asset_type") or "通用资产", asset_title, content
         )
-        parsed_fields = asset_schemas.parse_fields(payload.get("fields"))
+        parsed_fields = _clean_asset_fields_for_type(asset_type, payload.get("fields"))
         if not parsed_fields:
             parsed_fields = asset_schemas.build_fields_from_legacy(
                 asset_type,
@@ -3252,11 +3303,17 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         legacy_trigger, legacy_core = asset_schemas.sync_legacy_columns(
             asset_type, parsed_fields
         )
-        summary = asset_schemas.extract_summary(parsed_fields, legacy_core)
-        reusable = asset_schemas.extract_reusable_scenario(asset_type, parsed_fields)
-        maturity = payload.get("maturity") or "可用"
-        if maturity not in MATURITY_LEVELS:
-            maturity = "可用"
+        if not legacy_trigger and payload.get("trigger_context"):
+            legacy_trigger = _as_text(payload.get("trigger_context"))
+        if not legacy_core and payload.get("core_content"):
+            legacy_core = _as_text(payload.get("core_content"))
+        summary = _as_text(payload.get("summary")) or asset_schemas.extract_summary(
+            parsed_fields, legacy_core
+        )
+        reusable = _as_text(payload.get("reusable_scenario")) or asset_schemas.extract_reusable_scenario(
+            asset_type, parsed_fields
+        )
+        maturity = _map_asset_maturity(payload.get("maturity"), default="可用")
         tags = payload.get("capability_tags") or []
         if not isinstance(tags, list):
             tags = []

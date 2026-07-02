@@ -210,6 +210,82 @@ document.addEventListener("DOMContentLoaded", () => {
       </div>`;
   }
 
+  function actionLabel(action) {
+    const labels = {
+      create: "新建资产",
+      append: "追加已有资产",
+      merge: "合并资产",
+      stash: "暂存",
+    };
+    return labels[action] || "新建资产";
+  }
+
+  function normalizeList(value) {
+    return Array.isArray(value) ? value.filter(Boolean) : [];
+  }
+
+  function renderAssetFieldPreview(fields = {}) {
+    const entries = Object.entries(fields).filter(([, value]) => String(value || "").trim());
+    if (!entries.length) {
+      return '<p class="inbox-asset-empty">暂无结构化字段，确认后将按核心内容兼容入库</p>';
+    }
+    return `
+      <dl class="inbox-asset-fields">
+        ${entries
+          .map(
+            ([key, value]) => `
+              <div class="inbox-asset-field">
+                <dt>${escapeHtml(key)}</dt>
+                <dd>${escapeHtml(summarize(value, 120))}</dd>
+              </div>`
+          )
+          .join("")}
+      </dl>`;
+  }
+
+  function renderAssetPlacementPreview(suggestion) {
+    if (suggestion.target_type !== "asset") return "";
+    const payload = getEffectivePayload(suggestion);
+    const tags = normalizeList(payload.capability_tags);
+    const unmatched = normalizeList(payload.unmatched_fragments);
+    const title = payload.title || suggestion.title;
+    const type = payload.asset_type || "通用资产";
+    const reusable = payload.reusable_scenario || "";
+    const summary = payload.summary || payload.core_content || suggestion.content || "";
+    return `
+      <section class="inbox-asset-placement" aria-label="资产落位预览">
+        <div class="inbox-asset-placement-head">
+          <span class="tag inbox-asset-action">${escapeHtml(actionLabel(payload.action || "create"))}</span>
+          <span class="tag inbox-asset-type">${escapeHtml(type)}</span>
+          ${payload.maturity ? `<span class="tag tag-muted">${escapeHtml(payload.maturity)}</span>` : ""}
+        </div>
+        <div class="inbox-asset-placement-title">${escapeHtml(title)}</div>
+        ${summary ? `<p class="inbox-asset-summary">${escapeHtml(summarize(summary, 160))}</p>` : ""}
+        ${
+          tags.length
+            ? `<div class="inbox-asset-tags">${tags
+                .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
+                .join("")}</div>`
+            : ""
+        }
+        ${reusable ? `<p class="inbox-asset-reuse"><strong>复用场景</strong>${escapeHtml(reusable)}</p>` : ""}
+        <div class="inbox-asset-field-wrap">
+          <h4>字段落位</h4>
+          ${renderAssetFieldPreview(payload.fields || {})}
+        </div>
+        ${
+          unmatched.length
+            ? `<div class="inbox-asset-unmatched">
+                <h4>未匹配片段</h4>
+                <ul>${unmatched
+                  .map((item) => `<li>${escapeHtml(summarize(item, 120))}</li>`)
+                  .join("")}</ul>
+              </div>`
+            : ""
+        }
+      </section>`;
+  }
+
   function renderRelationSummary(suggestion) {
     const payload = getEffectivePayload(suggestion);
     if (suggestion.target_type === "project") {
@@ -361,6 +437,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${renderRelationSummary(suggestion)}
                 <p class="inbox-summary">${escapeHtml(summarize(suggestion.content))}</p>
                 <p class="inbox-reason"><strong>归档理由</strong> ${escapeHtml(suggestion.reason || "—")}</p>
+                ${renderAssetPlacementPreview(suggestion)}
                 ${renderRelationControls(suggestion)}
                 <details class="inbox-payload-details">
                   <summary>查看建议字段</summary>

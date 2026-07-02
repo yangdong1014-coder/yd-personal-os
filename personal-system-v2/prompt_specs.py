@@ -166,10 +166,12 @@ SCENE_SPECS = {
     },
     ("inbox", "analyze"): {
         "label": "智能归档解析",
-        "purpose": "将非结构化输入拆解为目标、项目、任务、复盘、资产、能力记录等归档建议。",
+        "purpose": "将非结构化输入拆解为目标、项目、任务、复盘、结构化资产、能力记录等归档建议。",
         "json_schema": (
             "items: 对象数组，每项含 target_type、title、content、"
-            "confidence（0-1）、reason、suggested_payload（对象）"
+            "summary（可选）、confidence（0-1）、reason、action（asset 可选）、"
+            "suggested_payload（asset 含 asset_type、summary、fields、"
+            "capability_tags、reusable_scenario、maturity、unmatched_fragments）"
         ),
         "user_mode": "template",
         "system_vars": [
@@ -177,6 +179,7 @@ SCENE_SPECS = {
             "goal_types",
             "review_types",
             "asset_types",
+            "asset_field_schema",
         ],
         "user_vars": ["raw_text"],
     },

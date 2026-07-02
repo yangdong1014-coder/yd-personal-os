@@ -24,6 +24,29 @@ MODULES = (
 )
 
 
+def _format_asset_field_schema():
+    import asset_schemas
+
+    lines = []
+    for asset_type in asset_schemas.ASSET_TYPES:
+        field_names = [name for name, _ in asset_schemas.get_field_defs(asset_type)]
+        lines.append(f"- {asset_type}: {', '.join(field_names)}")
+    return "\n".join(lines)
+
+
+def _with_default_variables(module, scene, kind, text, variables):
+    result = dict(variables)
+    if (
+        module == "inbox"
+        and scene == "analyze"
+        and kind == "system"
+        and "{asset_field_schema}" in text
+        and "asset_field_schema" not in result
+    ):
+        result["asset_field_schema"] = _format_asset_field_schema()
+    return result
+
+
 class PromptNotFoundError(FileNotFoundError):
     pass
 
@@ -56,6 +79,7 @@ def load(module: str, scene: str, kind: str = "system", **variables) -> str:
 
     text = path.read_text(encoding="utf-8").strip()
     if variables:
+        variables = _with_default_variables(module, scene, kind, text, variables)
         text = text.format(**variables)
     return text
 

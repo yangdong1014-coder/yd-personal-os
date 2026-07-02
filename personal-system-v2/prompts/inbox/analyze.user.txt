@@ -1,4 +1,4 @@
-请分析以下输入，拆解为归档建议项。只返回 JSON。
+请分析以下输入，拆解为归档建议项。若识别为 asset，请按 asset_type 的字段白名单拆解到 suggested_payload.fields，并把无法稳定落位但有价值的片段放入 unmatched_fragments。只返回 JSON object。
 
 ---
 {raw_text}
