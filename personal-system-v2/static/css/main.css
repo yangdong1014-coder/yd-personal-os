@@ -3240,6 +3240,21 @@ a {
     box-shadow: -10px 0 16px rgba(20, 20, 20, 0.9);
   }
 
+  .sidebar-foot #export-data-btn,
+  .sidebar-foot #export-obsidian-btn,
+  .sidebar-foot #import-data-btn {
+    display: none;
+  }
+
+  .sidebar-foot #theme-toggle-btn {
+    width: auto;
+    padding: 0.45rem 0.7rem;
+  }
+
+  .sidebar-foot #theme-toggle-btn .nav-export-label {
+    display: inline;
+  }
+
   .main-content {
     padding: 0 0.75rem 3rem;
   }
