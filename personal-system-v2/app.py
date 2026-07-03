@@ -509,6 +509,20 @@ def api_delete_feedback(feedback_id):
         return _error(str(exc), 409)
 
 
+@app.route("/api/feedback/<int:feedback_id>/asset", methods=["POST"])
+def api_create_asset_from_feedback(feedback_id):
+    try:
+        return jsonify({
+            "ok": True,
+            "data": database.create_asset_from_feedback(feedback_id),
+        })
+    except ValueError as exc:
+        status = 404 if "不存在" in str(exc) else 400
+        return _error(str(exc), status)
+    except TypeError as exc:
+        return _error(str(exc) if str(exc) else "参数无效")
+
+
 @app.route("/api/export", methods=["GET"])
 def api_export():
     try:

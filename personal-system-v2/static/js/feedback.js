@@ -61,7 +61,31 @@
     });
   }
 
+  function isStrongFeedback(item) {
+    const level = item.level || "";
+    return level.startsWith("L4") || level.startsWith("L5");
+  }
+
+  async function createCaseAsset(item) {
+    const strongHint = isStrongFeedback(item) ? "这是强反馈，适合沉淀为案例资产。\n\n" : "";
+    if (!confirm(`${strongHint}确定基于「${item.title}」生成案例资产？`)) return;
+    const asset = await apiRequest(`/api/feedback/${item.id}/asset`, { method: "POST" });
+    showToast("案例资产已生成", "success");
+    showAIViewModal({
+      title: "案例资产已生成",
+      bodyHtml: `
+        <div class="stacked-form">
+          <p class="form-hint">已生成「${escapeHtml(asset.title)}」，可在资产中心继续补充可迁移场景和产品化下一步。</p>
+          <a class="btn btn-primary" href="/assets">查看资产</a>
+        </div>
+      `,
+      closeLabel: "知道了",
+    });
+    await load();
+  }
+
   function card(item) {
+    const strongFeedback = isStrongFeedback(item);
     return `
       <article class="entity-card value-card" data-id="${item.id}">
         <div class="value-card-head">
@@ -74,8 +98,10 @@
         <div class="value-card-meta">
           ${item.related_type ? `<span class="tag">${escapeHtml(item.related_type)} #${escapeHtml(item.related_id || "")}</span>` : ""}
           ${item.evidence ? `<span class="tag">有证据</span>` : ""}
+          ${strongFeedback ? `<span class="tag">强反馈：适合沉淀为案例资产</span>` : ""}
         </div>
         <div class="entity-actions">
+          <button type="button" class="btn btn-sm btn-primary btn-create-asset">生成案例资产</button>
           <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-delete">删除</button>
         </div>
@@ -92,6 +118,9 @@
     listEl.innerHTML = items.map(card).join("");
     listEl.querySelectorAll(".value-card").forEach((el) => {
       const item = items.find((row) => row.id === Number(el.dataset.id));
+      el.querySelector(".btn-create-asset").addEventListener("click", () => {
+        createCaseAsset(item).catch((err) => showToast(err.message, "error"));
+      });
       el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
       el.querySelector(".btn-delete").addEventListener("click", async () => {
         if (!confirm(`确定删除反馈「${item.title}」？`)) return;

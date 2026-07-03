@@ -788,6 +788,7 @@ def _migrate_assets_table(conn):
         "maturity": "TEXT NOT NULL DEFAULT '草稿'",
         "reuse_count": "INTEGER NOT NULL DEFAULT 0",
         "source_type": "TEXT NOT NULL DEFAULT ''",
+        "source_id": "INTEGER",
         "updated_at": "TEXT NOT NULL DEFAULT ''",
         "asset_level": "TEXT NOT NULL DEFAULT '资料'",
         "evidence": "TEXT NOT NULL DEFAULT ''",
@@ -1614,7 +1615,8 @@ def _asset_row(row):
     if data.get("maturity") not in MATURITY_LEVELS:
         data["maturity"] = "草稿"
     data["reuse_count"] = int(data.get("reuse_count") or 0)
-    data["source_id"] = data.get("source_review_id")
+    if data.get("source_id") is None:
+        data["source_id"] = data.get("source_review_id")
     if not data.get("source_type"):
         data["source_type"] = "review" if data.get("source_review_id") else ""
     if not (data.get("updated_at") or "").strip():
@@ -1695,6 +1697,8 @@ def create_asset(
     external_expression="",
     transferable_scene="",
     productization_next_step="",
+    source_type="",
+    source_id=None,
 ):
     title = (title or "").strip()
     if not title:
@@ -1737,7 +1741,7 @@ def create_asset(
     )
 
     tags = _parse_tags(json.dumps(capability_tags or []))
-    source_type = ""
+    source_type = (source_type or "").strip()
     if source_review_id is not None:
         conn = get_connection()
         review = conn.execute(
@@ -1747,6 +1751,7 @@ def create_asset(
         if not review:
             raise ValueError("来源复盘不存在")
         source_type = "review"
+        source_id = source_review_id
 
     now = _now()
     conn = get_connection()
@@ -1756,9 +1761,9 @@ def create_asset(
             title, trigger_context, core_content, asset_type,
             capability_tags, source_review_id, created_at,
             summary, fields, reusable_scenario, maturity, reuse_count,
-            source_type, updated_at, asset_level, evidence,
+            source_type, source_id, updated_at, asset_level, evidence,
             external_expression, transferable_scene, productization_next_step
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             title,
@@ -1774,6 +1779,7 @@ def create_asset(
             maturity,
             0,
             source_type,
+            source_id,
             now,
             asset_level,
             (evidence or "").strip(),
@@ -1787,6 +1793,50 @@ def create_asset(
     row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
     conn.close()
     return _asset_row(row)
+
+
+def create_asset_from_feedback(feedback_id):
+    feedback = get_feedback_item(feedback_id)
+    if not feedback:
+        raise ValueError("反馈不存在")
+
+    content = _clean_text(feedback.get("content"))
+    title = _clean_text(feedback.get("title"))
+    evidence = _clean_text(feedback.get("evidence"))
+    next_action = _clean_text(feedback.get("next_action"))
+    base_content = content or title
+    external_text = (
+        f"基于一次真实反馈，我识别到：{base_content}。"
+        "该反馈说明该方向具备进一步验证和案例沉淀价值。"
+    )
+    productization_next_step = (
+        next_action or "继续补充结果数据、适用场景和可复用方法。"
+    )
+    fields = {
+        "资产说明": base_content,
+        "适用场景": _clean_text(feedback.get("source")),
+        "核心内容": base_content,
+        "使用方法": productization_next_step,
+        "可复用价值": evidence or _clean_text(feedback.get("level")),
+    }
+
+    return create_asset(
+        f"{title}案例资产",
+        "案例复盘",
+        capability_tags=[],
+        fields=fields,
+        summary=content,
+        reusable_scenario="",
+        maturity="可用",
+        core_content=base_content,
+        asset_level="案例",
+        evidence=evidence,
+        external_expression=external_text,
+        transferable_scene="",
+        productization_next_step=productization_next_step,
+        source_type="feedback",
+        source_id=feedback["id"],
+    )
 
 
 def get_asset(asset_id):
@@ -2532,6 +2582,7 @@ _TABLE_FIELDS = {
         "maturity",
         "reuse_count",
         "source_type",
+        "source_id",
         "updated_at",
         *ASSET_VALUE_FIELDS,
     ),
@@ -2731,6 +2782,7 @@ _OPTIONAL_IMPORT_FIELDS = {
     "maturity",
     "reuse_count",
     "source_type",
+    "source_id",
     "updated_at",
     "opportunity_id",
     "related_type",
@@ -2767,6 +2819,8 @@ def _normalize_import_record(table, raw):
                 record[key] = "L0 只是想法"
             elif key == "asset_level":
                 record[key] = "资料"
+            elif key == "source_id":
+                record[key] = None
             elif (
                 key in PROJECT_AUDIT_FIELDS
                 or key in ASSET_VALUE_FIELDS
@@ -2824,6 +2878,8 @@ def _normalize_import_record(table, raw):
         record["reuse_count"] = int(record.get("reuse_count") or 0)
         if not record.get("source_type") and record.get("source_review_id"):
             record["source_type"] = "review"
+        if record.get("source_id") in ("", None) and record.get("source_review_id"):
+            record["source_id"] = record["source_review_id"]
         if not record.get("updated_at"):
             record["updated_at"] = record.get("created_at")
 

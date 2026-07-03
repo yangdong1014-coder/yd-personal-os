@@ -205,6 +205,69 @@ def test_feedback_can_link_to_experiment(client):
     assert feedback["related_id"] == experiment["id"]
 
 
+def test_feedback_can_generate_case_asset(client):
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "周岁礼 AI 版面销售初测反馈",
+            "source": "客户反馈",
+            "level": "L3 业务流程开始使用",
+            "content": "客户愿意基于样图继续沟通",
+            "evidence": "客户追问价格和交付周期",
+            "next_action": "补充报价页和交付案例",
+        },
+    ).get_json()["data"]
+
+    response = client.post(f"/api/feedback/{feedback['id']}/asset")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    asset = payload["data"]
+
+    assert asset["title"] == "周岁礼 AI 版面销售初测反馈案例资产"
+    assert asset["asset_type"] == "案例复盘"
+    assert asset["asset_level"] == "案例"
+    assert asset["summary"] == "客户愿意基于样图继续沟通"
+    assert asset["core_content"] == "客户愿意基于样图继续沟通"
+    assert asset["evidence"] == "客户追问价格和交付周期"
+    assert asset["productization_next_step"] == "补充报价页和交付案例"
+    assert asset["source_type"] == "feedback"
+    assert asset["source_id"] == feedback["id"]
+
+    assets = client.get("/api/assets").get_json()["data"]
+    assert any(item["id"] == asset["id"] for item in assets)
+
+
+def test_feedback_generate_case_asset_not_found(client):
+    response = client.post("/api/feedback/999999/asset")
+    assert response.status_code == 404
+    assert response.get_json()["ok"] is False
+
+
+def test_strong_feedback_can_generate_case_asset_with_default_next_step(client):
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "强反馈验证",
+            "source": "数据反馈",
+            "level": "L4 产生可量化结果",
+            "content": "",
+            "evidence": "转化率提升 12%",
+        },
+    ).get_json()["data"]
+
+    response = client.post(f"/api/feedback/{feedback['id']}/asset")
+    assert response.status_code == 200
+    asset = response.get_json()["data"]
+    assert asset["asset_level"] == "案例"
+    assert asset["asset_type"] == "案例复盘"
+    assert asset["evidence"] == "转化率提升 12%"
+    assert asset["productization_next_step"] == "继续补充结果数据、适用场景和可复用方法。"
+    assert "强反馈验证" in asset["external_expression"]
+    assert asset["source_type"] == "feedback"
+    assert asset["source_id"] == feedback["id"]
+
+
 def test_project_audit_fields_preserve_old_project(client):
     goal = client.post("/api/goals", json={"name": "目标", "type": "年度"}).get_json()["data"]
     project = client.post("/api/projects", json={"goal_id": goal["id"], "name": "项目"}).get_json()["data"]
