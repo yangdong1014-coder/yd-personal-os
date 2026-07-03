@@ -16,6 +16,9 @@
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
+  <p class="asset-level-guide">
+    素材：原始信息和可复用片段 · 方法：可重复使用的判断或流程 · 案例：有真实反馈或结果证据的实践 · 产品：可被包装、交付或交易的方案 · 筹码：能提升个人议价权的成果证明
+  </p>
 </header>
 
 <div id="asset-form-host" class="asset-form-host" hidden>
@@ -88,6 +91,17 @@
   <section class="section-card assets-filter-panel">
     <h2>筛选</h2>
     <p class="form-hint section-hint">按资产类型与能力模块浏览</p>
+    <div class="filter-group">
+      <span class="filter-group-label">资产等级</span>
+      <div class="filter-bar" id="level-filter">
+        <button type="button" class="filter-chip active" data-level="">全部</button>
+        <button type="button" class="filter-chip" data-level="素材">素材</button>
+        <button type="button" class="filter-chip" data-level="方法">方法</button>
+        <button type="button" class="filter-chip" data-level="案例">案例</button>
+        <button type="button" class="filter-chip" data-level="产品">产品</button>
+        <button type="button" class="filter-chip" data-level="筹码">筹码</button>
+      </div>
+    </div>
     <div class="filter-group">
       <span class="filter-group-label">资产类型</span>
       <div class="filter-bar" id="type-filter">

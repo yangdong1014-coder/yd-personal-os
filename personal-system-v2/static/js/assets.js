@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const createAssetBtn = document.getElementById("create-asset-btn");
   const assetsList = document.getElementById("assets-list");
   const assetsCount = document.getElementById("assets-count");
+  const levelFilter = document.getElementById("level-filter");
   const typeFilter = document.getElementById("type-filter");
   const tagFilter = document.getElementById("tag-filter");
   const prefillHint = document.getElementById("asset-prefill-hint");
@@ -32,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let activeType = "";
   let activeTag = "";
+  let activeLevel = "";
 
   const MATURITY_CLASS = {
     草稿: "maturity-draft",
@@ -486,6 +488,17 @@ document.addEventListener("DOMContentLoaded", () => {
     return asset.updated_at || asset.created_at || "";
   }
 
+  function normalizedAssetLevel(asset) {
+    const level = (asset.asset_level || "").trim();
+    if (!level || level === "资料" || level === "模板") return "素材";
+    return level;
+  }
+
+  function matchesActiveLevel(asset) {
+    if (!activeLevel) return true;
+    return normalizedAssetLevel(asset) === activeLevel;
+  }
+
   function groupAssetsByType(assets) {
     const groupsByType = new Map();
     assets.forEach((asset) => {
@@ -566,6 +579,36 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function valueDetailRows(asset, caseOnly = false) {
+    const rows = [
+      ["证据", asset.evidence],
+      ["对外表达", asset.external_expression],
+      ["可迁移场景", asset.transferable_scene],
+      ["产品化下一步", asset.productization_next_step],
+    ];
+    if (!caseOnly) {
+      rows.unshift(["复用场景", asset.reusable_scenario]);
+    }
+    return rows
+      .filter(([, value]) => String(value || "").trim())
+      .map(
+        ([label, value]) =>
+          `<div><span class="meta-label">${escapeHtml(label)}</span><span class="meta-value">${formatText(value)}</span></div>`
+      )
+      .join("");
+  }
+
+  function renderCaseAssetBlock(asset) {
+    if (normalizedAssetLevel(asset) !== "案例") return "";
+    const rows = valueDetailRows(asset, true);
+    return `
+      <div class="asset-case-snapshot">
+        <p>这是可沉淀为对外表达或方法复用的资产。</p>
+        ${rows ? `<div class="asset-card-meta-grid asset-case-meta-grid">${rows}</div>` : ""}
+      </div>
+    `;
+  }
+
   function renderAssetArchiveItem(asset) {
     const tagsHtml = (asset.capability_tags || [])
       .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
@@ -573,15 +616,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const maturityClass = MATURITY_CLASS[asset.maturity] || "maturity-draft";
     const fieldPreviewEntries = getFieldPreviewEntries(asset);
     const previewLine = buildCompactPreviewLine(asset, fieldPreviewEntries);
+    const isCaseAsset = normalizedAssetLevel(asset) === "案例";
+    const valueRows = valueDetailRows(asset);
 
     return `
-      <article class="asset-archive-item" data-asset-id="${asset.id}">
+      <article class="asset-archive-item${isCaseAsset ? " asset-archive-item-case" : ""}" data-asset-id="${asset.id}">
         <div class="asset-archive-item-head">
           <div class="asset-archive-item-main">
             <div class="asset-archive-item-topline">
               <h3 class="asset-archive-item-title">${escapeHtml(asset.title)}</h3>
               <span class="tag asset-maturity ${maturityClass}">${escapeHtml(asset.maturity || "草稿")}</span>
-              <span class="tag">${escapeHtml(asset.asset_level || "资料")}</span>
+              <span class="tag">${escapeHtml(normalizedAssetLevel(asset))}</span>
+              ${isCaseAsset ? `<span class="tag tag-case-asset">案例资产</span>` : ""}
               ${tagsHtml ? `<span class="asset-archive-tags-inline">${tagsHtml}</span>` : ""}
               <span class="asset-meta-chip">复用 ${asset.reuse_count || 0}</span>
               <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
@@ -589,6 +635,7 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>
             ${previewLine}
             <p class="asset-archive-preview-line asset-source-title">来源标题：待查看</p>
+            ${renderCaseAssetBlock(asset)}
           </div>
           <div class="asset-archive-item-actions">
             <button type="button" class="btn btn-sm btn-ghost btn-edit-asset">编辑</button>
@@ -600,13 +647,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <div class="value-link-panel" hidden></div>
         <div class="asset-card-details" hidden>
           ${renderFieldPreview(asset, fieldPreviewEntries)}
-          <div class="asset-card-meta-grid asset-detail-meta-grid">
-            <div><span class="meta-label">复用场景</span><span class="meta-value">${formatText(asset.reusable_scenario)}</span></div>
-            <div><span class="meta-label">证据</span><span class="meta-value">${formatText(asset.evidence)}</span></div>
-            <div><span class="meta-label">对外表达</span><span class="meta-value">${formatText(asset.external_expression)}</span></div>
-            <div><span class="meta-label">可迁移场景</span><span class="meta-value">${formatText(asset.transferable_scene)}</span></div>
-            <div><span class="meta-label">产品化下一步</span><span class="meta-value">${formatText(asset.productization_next_step)}</span></div>
-          </div>
+          ${valueRows ? `<div class="asset-card-meta-grid asset-detail-meta-grid">${valueRows}</div>` : ""}
           <div class="asset-ai-actions">
             <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
             <button type="button" class="btn btn-sm btn-ai btn-classify">AI归类</button>
@@ -677,7 +718,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (activeType) params.set("asset_type", activeType);
     const query = params.toString();
     const url = query ? `/api/assets?${query}` : "/api/assets";
-    const assets = await apiRequest(url);
+    const allAssets = await apiRequest(url);
+    const assets = allAssets.filter(matchesActiveLevel);
 
     if (assetsCount) {
       assetsCount.textContent = assets.length ? `${assets.length} 条` : "";
@@ -687,8 +729,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (assets.length === 0) {
       assetsList.innerHTML = `
         <div class="empty-state assets-empty-state">
-          <strong>${activeType || activeTag ? "暂无匹配资产" : "添加第一条可复用资产"}</strong>
-          ${activeType || activeTag ? "调整筛选条件或新建资产" : "点击右上角「新建资产」，或从复盘 / 智能归档生成"}
+          <strong>${activeType || activeTag || activeLevel ? "暂无匹配资产" : "添加第一条可复用资产"}</strong>
+          ${activeType || activeTag || activeLevel ? "调整筛选条件或新建资产" : "点击右上角「新建资产」，或从复盘 / 智能归档生成"}
         </div>`;
       return;
     }
@@ -891,6 +933,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   bindFilterBar(tagFilter, "tag", (value) => {
     activeTag = value;
+  });
+  bindFilterBar(levelFilter, "level", (value) => {
+    activeLevel = value;
   });
 
   renderDynamicFields(assetTypeSelect.value);

@@ -71,8 +71,48 @@ def test_legacy_asset_migration(client):
     database.init_db()
     asset = database.get_asset(asset_id)
     assert asset["asset_type"] in ("本质洞察", "方法论", "通用资产")
+    assert asset["asset_level"] == "资料"
     assert asset["fields"]
     assert asset["summary"]
+
+
+def test_assets_api_returns_case_asset_value_fields(client):
+    response = client.post(
+        "/api/assets",
+        json={
+            "title": "真实反馈案例",
+            "asset_type": "案例复盘",
+            "asset_level": "案例",
+            "fields": {"资产说明": "一次可复用案例"},
+            "evidence": "客户确认愿意继续试用",
+            "external_expression": "基于真实反馈形成的案例表达",
+            "transferable_scene": "相似客户初测",
+            "productization_next_step": "包装为轻量交付方案",
+        },
+    )
+    assert response.status_code == 200
+    asset = response.get_json()["data"]
+    assert asset["asset_level"] == "案例"
+    assert asset["evidence"] == "客户确认愿意继续试用"
+    assert asset["external_expression"] == "基于真实反馈形成的案例表达"
+    assert asset["transferable_scene"] == "相似客户初测"
+    assert asset["productization_next_step"] == "包装为轻量交付方案"
+
+    listed = client.get("/api/assets").get_json()["data"]
+    case_asset = next(item for item in listed if item["id"] == asset["id"])
+    assert case_asset["asset_level"] == "案例"
+    assert case_asset["evidence"] == "客户确认愿意继续试用"
+    assert case_asset["external_expression"] == "基于真实反馈形成的案例表达"
+    assert case_asset["transferable_scene"] == "相似客户初测"
+    assert case_asset["productization_next_step"] == "包装为轻量交付方案"
+
+
+def test_assets_page_renders(client):
+    response = client.get("/assets")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "资产等级" in html
+    assert "案例：有真实反馈或结果证据的实践" in html
 
 
 def test_increment_reuse_count(client):
