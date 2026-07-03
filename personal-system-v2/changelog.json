@@ -1,6 +1,19 @@
 {
-  "current": "v1.19.5",
+  "current": "v1.19.6",
   "entries": [
+    {
+      "version": "v1.19.6",
+      "date": "2026-07-03",
+      "title": "顶部外观切换按钮视觉优化",
+      "type": "fix",
+      "items": [
+        "顶部外观按钮从长文案「外观：深色暖色」优化为轻量控制按钮，桌面端显示 icon +「暖色 / 冷色」短标签，移动端只显示图标，减少顶部拥挤",
+        "title 与 aria-label 保留完整主题状态，例如「当前外观：深色暖色，点击切换」，兼顾视觉轻量和可访问性",
+        "移动端外观按钮固定为轻量图标按钮，减少顶部右侧突兀色块，避免挤压首页导航与顶部操作区，改善 PWA App 模式下的顶部观感",
+        "保留 dark-warm、dark-cool、light-warm、light-cool 四套主题，保留原有 localStorage key、主题循环顺序与点击切换逻辑",
+        "主题切换时同步更新按钮短标签、title 与 aria-label，不改变数据库、业务逻辑、PWA manifest、service worker、云端配置，也不影响 AI 解析、目标、任务、资产、收件箱等功能"
+      ]
+    },
     {
       "version": "v1.19.5",
       "date": "2026-07-03",

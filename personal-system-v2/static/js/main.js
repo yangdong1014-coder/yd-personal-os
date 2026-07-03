@@ -1,14 +1,19 @@
 const UI_THEME_STORAGE_KEY = "personal-os-ui-theme";
 
 const UI_THEMES = [
-  { id: "theme-dark-warm", label: "外观：深色暖色" },
-  { id: "theme-dark-cool", label: "外观：深色冷色" },
-  { id: "theme-light-warm", label: "外观：浅色暖色" },
-  { id: "theme-light-cool", label: "外观：浅色冷色" },
+  { id: "theme-dark-warm", short: "暖色", full: "深色暖色" },
+  { id: "theme-dark-cool", short: "冷色", full: "深色冷色" },
+  { id: "theme-light-warm", short: "暖色", full: "浅色暖色" },
+  { id: "theme-light-cool", short: "冷色", full: "浅色冷色" },
 ];
 
 function getStoredUiTheme() {
-  const saved = localStorage.getItem(UI_THEME_STORAGE_KEY);
+  let saved = null;
+  try {
+    saved = localStorage.getItem(UI_THEME_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Unable to read UI theme preference", error);
+  }
   return UI_THEMES.some((theme) => theme.id === saved) ? saved : UI_THEMES[0].id;
 }
 
@@ -19,11 +24,22 @@ function applyUiTheme(themeId) {
 
   UI_THEMES.forEach((item) => root.classList.remove(item.id));
   root.classList.add(theme.id);
-  localStorage.setItem(UI_THEME_STORAGE_KEY, theme.id);
+  try {
+    localStorage.setItem(UI_THEME_STORAGE_KEY, theme.id);
+  } catch (error) {
+    console.warn("Unable to save UI theme preference", error);
+  }
 
   const label = document.getElementById("theme-toggle-label");
   if (label) {
-    label.textContent = theme.label;
+    label.textContent = theme.short;
+  }
+
+  const button = document.getElementById("theme-toggle-btn");
+  if (button) {
+    const fullLabel = `当前外观：${theme.full}，点击切换`;
+    button.setAttribute("aria-label", fullLabel);
+    button.setAttribute("title", fullLabel);
   }
 }
 

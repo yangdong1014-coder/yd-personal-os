@@ -1,6 +1,10 @@
 import json
+from pathlib import Path
 
 import database
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _empty_backup():
@@ -33,6 +37,30 @@ def test_base_template_has_pwa_metadata(client):
     assert 'name="theme-color"' in html
     assert 'name="apple-mobile-web-app-capable"' in html
     assert 'name="apple-mobile-web-app-title"' in html
+
+
+def test_base_template_has_compact_theme_toggle(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="theme-toggle-btn"' in html
+    assert 'class="nav-export-btn theme-toggle"' in html
+    assert 'class="nav-export-icon theme-toggle-icon theme-toggle__icon"' in html
+    assert 'class="nav-export-label theme-toggle__label"' in html
+    assert 'aria-label="当前外观：深色暖色，点击切换"' in html
+    assert 'title="当前外观：深色暖色，点击切换"' in html
+    assert ">暖色</span>" in html
+    assert "外观：深色暖色</span>" not in html
+
+
+def test_main_js_updates_theme_toggle_accessible_label():
+    script = (PROJECT_ROOT / "static" / "js" / "main.js").read_text(encoding="utf-8")
+    assert 'short: "暖色", full: "深色暖色"' in script
+    assert 'short: "冷色", full: "深色冷色"' in script
+    assert 'label.textContent = theme.short;' in script
+    assert 'button.setAttribute("aria-label", fullLabel);' in script
+    assert 'button.setAttribute("title", fullLabel);' in script
+    assert 'label: "外观：深色暖色"' not in script
 
 
 def test_manifest_is_available(client):
@@ -73,7 +101,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v1.19.5"
+    assert payload["data"]["current"] == "v1.19.6"
     assert isinstance(payload["data"]["entries"], list)
 
 
