@@ -219,6 +219,44 @@
     `;
   }
 
+  function hasContent(value) {
+    return String(value || "").trim().length > 0;
+  }
+
+  function renderKernelTags(item) {
+    const tags = [];
+    if (hasContent(item.seven_day_mvp)) tags.push(["有 7 天 MVP", "positive"]);
+    if (hasContent(item.next_action)) tags.push(["有下一步", "muted"]);
+    if (
+      hasContent(item.affects_revenue) ||
+      hasContent(item.affects_cost) ||
+      hasContent(item.affects_efficiency) ||
+      hasContent(item.affects_experience)
+    ) {
+      tags.push(["价值变化明确", "positive"]);
+    }
+    if (!["已转项目", "已转化", "删除", "停止"].includes(item.status || "")) {
+      tags.push(["待实验验证", "warning"]);
+    }
+    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+  }
+
+  function renderMvpLayerTag(item) {
+    let label = "想法 MVP";
+    let tone = "idea";
+    if (hasContent(item.case_asset_potential)) {
+      label = "资产 MVP 候选";
+      tone = "asset";
+    } else if (hasContent(item.transaction_potential)) {
+      label = "交易 MVP 候选";
+      tone = "transaction";
+    } else if (hasContent(item.target_user) && hasContent(item.next_action)) {
+      label = "表达 MVP";
+      tone = "expression";
+    }
+    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+  }
+
   async function toggleLinks(el, item) {
     const panel = el.querySelector(".value-link-panel");
     const summary = el.querySelector(".value-link-summary");
@@ -260,6 +298,8 @@
           <span class="tag">${escapeHtml(advice(total))}</span>
           ${item.target_user ? `<span class="tag">${escapeHtml(item.target_user)}</span>` : ""}
         </div>
+        ${renderMvpLayerTag(item)}
+        <div class="kernel-tag-row">${renderKernelTags(item)}</div>
         <div class="value-link-strip">
           <span class="value-link-summary">关联链路：待查看</span>
           <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>

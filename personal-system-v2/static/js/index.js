@@ -3,6 +3,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const projectsEl = document.getElementById("dashboard-projects-content");
   const tasksEl = document.getElementById("dashboard-tasks-content");
   const valueEl = document.getElementById("value-dashboard-content");
+  const cockpitEl = document.getElementById("dashboard-cockpit-content");
+  const assetCompoundEl = document.getElementById("asset-compound-content");
   const briefingBtn = document.getElementById("ai-briefing-btn");
   const dispatchBtn = document.getElementById("ai-dispatch-btn");
 
@@ -576,6 +578,113 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function cockpitCard(title, value, meta, tone = "") {
+    return `
+      <article class="dashboard-cockpit-card ${tone ? `dashboard-cockpit-card--${tone}` : ""}">
+        <span class="dashboard-cockpit-label">${escapeHtml(title)}</span>
+        <strong>${escapeHtml(value || "暂无")}</strong>
+        <p>${escapeHtml(meta || "")}</p>
+      </article>
+    `;
+  }
+
+  function pickValueBottleneck(valueData) {
+    if (!valueData) {
+      return {
+        title: "等待价值链数据",
+        meta: "正在读取机会、实验、反馈和资产状态",
+        tone: "muted",
+      };
+    }
+    const pendingDeposit = [
+      ...(valueData.pending_deposit || []),
+      ...(valueData.completed_experiments_without_assets || []),
+    ];
+    if (pendingDeposit.length > 0) {
+      return {
+        title: "待资产化",
+        meta: `${pendingDeposit.length} 个强反馈或实验结果需要沉淀`,
+        tone: "deposit",
+      };
+    }
+    if ((valueData.pending_validation || []).length > 0) {
+      return {
+        title: "待验证",
+        meta: `${valueData.pending_validation.length} 个机会等待最小验证`,
+        tone: "validate",
+      };
+    }
+    if ((valueData.pending_stop_review || []).length > 0) {
+      return {
+        title: "待停止审查",
+        meta: `${valueData.pending_stop_review.length} 个事项需要判断是否止损`,
+        tone: "stop",
+      };
+    }
+    return {
+      title: "链路顺畅",
+      meta: "当前没有明显堵点，优先推进今日行动",
+      tone: "clear",
+    };
+  }
+
+  function renderCockpitSummary(data, valueData, todayTasks) {
+    if (!cockpitEl) return;
+    const goal = data.mainline_goal;
+    const firstTask = (todayTasks || [])[0];
+    const bottleneck = pickValueBottleneck(valueData);
+    cockpitEl.innerHTML = [
+      cockpitCard(
+        "当前主线",
+        goal?.name || "暂无主线目标",
+        goal ? `${goal.type || "目标"} · ${Number(goal.today_task_count || goal.stats?.today || 0)} 个今日推进` : "在目标页设置“当前主线”目标",
+        "mainline"
+      ),
+      cockpitCard(
+        "今日最小推进",
+        firstTask?.name || "暂无今日推进",
+        firstTask ? `${firstTask.project_name || "未归属项目"} · ${firstTask.status || ""}` : "在任务页标记今日推进任务",
+        "today"
+      ),
+      cockpitCard(
+        "价值链最大堵点",
+        bottleneck.title,
+        bottleneck.meta,
+        bottleneck.tone
+      ),
+    ].join("");
+  }
+
+  function renderAssetCompound(valueData) {
+    if (!assetCompoundEl) return;
+    const caseAssets = valueData?.case_assets || [];
+    const strongFeedback = valueData?.strong_feedback || [];
+    const pendingDeposit = [
+      ...(valueData?.pending_deposit || []),
+      ...(valueData?.completed_experiments_without_assets || []),
+    ];
+    assetCompoundEl.innerHTML = [
+      valueList(
+        "案例资产",
+        caseAssets,
+        (item) => valueItem(item.title, `${item.asset_level || ""} · ${item.asset_type || ""}`),
+        "暂无案例/产品/筹码资产"
+      ),
+      valueList(
+        "可复用信号",
+        strongFeedback,
+        (item) => valueItem(item.title, `${item.source || ""} · ${item.level || ""}`),
+        "暂无 L4/L5 强反馈"
+      ),
+      valueList(
+        "能力提醒",
+        pendingDeposit,
+        (item) => valueItem(item.title || item.name, "优先沉淀为资产，再回流能力系统"),
+        "暂无待沉淀提醒"
+      ),
+    ].join("");
+  }
+
   function renderValueSignalRows(data) {
     const pendingValidation = (data.pending_validation || []).map((item) =>
       valueSignalItem(item.name, `${item.total_score || 0} 分 · 等待 7 天 MVP`, "validate")
@@ -671,7 +780,11 @@ document.addEventListener("DOMContentLoaded", () => {
     focusProjectsExpanded = false;
     cachedFocusProjects = selectFocusProjects(data);
     renderKeyProjects(cachedFocusProjects);
-    if (valueData) renderValueDashboard(valueData);
+    renderCockpitSummary(data, valueData, todayTasks);
+    if (valueData) {
+      renderValueDashboard(valueData);
+      renderAssetCompound(valueData);
+    }
   }
 
   const goalSection = document.getElementById("dashboard-goal");
@@ -696,7 +809,7 @@ document.addEventListener("DOMContentLoaded", () => {
           .join("");
 
         showAIViewModal({
-          title: "AI 今日作战简报",
+          title: "AI 审计瓶颈",
           bodyHtml: `
             <div class="ai-briefing">
               <p class="ai-briefing-text">${formatMultiline(result.briefing)}</p>
@@ -735,7 +848,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         showAIModal({
-          title: "AI 行动分发",
+          title: "AI 今日推进",
           bodyHtml: buildDispatchActionsHtml(result),
           confirmLabel: "确认执行",
           loadingLabel: "执行中…",
@@ -763,7 +876,7 @@ document.addEventListener("DOMContentLoaded", () => {
           },
         });
       } catch (err) {
-        showToast(err.message || "AI 行动分发失败", "error");
+        showToast(err.message || "AI 今日推进失败", "error");
       } finally {
         dispatchBtn.disabled = false;
         dispatchBtn.textContent = prev;

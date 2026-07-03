@@ -104,7 +104,7 @@ def test_service_worker_is_available(client):
     script = response.get_data(as_text=True)
     assert '"/api/"' in script
     assert "caches.open" in script
-    assert "psy-2-pwa-v2.0.0" in script
+    assert "psy-2-pwa-v2.1.0" in script
 
 
 def test_positioning_page(client):
@@ -122,7 +122,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v2.0.0"
+    assert payload["data"]["current"] == "v2.1.0"
     assert isinstance(payload["data"]["entries"], list)
 
 
