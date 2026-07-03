@@ -54,6 +54,17 @@ def test_remote_mode_api_with_header_token(client, monkeypatch):
     assert response.get_json()["ok"] is True
 
 
+def test_remote_mode_service_worker_is_public(client, monkeypatch):
+    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
+    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
+    response = client.get(
+        "/service-worker.js",
+        environ_overrides={"REMOTE_ADDR": "100.64.0.1"},
+    )
+    assert response.status_code == 200
+    assert response.content_type.startswith("application/javascript")
+
+
 def test_local_remote_mode_no_token_required(client, monkeypatch):
     monkeypatch.setattr(config, "is_remote_mode", lambda: True)
     monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")

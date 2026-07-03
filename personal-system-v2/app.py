@@ -1,7 +1,7 @@
 import json
 import os
 
-from flask import Flask, Response, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory
 
 import access_control
 import ai_service
@@ -90,6 +90,18 @@ def api_health():
             },
         }
     )
+
+
+@app.route("/service-worker.js", methods=["GET"])
+def service_worker():
+    response = send_from_directory(
+        app.static_folder,
+        "service-worker.js",
+        mimetype="application/javascript",
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.route("/")

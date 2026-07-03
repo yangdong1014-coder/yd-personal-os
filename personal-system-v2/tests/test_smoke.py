@@ -24,6 +24,40 @@ def test_index_page(client):
     assert response.status_code == 200
 
 
+def test_base_template_has_pwa_metadata(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'rel="manifest"' in html
+    assert "/static/manifest.json" in html
+    assert 'name="theme-color"' in html
+    assert 'name="apple-mobile-web-app-capable"' in html
+    assert 'name="apple-mobile-web-app-title"' in html
+
+
+def test_manifest_is_available(client):
+    response = client.get("/static/manifest.json")
+    assert response.status_code == 200
+    assert response.content_type.startswith("application/json")
+    payload = response.get_json()
+    assert payload["name"] == "PSY-1 Personal OS"
+    assert payload["short_name"] == "PSY-1"
+    assert payload["start_url"] == "/"
+    assert payload["display"] == "standalone"
+    assert len(payload["icons"]) >= 2
+    assert {icon["sizes"] for icon in payload["icons"]} >= {"192x192", "512x512"}
+
+
+def test_service_worker_is_available(client):
+    response = client.get("/service-worker.js")
+    assert response.status_code == 200
+    assert response.content_type.startswith("application/javascript")
+    assert response.headers["Cache-Control"] == "no-cache"
+    script = response.get_data(as_text=True)
+    assert '"/api/"' in script
+    assert "caches.open" in script
+
+
 def test_positioning_page(client):
     response = client.get("/positioning")
     assert response.status_code == 200
@@ -39,7 +73,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v1.19.4"
+    assert payload["data"]["current"] == "v1.19.5"
     assert isinstance(payload["data"]["entries"], list)
 
 

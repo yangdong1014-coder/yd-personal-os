@@ -1,6 +1,23 @@
 {
-  "current": "v1.19.4",
+  "current": "v1.19.5",
   "entries": [
+    {
+      "version": "v1.19.5",
+      "date": "2026-07-03",
+      "title": "PWA 安装体验优化",
+      "type": "feat",
+      "items": [
+        "新增 static/manifest.json，配置 name、short_name、description、start_url、scope、display、orientation、background_color、theme_color，使浏览器可识别 PSY-1 为可安装 Web App 并支持添加到手机主屏幕",
+        "新增 static/icons/icon-192.png 与 static/icons/icon-512.png，使用 PSY-1 简洁标识，并在 manifest 中引用 192x192 与 512x512 图标",
+        "新增 static/service-worker.js 与根路径 /service-worker.js 路由，使 service worker 以根 scope 覆盖全站；install 阶段缓存基础 shell 资源，activate 阶段清理旧缓存，fetch 阶段采用 network-first，失败后 fallback cache",
+        "service worker 不缓存 POST 请求、不缓存 /api/*，也不缓存带 token、Authorization、X-Personal-OS-Token 的请求，避免影响访问令牌与动态写入接口",
+        "base.html 增加 manifest link、theme-color、mobile-web-app-capable、apple-mobile-web-app-capable、apple-mobile-web-app-title、apple-mobile-web-app-status-bar-style 与 apple-touch-icon",
+        "main.js 注册 service worker，注册失败仅 console warn，不阻塞页面加载或现有交互",
+        "service-worker.js 作为 PWA 必需静态入口允许访问，static 资源继续按现有逻辑访问，不改变业务页面、API、token、Tailscale 的访问安全模型",
+        "不改数据库、不新增业务 API、不新增外部依赖、不改云端 systemd 配置；PWA 只改善安装和启动体验，不改变云端访问链路，云端依赖 Tailscale 时手机仍需保持 Tailscale 可用",
+        "不影响智能归档、目标、任务、资产等业务功能"
+      ]
+    },
     {
       "version": "v1.19.4",
       "date": "2026-07-02",

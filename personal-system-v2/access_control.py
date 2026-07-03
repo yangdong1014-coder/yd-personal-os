@@ -43,6 +43,8 @@ def validate_token(token):
 def is_public_path():
     if request.path == "/api/health":
         return True
+    if request.path == "/service-worker.js":
+        return True
     if request.path.startswith("/static/"):
         return True
     return False
