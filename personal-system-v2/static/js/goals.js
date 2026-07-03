@@ -199,10 +199,28 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function openProjectEditModal(project) {
+    const auditFields = [
+      ["core_hypothesis", "核心假设"],
+      ["disconfirming_signal", "反证信号"],
+      ["seven_day_mvp", "7天MVP"],
+      ["real_feedback", "真实反馈"],
+      ["result_data", "结果数据"],
+      ["asset_deposit", "资产沉淀"],
+      ["value_capture", "价值捕获"],
+      ["stop_condition", "停止条件"],
+      ["value_tags", "价值类型标签"],
+    ];
+    const scoreFields = [
+      ["importance_score", "重要性"],
+      ["feedback_speed_score", "反馈速度"],
+      ["revenue_score", "收入/成本"],
+      ["asset_score", "资产化"],
+      ["leverage_score", "杠杆"],
+    ];
     showAIModal({
       title: `编辑项目 — ${project.name}`,
       bodyHtml: `
-        <div class="stacked-form">
+        <div class="stacked-form value-form-grid">
           <label class="form-row">
             <span class="form-label">项目名称</span>
             <input type="text" id="edit-project-name" class="input full-width" value="${escapeAttr(project.name)}" required>
@@ -211,6 +229,27 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="form-label">项目优先级</span>
             <select id="edit-project-priority" class="select full-width">${buildPriorityOptions(project.priority)}</select>
           </label>
+          <div class="form-row form-row-wide value-audit-heading">
+            <strong>对抗性审计</strong>
+            <span class="form-hint">用反证、反馈和结果约束项目继续投入</span>
+          </div>
+          ${auditFields.map(([key, label]) => `
+            <label class="form-row">
+              <span class="form-label">${label}</span>
+              <textarea id="edit-project-${key}" class="textarea" rows="2">${escapeHtml(project[key] || "")}</textarea>
+            </label>
+          `).join("")}
+          <div class="form-row form-row-wide">
+            <span class="form-label">五维价值评分</span>
+            <div class="value-score-grid">
+              ${scoreFields.map(([key, label]) => `
+                <label class="value-score-field">
+                  <span class="form-label">${label}</span>
+                  <input id="edit-project-${key}" class="input value-score-input" type="number" min="0" max="5" value="${Number(project[key] || 0)}">
+                </label>
+              `).join("")}
+            </div>
+          </div>
         </div>
       `,
       confirmLabel: "保存",
@@ -223,7 +262,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         await apiRequest(`/api/projects/${project.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name, priority }),
+          body: JSON.stringify({
+            name,
+            priority,
+            ...Object.fromEntries(auditFields.map(([key]) => [
+              key,
+              document.getElementById(`edit-project-${key}`).value.trim(),
+            ])),
+            ...Object.fromEntries(scoreFields.map(([key]) => [
+              key,
+              Number(document.getElementById(`edit-project-${key}`).value || 0),
+            ])),
+          }),
         });
         showToast("项目已更新", "success");
         await loadGoals();

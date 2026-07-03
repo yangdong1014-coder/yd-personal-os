@@ -41,7 +41,33 @@
         {% endfor %}
       </select>
     </div>
+    <div class="form-row">
+      <label class="form-label" for="asset-level">资产等级</label>
+      <select id="asset-level" class="select full-width">
+        {% for l in asset_levels %}
+        <option value="{{ l }}"{% if l == '资料' %} selected{% endif %}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div id="asset-dynamic-fields" class="asset-dynamic-fields"></div>
+    <div class="asset-value-fields">
+      <div class="form-row">
+        <label class="form-label" for="asset-evidence">证据</label>
+        <textarea id="asset-evidence" class="textarea" rows="2"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="asset-external-expression">可对外表达版本</label>
+        <textarea id="asset-external-expression" class="textarea" rows="2"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="asset-transferable-scene">可迁移场景</label>
+        <textarea id="asset-transferable-scene" class="textarea" rows="2"></textarea>
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="asset-productization-next-step">下一步产品化可能</label>
+        <textarea id="asset-productization-next-step" class="textarea" rows="2"></textarea>
+      </div>
+    </div>
     <div class="form-row">
       <span class="form-label">关联能力模块（多选）</span>
       <div class="tag-picker" id="capability-picker">
@@ -100,6 +126,7 @@
 {% block scripts %}
 <script>
   window.ASSET_TYPES = {{ asset_types | tojson }};
+  window.ASSET_LEVELS = {{ asset_levels | tojson }};
   window.ASSET_FIELD_SCHEMAS = {{ asset_field_schemas | tojson }};
   window.MATURITY_LEVELS = {{ maturity_levels | tojson }};
   window.CAPABILITY_MODULES = {{ capability_modules | tojson }};

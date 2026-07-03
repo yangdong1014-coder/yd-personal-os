@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}机会 · 个人价值增长系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">机会中心</h1>
+      <p class="page-subtitle">审计价值，不记录努力</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="create-opportunity-btn" class="btn btn-sm">审计一个机会</button>
+    </div>
+  </div>
+</header>
+
+<section class="section-card page-main-panel value-page-panel">
+  <div class="section-header-row">
+    <h2>机会列表</h2>
+    <span class="section-kicker">五维评分自动汇总</span>
+  </div>
+  <div id="opportunities-list" class="entity-list value-entity-list">
+    <div class="empty-state">
+      <strong>暂无机会</strong>
+      点击右上角开始审计第一个机会
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.OPPORTUNITY_STATUSES = {{ opportunity_statuses | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/opportunities.js') }}"></script>
+{% endblock %}

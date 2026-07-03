@@ -48,6 +48,89 @@ INBOX_COMMITTABLE_TYPES = (
     "asset",
     "capability_entry",
 )
+OPPORTUNITY_STATUSES = ("待审计", "值得测试", "已进入MVP", "已转项目", "暂停", "删除")
+EXPERIMENT_TYPES = ("交易型MVP", "结果型MVP", "反证型MVP", "功能型MVP")
+EXPERIMENT_STATUSES = ("设计中", "进行中", "已验证", "未验证", "已转项目", "已暂停")
+FEEDBACK_SOURCES = (
+    "自我判断",
+    "使用者反馈",
+    "业务反馈",
+    "老板反馈",
+    "客户反馈",
+    "市场反馈",
+    "数据反馈",
+)
+FEEDBACK_LEVELS = (
+    "L0 只是想法",
+    "L1 我自己觉得有价值",
+    "L2 同事/使用者觉得有价值",
+    "L3 业务流程开始使用",
+    "L4 产生可量化结果",
+    "L5 带来收入、降本、加薪、资源、外部机会",
+)
+FEEDBACK_RELATED_TYPES = ("opportunity", "experiment", "project", "asset", "review")
+ASSET_LEVELS = ("资料", "模板", "方法", "案例", "产品", "筹码")
+VALUE_SCORE_FIELDS = (
+    "importance_score",
+    "feedback_speed_score",
+    "revenue_score",
+    "asset_score",
+    "leverage_score",
+)
+PROJECT_AUDIT_FIELDS = (
+    "core_hypothesis",
+    "disconfirming_signal",
+    "seven_day_mvp",
+    "real_feedback",
+    "result_data",
+    "asset_deposit",
+    "value_capture",
+    "stop_condition",
+    "value_tags",
+    "importance_score",
+    "feedback_speed_score",
+    "revenue_score",
+    "asset_score",
+    "leverage_score",
+    "total_score",
+)
+ASSET_VALUE_FIELDS = (
+    "asset_level",
+    "evidence",
+    "external_expression",
+    "transferable_scene",
+    "productization_next_step",
+)
+OPPORTUNITY_TEXT_FIELDS = (
+    "source",
+    "description",
+    "related_context",
+    "target_user",
+    "affects_revenue",
+    "affects_cost",
+    "affects_efficiency",
+    "affects_experience",
+    "productization_potential",
+    "transaction_potential",
+    "seven_day_mvp",
+    "case_asset_potential",
+    "leverage_potential",
+    "next_action",
+)
+EXPERIMENT_TEXT_FIELDS = (
+    "hypothesis",
+    "minimum_action",
+    "test_target",
+    "feedback_source",
+    "validation_period",
+    "success_criteria",
+    "failure_criteria",
+    "progress",
+    "real_feedback",
+    "data_result",
+    "next_decision",
+    "review_conclusion",
+)
 INBOX_OVERRIDE_FIELDS = frozenset({"goal_id", "project_id"})
 INBOX_COMMIT_ORDER = {
     "goal": 0,
@@ -310,6 +393,32 @@ def _normalize_priority(value, strict=False):
     return "medium"
 
 
+def _clean_text(value, default=""):
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+def _score(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(number, 5))
+
+
+def _value_scores_from_payload(payload, existing=None):
+    if existing is None:
+        existing = {}
+    elif not isinstance(existing, dict):
+        existing = dict(existing)
+    scores = {}
+    for field in VALUE_SCORE_FIELDS:
+        scores[field] = _score(payload.get(field, existing.get(field, 0)))
+    scores["total_score"] = sum(scores.values())
+    return scores
+
+
 def _priority_label(value):
     return PRIORITY_LABELS[_normalize_priority(value)]
 
@@ -322,6 +431,13 @@ def _project_row(row):
     data = _row_to_dict(row)
     if data:
         data["priority"] = _normalize_priority(data.get("priority"))
+        for field in VALUE_SCORE_FIELDS:
+            data[field] = _score(data.get(field))
+        data["total_score"] = sum(data[field] for field in VALUE_SCORE_FIELDS)
+        for field in PROJECT_AUDIT_FIELDS:
+            if field.endswith("_score"):
+                continue
+            data[field] = data.get(field) or ""
     return data
 
 
@@ -389,6 +505,104 @@ def _migrate_tasks_table(conn):
         conn.execute(
             "ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"
         )
+
+
+def _add_columns(conn, table, additions):
+    columns = _table_columns(conn, table)
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+
+def _migrate_projects_value_fields(conn):
+    _add_columns(conn, "projects", {
+        "core_hypothesis": "TEXT NOT NULL DEFAULT ''",
+        "disconfirming_signal": "TEXT NOT NULL DEFAULT ''",
+        "seven_day_mvp": "TEXT NOT NULL DEFAULT ''",
+        "real_feedback": "TEXT NOT NULL DEFAULT ''",
+        "result_data": "TEXT NOT NULL DEFAULT ''",
+        "asset_deposit": "TEXT NOT NULL DEFAULT ''",
+        "value_capture": "TEXT NOT NULL DEFAULT ''",
+        "stop_condition": "TEXT NOT NULL DEFAULT ''",
+        "value_tags": "TEXT NOT NULL DEFAULT ''",
+        "importance_score": "INTEGER NOT NULL DEFAULT 0",
+        "feedback_speed_score": "INTEGER NOT NULL DEFAULT 0",
+        "revenue_score": "INTEGER NOT NULL DEFAULT 0",
+        "asset_score": "INTEGER NOT NULL DEFAULT 0",
+        "leverage_score": "INTEGER NOT NULL DEFAULT 0",
+        "total_score": "INTEGER NOT NULL DEFAULT 0",
+    })
+
+
+def _migrate_value_tables(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            related_context TEXT NOT NULL DEFAULT '',
+            target_user TEXT NOT NULL DEFAULT '',
+            affects_revenue TEXT NOT NULL DEFAULT '',
+            affects_cost TEXT NOT NULL DEFAULT '',
+            affects_efficiency TEXT NOT NULL DEFAULT '',
+            affects_experience TEXT NOT NULL DEFAULT '',
+            productization_potential TEXT NOT NULL DEFAULT '',
+            transaction_potential TEXT NOT NULL DEFAULT '',
+            seven_day_mvp TEXT NOT NULL DEFAULT '',
+            case_asset_potential TEXT NOT NULL DEFAULT '',
+            leverage_potential TEXT NOT NULL DEFAULT '',
+            importance_score INTEGER NOT NULL DEFAULT 0,
+            feedback_speed_score INTEGER NOT NULL DEFAULT 0,
+            revenue_score INTEGER NOT NULL DEFAULT 0,
+            asset_score INTEGER NOT NULL DEFAULT 0,
+            leverage_score INTEGER NOT NULL DEFAULT 0,
+            total_score INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT '待审计',
+            next_action TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            opportunity_id INTEGER,
+            name TEXT NOT NULL,
+            hypothesis TEXT NOT NULL DEFAULT '',
+            experiment_type TEXT NOT NULL DEFAULT '结果型MVP',
+            minimum_action TEXT NOT NULL DEFAULT '',
+            test_target TEXT NOT NULL DEFAULT '',
+            feedback_source TEXT NOT NULL DEFAULT '',
+            validation_period TEXT NOT NULL DEFAULT '',
+            success_criteria TEXT NOT NULL DEFAULT '',
+            failure_criteria TEXT NOT NULL DEFAULT '',
+            progress TEXT NOT NULL DEFAULT '',
+            real_feedback TEXT NOT NULL DEFAULT '',
+            data_result TEXT NOT NULL DEFAULT '',
+            next_decision TEXT NOT NULL DEFAULT '',
+            review_conclusion TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '设计中',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS feedback_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            related_type TEXT NOT NULL DEFAULT '',
+            related_id INTEGER,
+            title TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '自我判断',
+            level TEXT NOT NULL DEFAULT 'L0 只是想法',
+            content TEXT NOT NULL DEFAULT '',
+            evidence TEXT NOT NULL DEFAULT '',
+            next_action TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
 
 
 def init_db():
@@ -468,8 +682,10 @@ def init_db():
     )
     _migrate_projects_table(conn)
     _migrate_tasks_table(conn)
+    _migrate_projects_value_fields(conn)
     _migrate_inbox_tables(conn)
     _migrate_assets_table(conn)
+    _migrate_value_tables(conn)
     _migrate_positioning_tables(conn)
     _migrate_goals_status(conn)
     _ensure_default_capability_practice_steps(conn)
@@ -564,6 +780,11 @@ def _migrate_assets_table(conn):
         "reuse_count": "INTEGER NOT NULL DEFAULT 0",
         "source_type": "TEXT NOT NULL DEFAULT ''",
         "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "asset_level": "TEXT NOT NULL DEFAULT '资料'",
+        "evidence": "TEXT NOT NULL DEFAULT ''",
+        "external_expression": "TEXT NOT NULL DEFAULT ''",
+        "transferable_scene": "TEXT NOT NULL DEFAULT ''",
+        "productization_next_step": "TEXT NOT NULL DEFAULT ''",
     }
     for name, definition in additions.items():
         if name not in columns:
@@ -813,6 +1034,17 @@ def update_project(project_id, payload):
         updates["name"] = name
     if "priority" in payload:
         updates["priority"] = _normalize_priority(payload.get("priority"), strict=True)
+    for field in PROJECT_AUDIT_FIELDS:
+        if field in VALUE_SCORE_FIELDS or field == "total_score":
+            continue
+        if field in payload:
+            updates[field] = _clean_text(payload.get(field))
+    if any(field in payload for field in VALUE_SCORE_FIELDS):
+        existing_row = conn.execute(
+            "SELECT * FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        scores = _value_scores_from_payload(payload, existing_row)
+        updates.update(scores)
 
     if not updates:
         conn.close()
@@ -1378,6 +1610,11 @@ def _asset_row(row):
         data["source_type"] = "review" if data.get("source_review_id") else ""
     if not (data.get("updated_at") or "").strip():
         data["updated_at"] = data.get("created_at")
+    if data.get("asset_level") not in ASSET_LEVELS:
+        data["asset_level"] = "资料"
+    for field in ASSET_VALUE_FIELDS:
+        if field != "asset_level":
+            data[field] = data.get(field) or ""
     trigger, core_content = asset_schemas.sync_legacy_columns(data["asset_type"], fields)
     if trigger:
         data["trigger_context"] = trigger
@@ -1444,6 +1681,11 @@ def create_asset(
     source_review_id=None,
     trigger_context=None,
     core_content=None,
+    asset_level="资料",
+    evidence="",
+    external_expression="",
+    transferable_scene="",
+    productization_next_step="",
 ):
     title = (title or "").strip()
     if not title:
@@ -1455,6 +1697,8 @@ def create_asset(
         raise ValueError("无效的资产类型")
     if maturity not in MATURITY_LEVELS:
         maturity = "草稿"
+    if asset_level not in ASSET_LEVELS:
+        asset_level = "资料"
 
     parsed_fields = asset_schemas.parse_fields(fields)
     if not parsed_fields:
@@ -1503,8 +1747,9 @@ def create_asset(
             title, trigger_context, core_content, asset_type,
             capability_tags, source_review_id, created_at,
             summary, fields, reusable_scenario, maturity, reuse_count,
-            source_type, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source_type, updated_at, asset_level, evidence,
+            external_expression, transferable_scene, productization_next_step
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             title,
@@ -1521,6 +1766,11 @@ def create_asset(
             0,
             source_type,
             now,
+            asset_level,
+            (evidence or "").strip(),
+            (external_expression or "").strip(),
+            (transferable_scene or "").strip(),
+            (productization_next_step or "").strip(),
         ),
     )
     conn.commit()
@@ -1567,6 +1817,11 @@ def update_asset(asset_id, **kwargs):
         "fields",
         "trigger_context",
         "core_content",
+        "asset_level",
+        "evidence",
+        "external_expression",
+        "transferable_scene",
+        "productization_next_step",
     }
     kwargs = {key: value for key, value in kwargs.items() if key in allowed_fields}
     if not kwargs:
@@ -1630,6 +1885,9 @@ def update_asset(asset_id, **kwargs):
     maturity = kwargs.get("maturity", current.get("maturity", "草稿"))
     if maturity not in MATURITY_LEVELS:
         maturity = current.get("maturity", "草稿")
+    asset_level = kwargs.get("asset_level", current.get("asset_level", "资料"))
+    if asset_level not in ASSET_LEVELS:
+        asset_level = current.get("asset_level", "资料")
 
     capability_tags = kwargs.get("capability_tags", current.get("capability_tags"))
     tags = _parse_tags(json.dumps(capability_tags or []))
@@ -1645,6 +1903,11 @@ def update_asset(asset_id, **kwargs):
         "maturity": maturity,
         "capability_tags": json.dumps(tags, ensure_ascii=False),
         "updated_at": _now(),
+        "asset_level": asset_level,
+        "evidence": _clean_text(kwargs.get("evidence", current.get("evidence", ""))),
+        "external_expression": _clean_text(kwargs.get("external_expression", current.get("external_expression", ""))),
+        "transferable_scene": _clean_text(kwargs.get("transferable_scene", current.get("transferable_scene", ""))),
+        "productization_next_step": _clean_text(kwargs.get("productization_next_step", current.get("productization_next_step", ""))),
     }
 
     set_clause = ", ".join(f"{key} = ?" for key in updates)
@@ -2194,8 +2457,19 @@ class ExportError(Exception):
     pass
 
 
-SUPPORTED_IMPORT_VERSIONS = ("1.0",)
+SUPPORTED_IMPORT_VERSIONS = ("1.0", "2.0")
 IMPORT_TABLES = (
+    "goals",
+    "projects",
+    "tasks",
+    "reviews",
+    "assets",
+    "capability_entries",
+    "opportunities",
+    "experiments",
+    "feedback_items",
+)
+LEGACY_IMPORT_TABLES = (
     "goals",
     "projects",
     "tasks",
@@ -2206,7 +2480,14 @@ IMPORT_TABLES = (
 
 _TABLE_FIELDS = {
     "goals": ("id", "name", "type", "created_at"),
-    "projects": ("id", "goal_id", "name", "priority", "created_at"),
+    "projects": (
+        "id",
+        "goal_id",
+        "name",
+        "priority",
+        "created_at",
+        *PROJECT_AUDIT_FIELDS,
+    ),
     "tasks": (
         "id",
         "project_id",
@@ -2243,6 +2524,7 @@ _TABLE_FIELDS = {
         "reuse_count",
         "source_type",
         "updated_at",
+        *ASSET_VALUE_FIELDS,
     ),
     "capability_entries": (
         "id",
@@ -2252,6 +2534,50 @@ _TABLE_FIELDS = {
         "source_project",
         "level_type",
         "created_at",
+    ),
+    "opportunities": (
+        "id",
+        "name",
+        *OPPORTUNITY_TEXT_FIELDS,
+        *VALUE_SCORE_FIELDS,
+        "total_score",
+        "status",
+        "created_at",
+        "updated_at",
+    ),
+    "experiments": (
+        "id",
+        "opportunity_id",
+        "name",
+        "hypothesis",
+        "experiment_type",
+        "minimum_action",
+        "test_target",
+        "feedback_source",
+        "validation_period",
+        "success_criteria",
+        "failure_criteria",
+        "progress",
+        "real_feedback",
+        "data_result",
+        "next_decision",
+        "review_conclusion",
+        "status",
+        "created_at",
+        "updated_at",
+    ),
+    "feedback_items": (
+        "id",
+        "related_type",
+        "related_id",
+        "title",
+        "source",
+        "level",
+        "content",
+        "evidence",
+        "next_action",
+        "created_at",
+        "updated_at",
     ),
 }
 
@@ -2397,6 +2723,13 @@ _OPTIONAL_IMPORT_FIELDS = {
     "reuse_count",
     "source_type",
     "updated_at",
+    "opportunity_id",
+    "related_type",
+    "related_id",
+    *PROJECT_AUDIT_FIELDS,
+    *ASSET_VALUE_FIELDS,
+    *OPPORTUNITY_TEXT_FIELDS,
+    *EXPERIMENT_TEXT_FIELDS,
 }
 
 
@@ -2411,6 +2744,28 @@ def _normalize_import_record(table, raw):
                 record[key] = 0
             elif key == "priority":
                 record[key] = "medium"
+            elif key in VALUE_SCORE_FIELDS or key == "total_score":
+                record[key] = 0
+            elif key == "status" and table == "opportunities":
+                record[key] = "待审计"
+            elif key == "status" and table == "experiments":
+                record[key] = "设计中"
+            elif key == "experiment_type":
+                record[key] = "结果型MVP"
+            elif key == "source" and table == "feedback_items":
+                record[key] = "自我判断"
+            elif key == "level":
+                record[key] = "L0 只是想法"
+            elif key == "asset_level":
+                record[key] = "资料"
+            elif (
+                key in PROJECT_AUDIT_FIELDS
+                or key in ASSET_VALUE_FIELDS
+                or key in OPPORTUNITY_TEXT_FIELDS
+                or key in EXPERIMENT_TEXT_FIELDS
+                or key in {"related_type", "content", "evidence", "next_action"}
+            ):
+                record[key] = ""
             elif key in _OPTIONAL_IMPORT_FIELDS:
                 record[key] = None
             else:
@@ -2467,17 +2822,41 @@ def _normalize_import_record(table, raw):
         raise ValueError("无效的目标类型")
     if table in {"projects", "tasks"}:
         record["priority"] = _normalize_priority(record.get("priority"), strict=True)
+    if table == "projects":
+        scores = _value_scores_from_payload(record)
+        for field, value in scores.items():
+            record[field] = value
     if table == "tasks" and record["status"] not in TASK_STATUSES:
         raise ValueError("无效的任务状态")
     if table == "reviews" and record["type"] not in REVIEW_TYPES:
         raise ValueError("无效的复盘类型")
     if table == "assets" and record["asset_type"] not in ASSET_TYPES:
         raise ValueError("无效的资产类型")
+    if table == "assets" and record.get("asset_level") not in ASSET_LEVELS:
+        record["asset_level"] = "资料"
     if table == "capability_entries":
         if record["module"] not in CAPABILITY_MODULES:
             raise ValueError("无效的能力模块")
         if record["level_type"] not in LEVEL_TYPES:
             raise ValueError("无效的层级判断")
+    if table == "opportunities":
+        if record["status"] not in OPPORTUNITY_STATUSES:
+            record["status"] = "待审计"
+        scores = _value_scores_from_payload(record)
+        for field, value in scores.items():
+            record[field] = value
+    if table == "experiments":
+        if record["experiment_type"] not in EXPERIMENT_TYPES:
+            record["experiment_type"] = "结果型MVP"
+        if record["status"] not in EXPERIMENT_STATUSES:
+            record["status"] = "设计中"
+    if table == "feedback_items":
+        if record["source"] not in FEEDBACK_SOURCES:
+            record["source"] = "自我判断"
+        if record["level"] not in FEEDBACK_LEVELS:
+            record["level"] = "L0 只是想法"
+        if record["related_type"] and record["related_type"] not in FEEDBACK_RELATED_TYPES:
+            raise ValueError("无效的反馈关联类型")
 
     return record
 
@@ -2515,6 +2894,13 @@ def _validate_import_foreign_keys(table, record, conn, pending):
                 "SELECT id FROM reviews WHERE id = ?", (review_id,)
             ).fetchone():
                 raise ValueError(f"复盘 id={review_id} 不存在")
+    elif table == "experiments":
+        opportunity_id = record.get("opportunity_id")
+        if opportunity_id is not None and opportunity_id not in pending["opportunities"]:
+            if not conn.execute(
+                "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
+            ).fetchone():
+                raise ValueError(f"机会 id={opportunity_id} 不存在")
 
 
 def _resolve_import_action(conn, table, raw, pending=None):
@@ -2617,10 +3003,14 @@ def _validate_import_payload(payload):
             f"不支持的备份版本：{version!r}，当前兼容 {', '.join(SUPPORTED_IMPORT_VERSIONS)}"
         )
 
-    for table in IMPORT_TABLES:
+    required_tables = IMPORT_TABLES if version == "2.0" else LEGACY_IMPORT_TABLES
+    for table in required_tables:
         if table not in payload:
             raise DataImportError(f"缺少数据表：{table}")
         if not isinstance(payload[table], list):
+            raise DataImportError(f"{table} 必须是数组")
+    for table in IMPORT_TABLES:
+        if table in payload and not isinstance(payload[table], list):
             raise DataImportError(f"{table} 必须是数组")
 
 
@@ -2657,7 +3047,7 @@ def preview_import_data(payload):
     conn = get_connection()
     try:
         for table in IMPORT_TABLES:
-            for index, raw in enumerate(payload[table]):
+            for index, raw in enumerate(payload.get(table, [])):
                 label = f"{table}[{index}]"
                 try:
                     action, _record = _resolve_import_action(
@@ -2693,7 +3083,7 @@ def import_all_data(payload):
     try:
         conn.execute("BEGIN")
         for table in IMPORT_TABLES:
-            for index, raw in enumerate(payload[table]):
+            for index, raw in enumerate(payload.get(table, [])):
                 label = f"{table}[{index}]"
                 try:
                     _import_row(conn, table, raw, stats)
@@ -2736,15 +3126,8 @@ def export_all_data():
         return {
             "meta": {
                 "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "version": "1.0",
-                "tables": [
-                    "goals",
-                    "projects",
-                    "tasks",
-                    "reviews",
-                    "assets",
-                    "capability_entries",
-                ],
+                "version": "2.0",
+                "tables": list(IMPORT_TABLES),
             },
             "goals": list_goals(),
             "projects": list_projects(),
@@ -2752,6 +3135,9 @@ def export_all_data():
             "reviews": list_reviews(),
             "assets": list_assets(),
             "capability_entries": list_capability_entries(),
+            "opportunities": list_opportunities(),
+            "experiments": list_experiments(),
+            "feedback_items": list_feedback_items(),
         }
     except sqlite3.Error as exc:
         raise ExportError(
@@ -2759,6 +3145,449 @@ def export_all_data():
         ) from exc
     except Exception as exc:
         raise ExportError("导出数据时发生错误，请稍后重试") from exc
+
+
+def _opportunity_row(row):
+    data = _row_to_dict(row)
+    if data:
+        for field in VALUE_SCORE_FIELDS:
+            data[field] = _score(data.get(field))
+        data["total_score"] = sum(data[field] for field in VALUE_SCORE_FIELDS)
+        if data.get("status") not in OPPORTUNITY_STATUSES:
+            data["status"] = "待审计"
+    return data
+
+
+def list_opportunities():
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM opportunities ORDER BY total_score DESC, updated_at DESC, created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [_opportunity_row(row) for row in rows]
+
+
+def get_opportunity(opportunity_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+    ).fetchone()
+    conn.close()
+    return _opportunity_row(row)
+
+
+def create_opportunity(payload):
+    payload = payload or {}
+    name = _clean_text(payload.get("name"))
+    if not name:
+        raise ValueError("机会名称不能为空")
+    status = payload.get("status") or "待审计"
+    if status not in OPPORTUNITY_STATUSES:
+        status = "待审计"
+    scores = _value_scores_from_payload(payload)
+    now = _now()
+    record = {
+        "name": name,
+        "status": status,
+        "created_at": now,
+        "updated_at": now,
+        **{field: _clean_text(payload.get(field)) for field in OPPORTUNITY_TEXT_FIELDS},
+        **scores,
+    }
+    fields = tuple(record.keys())
+    placeholders = ", ".join("?" for _ in fields)
+    conn = get_connection()
+    cur = conn.execute(
+        f"INSERT INTO opportunities ({', '.join(fields)}) VALUES ({placeholders})",
+        tuple(record[field] for field in fields),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM opportunities WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return _opportunity_row(row)
+
+
+def update_opportunity(opportunity_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("机会不存在")
+    updates = {}
+    if "name" in payload:
+        name = _clean_text(payload.get("name"))
+        if not name:
+            conn.close()
+            raise ValueError("机会名称不能为空")
+        updates["name"] = name
+    if "status" in payload:
+        status = payload.get("status")
+        if status not in OPPORTUNITY_STATUSES:
+            conn.close()
+            raise ValueError("无效的机会状态")
+        updates["status"] = status
+    for field in OPPORTUNITY_TEXT_FIELDS:
+        if field in payload:
+            updates[field] = _clean_text(payload.get(field))
+    if any(field in payload for field in VALUE_SCORE_FIELDS):
+        updates.update(_value_scores_from_payload(payload, existing))
+    if not updates:
+        conn.close()
+        raise ValueError("没有可更新的机会字段")
+    updates["updated_at"] = _now()
+    set_clause = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE opportunities SET {set_clause} WHERE id = ?",
+        (*updates.values(), opportunity_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+    ).fetchone()
+    conn.close()
+    return _opportunity_row(row)
+
+
+def delete_opportunity(opportunity_id):
+    return _delete_entity("opportunities", opportunity_id, "机会")
+
+
+def _experiment_row(row):
+    data = _row_to_dict(row)
+    if data:
+        if data.get("experiment_type") not in EXPERIMENT_TYPES:
+            data["experiment_type"] = "结果型MVP"
+        if data.get("status") not in EXPERIMENT_STATUSES:
+            data["status"] = "设计中"
+    return data
+
+
+def _normalize_opportunity_id(conn, value):
+    if value in (None, ""):
+        return None
+    try:
+        opportunity_id = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("关联机会无效")
+    if not conn.execute(
+        "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
+    ).fetchone():
+        raise ValueError("关联机会不存在")
+    return opportunity_id
+
+
+def list_experiments():
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT e.*, o.name AS opportunity_name
+        FROM experiments e
+        LEFT JOIN opportunities o ON o.id = e.opportunity_id
+        ORDER BY e.updated_at DESC, e.created_at DESC
+        """
+    ).fetchall()
+    conn.close()
+    return [_experiment_row(row) for row in rows]
+
+
+def get_experiment(experiment_id):
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT e.*, o.name AS opportunity_name
+        FROM experiments e
+        LEFT JOIN opportunities o ON o.id = e.opportunity_id
+        WHERE e.id = ?
+        """,
+        (experiment_id,),
+    ).fetchone()
+    conn.close()
+    return _experiment_row(row)
+
+
+def create_experiment(payload):
+    payload = payload or {}
+    name = _clean_text(payload.get("name"))
+    if not name:
+        raise ValueError("实验名称不能为空")
+    experiment_type = payload.get("experiment_type") or "结果型MVP"
+    if experiment_type not in EXPERIMENT_TYPES:
+        raise ValueError("无效的实验类型")
+    status = payload.get("status") or "设计中"
+    if status not in EXPERIMENT_STATUSES:
+        status = "设计中"
+    now = _now()
+    conn = get_connection()
+    opportunity_id = _normalize_opportunity_id(
+        conn,
+        payload.get("opportunity_id", payload.get("source_opportunity_id")),
+    )
+    if payload.get("require_opportunity") and opportunity_id is None:
+        conn.close()
+        raise ValueError("从机会创建实验时必须关联 opportunity_id")
+    record = {
+        "opportunity_id": opportunity_id,
+        "name": name,
+        "experiment_type": experiment_type,
+        "status": status,
+        "created_at": now,
+        "updated_at": now,
+        **{field: _clean_text(payload.get(field)) for field in EXPERIMENT_TEXT_FIELDS},
+    }
+    fields = tuple(record.keys())
+    placeholders = ", ".join("?" for _ in fields)
+    cur = conn.execute(
+        f"INSERT INTO experiments ({', '.join(fields)}) VALUES ({placeholders})",
+        tuple(record[field] for field in fields),
+    )
+    if opportunity_id:
+        conn.execute(
+            "UPDATE opportunities SET status = '已进入MVP', updated_at = ? WHERE id = ? AND status IN ('待审计', '值得测试')",
+            (now, opportunity_id),
+        )
+    conn.commit()
+    row = conn.execute(
+        """
+        SELECT e.*, o.name AS opportunity_name
+        FROM experiments e
+        LEFT JOIN opportunities o ON o.id = e.opportunity_id
+        WHERE e.id = ?
+        """,
+        (cur.lastrowid,),
+    ).fetchone()
+    conn.close()
+    return _experiment_row(row)
+
+
+def update_experiment(experiment_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT * FROM experiments WHERE id = ?", (experiment_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("实验不存在")
+    updates = {}
+    if "name" in payload:
+        name = _clean_text(payload.get("name"))
+        if not name:
+            conn.close()
+            raise ValueError("实验名称不能为空")
+        updates["name"] = name
+    if "opportunity_id" in payload:
+        updates["opportunity_id"] = _normalize_opportunity_id(
+            conn, payload.get("opportunity_id")
+        )
+    if "experiment_type" in payload:
+        if payload.get("experiment_type") not in EXPERIMENT_TYPES:
+            conn.close()
+            raise ValueError("无效的实验类型")
+        updates["experiment_type"] = payload.get("experiment_type")
+    if "status" in payload:
+        if payload.get("status") not in EXPERIMENT_STATUSES:
+            conn.close()
+            raise ValueError("无效的实验状态")
+        updates["status"] = payload.get("status")
+    for field in EXPERIMENT_TEXT_FIELDS:
+        if field in payload:
+            updates[field] = _clean_text(payload.get(field))
+    if not updates:
+        conn.close()
+        raise ValueError("没有可更新的实验字段")
+    updates["updated_at"] = _now()
+    set_clause = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE experiments SET {set_clause} WHERE id = ?",
+        (*updates.values(), experiment_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        """
+        SELECT e.*, o.name AS opportunity_name
+        FROM experiments e
+        LEFT JOIN opportunities o ON o.id = e.opportunity_id
+        WHERE e.id = ?
+        """,
+        (experiment_id,),
+    ).fetchone()
+    conn.close()
+    return _experiment_row(row)
+
+
+def delete_experiment(experiment_id):
+    return _delete_entity("experiments", experiment_id, "实验")
+
+
+def _feedback_row(row):
+    data = _row_to_dict(row)
+    if data:
+        if data.get("source") not in FEEDBACK_SOURCES:
+            data["source"] = "自我判断"
+        if data.get("level") not in FEEDBACK_LEVELS:
+            data["level"] = "L0 只是想法"
+    return data
+
+
+def list_feedback_items():
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM feedback_items ORDER BY updated_at DESC, created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [_feedback_row(row) for row in rows]
+
+
+def get_feedback_item(feedback_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+    ).fetchone()
+    conn.close()
+    return _feedback_row(row)
+
+
+def _normalize_feedback_relation(related_type, related_id):
+    related_type = _clean_text(related_type)
+    if not related_type:
+        return "", None
+    if related_type not in FEEDBACK_RELATED_TYPES:
+        raise ValueError("无效的反馈关联类型")
+    if related_id in (None, ""):
+        return related_type, None
+    try:
+        return related_type, int(related_id)
+    except (TypeError, ValueError):
+        raise ValueError("反馈关联 id 无效")
+
+
+def create_feedback_item(payload):
+    payload = payload or {}
+    title = _clean_text(payload.get("title"))
+    if not title:
+        raise ValueError("反馈标题不能为空")
+    source = payload.get("source") or "自我判断"
+    if source not in FEEDBACK_SOURCES:
+        source = "自我判断"
+    level = payload.get("level") or "L0 只是想法"
+    if level not in FEEDBACK_LEVELS:
+        level = "L0 只是想法"
+    related_type, related_id = _normalize_feedback_relation(
+        payload.get("related_type"), payload.get("related_id")
+    )
+    now = _now()
+    record = {
+        "related_type": related_type,
+        "related_id": related_id,
+        "title": title,
+        "source": source,
+        "level": level,
+        "content": _clean_text(payload.get("content")),
+        "evidence": _clean_text(payload.get("evidence")),
+        "next_action": _clean_text(payload.get("next_action")),
+        "created_at": now,
+        "updated_at": now,
+    }
+    fields = tuple(record.keys())
+    placeholders = ", ".join("?" for _ in fields)
+    conn = get_connection()
+    cur = conn.execute(
+        f"INSERT INTO feedback_items ({', '.join(fields)}) VALUES ({placeholders})",
+        tuple(record[field] for field in fields),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM feedback_items WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return _feedback_row(row)
+
+
+def update_feedback_item(feedback_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+    ).fetchone()
+    if not existing:
+        conn.close()
+        raise ValueError("反馈不存在")
+    updates = {}
+    if "title" in payload:
+        title = _clean_text(payload.get("title"))
+        if not title:
+            conn.close()
+            raise ValueError("反馈标题不能为空")
+        updates["title"] = title
+    if "source" in payload:
+        if payload.get("source") not in FEEDBACK_SOURCES:
+            conn.close()
+            raise ValueError("无效的反馈来源")
+        updates["source"] = payload.get("source")
+    if "level" in payload:
+        if payload.get("level") not in FEEDBACK_LEVELS:
+            conn.close()
+            raise ValueError("无效的反馈等级")
+        updates["level"] = payload.get("level")
+    if "related_type" in payload or "related_id" in payload:
+        related_type, related_id = _normalize_feedback_relation(
+            payload.get("related_type", existing["related_type"]),
+            payload.get("related_id", existing["related_id"]),
+        )
+        updates["related_type"] = related_type
+        updates["related_id"] = related_id
+    for field in ("content", "evidence", "next_action"):
+        if field in payload:
+            updates[field] = _clean_text(payload.get(field))
+    if not updates:
+        conn.close()
+        raise ValueError("没有可更新的反馈字段")
+    updates["updated_at"] = _now()
+    set_clause = ", ".join(f"{field} = ?" for field in updates)
+    conn.execute(
+        f"UPDATE feedback_items SET {set_clause} WHERE id = ?",
+        (*updates.values(), feedback_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+    ).fetchone()
+    conn.close()
+    return _feedback_row(row)
+
+
+def delete_feedback_item(feedback_id):
+    return _delete_entity("feedback_items", feedback_id, "反馈")
+
+
+def get_value_dashboard():
+    opportunities = [
+        item for item in list_opportunities()
+        if item.get("status") != "删除"
+    ]
+    experiments = list_experiments()
+    feedback = list_feedback_items()
+    assets = list_assets()
+    return {
+        "high_score_opportunities": opportunities[:5],
+        "running_experiments": [
+            item for item in experiments if item.get("status") in ("设计中", "进行中")
+        ][:5],
+        "strong_feedback": [
+            item for item in feedback
+            if (item.get("level") or "").startswith("L4")
+            or (item.get("level") or "").startswith("L5")
+        ][:5],
+        "case_assets": [
+            item for item in assets
+            if item.get("asset_level") in ("案例", "产品", "筹码")
+        ][:5],
+    }
 
 
 class InboxError(Exception):

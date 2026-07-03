@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const goalEl = document.getElementById("dashboard-goal-content");
   const projectsEl = document.getElementById("dashboard-projects-content");
   const tasksEl = document.getElementById("dashboard-tasks-content");
+  const valueEl = document.getElementById("value-dashboard-content");
   const briefingBtn = document.getElementById("ai-briefing-btn");
   const dispatchBtn = document.getElementById("ai-dispatch-btn");
 
@@ -545,10 +546,62 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function valueList(title, items, formatter, emptyText) {
+    const body = items && items.length
+      ? items.map(formatter).join("")
+      : `<p class="muted value-dashboard-empty">${escapeHtml(emptyText)}</p>`;
+    return `
+      <section class="value-dashboard-column">
+        <h3>${escapeHtml(title)}</h3>
+        <div class="value-dashboard-list">${body}</div>
+      </section>
+    `;
+  }
+
+  function valueItem(title, meta) {
+    return `
+      <article class="value-dashboard-item">
+        <strong>${escapeHtml(title || "未命名")}</strong>
+        <span>${escapeHtml(meta || "")}</span>
+      </article>
+    `;
+  }
+
+  function renderValueDashboard(data) {
+    if (!valueEl) return;
+    valueEl.innerHTML = [
+      valueList(
+        "高分机会",
+        data.high_score_opportunities || [],
+        (item) => valueItem(item.name, `${item.total_score || 0} 分 · ${item.status || ""}`),
+        "暂无高分机会"
+      ),
+      valueList(
+        "进行中的实验",
+        data.running_experiments || [],
+        (item) => valueItem(item.name, `${item.status || ""} · ${item.experiment_type || ""}`),
+        "暂无进行中的实验"
+      ),
+      valueList(
+        "L4/L5 反馈",
+        data.strong_feedback || [],
+        (item) => valueItem(item.title, `${item.source || ""} · ${item.level || ""}`),
+        "暂无强反馈"
+      ),
+      valueList(
+        "案例资产",
+        data.case_assets || [],
+        (item) => valueItem(item.title, `${item.asset_level || ""} · ${item.asset_type || ""}`),
+        "暂无案例/产品/筹码资产"
+      ),
+    ].join("");
+  }
+
   async function loadDashboard() {
-    const [data, tasks] = await Promise.all([
+    const [data, tasks, valueData] = await Promise.all([
       apiRequest("/api/dashboard"),
       apiRequest("/api/tasks"),
+      valueEl ? apiRequest("/api/value-dashboard") : Promise.resolve(null),
     ]);
 
     tasksByProject = {};
@@ -570,6 +623,7 @@ document.addEventListener("DOMContentLoaded", () => {
     focusProjectsExpanded = false;
     cachedFocusProjects = selectFocusProjects(data);
     renderKeyProjects(cachedFocusProjects);
+    if (valueData) renderValueDashboard(valueData);
   }
 
   const goalSection = document.getElementById("dashboard-goal");

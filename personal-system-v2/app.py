@@ -28,6 +28,9 @@ def inject_globals():
 
 NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},
+    {"endpoint": "opportunities", "label": "机会", "path": "/opportunities"},
+    {"endpoint": "experiments", "label": "实验", "path": "/experiments"},
+    {"endpoint": "feedback_page", "label": "反馈", "path": "/feedback"},
     {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
     {"endpoint": "goals", "label": "目标", "path": "/goals"},
     {"endpoint": "tasks", "label": "任务", "path": "/tasks"},
@@ -109,6 +112,39 @@ def index():
     return render_template("index.html", active_page="index", nav_items=NAV_ITEMS)
 
 
+@app.route("/opportunities")
+def opportunities():
+    return render_template(
+        "opportunities.html",
+        active_page="opportunities",
+        nav_items=NAV_ITEMS,
+        opportunity_statuses=database.OPPORTUNITY_STATUSES,
+    )
+
+
+@app.route("/experiments")
+def experiments():
+    return render_template(
+        "experiments.html",
+        active_page="experiments",
+        nav_items=NAV_ITEMS,
+        experiment_types=database.EXPERIMENT_TYPES,
+        experiment_statuses=database.EXPERIMENT_STATUSES,
+    )
+
+
+@app.route("/feedback")
+def feedback_page():
+    return render_template(
+        "feedback.html",
+        active_page="feedback_page",
+        nav_items=NAV_ITEMS,
+        feedback_sources=database.FEEDBACK_SOURCES,
+        feedback_levels=database.FEEDBACK_LEVELS,
+        feedback_related_types=database.FEEDBACK_RELATED_TYPES,
+    )
+
+
 @app.route("/positioning")
 def positioning_page():
     return render_template(
@@ -160,6 +196,7 @@ def assets():
         nav_items=NAV_ITEMS,
         asset_types=database.ASSET_TYPES,
         maturity_levels=database.MATURITY_LEVELS,
+        asset_levels=database.ASSET_LEVELS,
         asset_field_schemas=asset_schemas.get_frontend_schemas(),
         capability_modules=database.CAPABILITY_MODULES,
     )
@@ -356,6 +393,122 @@ def api_dashboard():
     return jsonify({"ok": True, "data": database.get_dashboard()})
 
 
+@app.route("/api/value-dashboard", methods=["GET"])
+def api_value_dashboard():
+    return jsonify({"ok": True, "data": database.get_value_dashboard()})
+
+
+@app.route("/api/opportunities", methods=["GET"])
+def api_list_opportunities():
+    return jsonify({"ok": True, "data": database.list_opportunities()})
+
+
+@app.route("/api/opportunities", methods=["POST"])
+def api_create_opportunity():
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "data": database.create_opportunity(payload)})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/opportunities/<int:opportunity_id>", methods=["PATCH"])
+def api_update_opportunity(opportunity_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({
+            "ok": True,
+            "data": database.update_opportunity(opportunity_id, payload),
+        })
+    except ValueError as exc:
+        status = 404 if "不存在" in str(exc) else 400
+        return _error(str(exc), status)
+
+
+@app.route("/api/opportunities/<int:opportunity_id>", methods=["DELETE"])
+def api_delete_opportunity(opportunity_id):
+    try:
+        return jsonify({"ok": True, "data": database.delete_opportunity(opportunity_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
+@app.route("/api/experiments", methods=["GET"])
+def api_list_experiments():
+    return jsonify({"ok": True, "data": database.list_experiments()})
+
+
+@app.route("/api/experiments", methods=["POST"])
+def api_create_experiment():
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "data": database.create_experiment(payload)})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/experiments/<int:experiment_id>", methods=["PATCH"])
+def api_update_experiment(experiment_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({
+            "ok": True,
+            "data": database.update_experiment(experiment_id, payload),
+        })
+    except ValueError as exc:
+        status = 404 if "不存在" in str(exc) else 400
+        return _error(str(exc), status)
+
+
+@app.route("/api/experiments/<int:experiment_id>", methods=["DELETE"])
+def api_delete_experiment(experiment_id):
+    try:
+        return jsonify({"ok": True, "data": database.delete_experiment(experiment_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
+@app.route("/api/feedback", methods=["GET"])
+def api_list_feedback():
+    return jsonify({"ok": True, "data": database.list_feedback_items()})
+
+
+@app.route("/api/feedback", methods=["POST"])
+def api_create_feedback():
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "data": database.create_feedback_item(payload)})
+    except ValueError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/feedback/<int:feedback_id>", methods=["PATCH"])
+def api_update_feedback(feedback_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        return jsonify({
+            "ok": True,
+            "data": database.update_feedback_item(feedback_id, payload),
+        })
+    except ValueError as exc:
+        status = 404 if "不存在" in str(exc) else 400
+        return _error(str(exc), status)
+
+
+@app.route("/api/feedback/<int:feedback_id>", methods=["DELETE"])
+def api_delete_feedback(feedback_id):
+    try:
+        return jsonify({"ok": True, "data": database.delete_feedback_item(feedback_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
 @app.route("/api/export", methods=["GET"])
 def api_export():
     try:
@@ -486,6 +639,11 @@ def api_create_asset():
             source_review_id=payload.get("source_review_id"),
             trigger_context=payload.get("trigger_context"),
             core_content=payload.get("core_content"),
+            asset_level=payload.get("asset_level", "资料"),
+            evidence=payload.get("evidence", ""),
+            external_expression=payload.get("external_expression", ""),
+            transferable_scene=payload.get("transferable_scene", ""),
+            productization_next_step=payload.get("productization_next_step", ""),
         )
         return jsonify({"ok": True, "data": asset})
     except (ValueError, TypeError) as exc:
@@ -505,6 +663,11 @@ def api_update_asset(asset_id):
         "fields",
         "trigger_context",
         "core_content",
+        "asset_level",
+        "evidence",
+        "external_expression",
+        "transferable_scene",
+        "productization_next_step",
     }
     update_payload = {
         key: value for key, value in payload.items() if key in allowed_fields

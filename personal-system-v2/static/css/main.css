@@ -130,6 +130,135 @@ html.theme-dark-warm {
   --main-content-pad-x: 1rem;
 }
 
+.value-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.value-dashboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.value-dashboard-column {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.value-dashboard-column h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.value-dashboard-list {
+  display: grid;
+  gap: 8px;
+}
+
+.value-dashboard-item {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.value-dashboard-item strong {
+  overflow-wrap: anywhere;
+}
+
+.value-dashboard-item span,
+.value-dashboard-empty {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.value-page-panel {
+  max-width: 1180px;
+}
+
+.value-entity-list {
+  gap: 12px;
+}
+
+.value-card {
+  display: grid;
+  gap: 10px;
+}
+
+.value-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.value-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.value-card-summary {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+.value-card-meta,
+.value-score-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.value-score-field {
+  display: grid;
+  gap: 4px;
+  min-width: 96px;
+}
+
+.value-score-input {
+  max-width: 96px;
+}
+
+.value-form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+@media (min-width: 760px) {
+  .value-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .value-form-grid .form-row-wide,
+  .value-audit-heading {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .value-action-row {
+    justify-content: flex-start;
+  }
+
+  .value-card-head {
+    flex-direction: column;
+  }
+}
+
 *,
 *::before,
 *::after {

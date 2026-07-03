@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}反馈 · 个人价值增长系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">反馈中心</h1>
+      <p class="page-subtitle">只把真实反馈当作价值证据</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="create-feedback-btn" class="btn btn-sm">记录一个反馈</button>
+    </div>
+  </div>
+</header>
+
+<section class="section-card page-main-panel value-page-panel">
+  <div class="section-header-row">
+    <h2>反馈列表</h2>
+    <span class="section-kicker">L0-L5 证据等级</span>
+  </div>
+  <div id="feedback-list" class="entity-list value-entity-list">
+    <div class="empty-state">
+      <strong>暂无反馈</strong>
+      记录来自使用、业务、客户或数据的真实信号
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.FEEDBACK_SOURCES = {{ feedback_sources | tojson }};
+  window.FEEDBACK_LEVELS = {{ feedback_levels | tojson }};
+  window.FEEDBACK_RELATED_TYPES = {{ feedback_related_types | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/feedback.js') }}"></script>
+{% endblock %}

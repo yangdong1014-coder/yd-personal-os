@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}实验 · 个人价值增长系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">实验中心</h1>
+      <p class="page-subtitle">用最小行动验证价值假设</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="create-experiment-btn" class="btn btn-sm">启动一个实验</button>
+    </div>
+  </div>
+</header>
+
+<section class="section-card page-main-panel value-page-panel">
+  <div class="section-header-row">
+    <h2>实验列表</h2>
+    <span class="section-kicker">MVP · 反馈 · 决策</span>
+  </div>
+  <div id="experiments-list" class="entity-list value-entity-list">
+    <div class="empty-state">
+      <strong>暂无实验</strong>
+      从机会创建实验，或直接启动一次 MVP
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.EXPERIMENT_TYPES = {{ experiment_types | tojson }};
+  window.EXPERIMENT_STATUSES = {{ experiment_statuses | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/experiments.js') }}"></script>
+{% endblock %}

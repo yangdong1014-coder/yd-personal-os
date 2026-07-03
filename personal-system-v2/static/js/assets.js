@@ -11,8 +11,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const assetTypeSelect = document.getElementById("asset-type");
   const dynamicFieldsEl = document.getElementById("asset-dynamic-fields");
   const maturitySelect = document.getElementById("asset-maturity");
+  const assetLevelSelect = document.getElementById("asset-level");
 
   const assetTypes = window.ASSET_TYPES || [];
+  const assetLevels = window.ASSET_LEVELS || [];
   const fieldSchemas = window.ASSET_FIELD_SCHEMAS || {};
   const maturityLevels = window.MATURITY_LEVELS || [];
 
@@ -101,6 +103,12 @@ document.addEventListener("DOMContentLoaded", () => {
       asset_type: data.asset_type ?? asset.asset_type,
       capability_tags: data.capability_tags ?? asset.capability_tags,
       maturity: data.maturity ?? asset.maturity,
+      asset_level: data.asset_level ?? asset.asset_level,
+      evidence: data.evidence ?? asset.evidence,
+      external_expression: data.external_expression ?? asset.external_expression,
+      transferable_scene: data.transferable_scene ?? asset.transferable_scene,
+      productization_next_step:
+        data.productization_next_step ?? asset.productization_next_step,
       summary: data.summary ?? asset.summary,
       reusable_scenario: data.reusable_scenario ?? asset.reusable_scenario,
     };
@@ -191,12 +199,32 @@ document.addEventListener("DOMContentLoaded", () => {
             <label class="form-label">成熟度</label>
             <select id="asset-edit-maturity" class="select full-width">${buildSelectOptions(maturityLevels, asset.maturity || "草稿")}</select>
           </div>
+          <div class="form-row">
+            <label class="form-label">资产等级</label>
+            <select id="asset-edit-level" class="select full-width">${buildSelectOptions(assetLevels, asset.asset_level || "资料")}</select>
+          </div>
           <div id="asset-edit-dynamic-fields" class="asset-dynamic-fields">
             ${buildAssetEditFieldsHtml(asset.asset_type, asset.fields || {})}
           </div>
           <div class="form-row">
             <label class="form-label">复用场景</label>
             <textarea id="asset-edit-reusable" class="textarea" rows="3">${escapeHtml(asset.reusable_scenario || "")}</textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">证据</label>
+            <textarea id="asset-edit-evidence" class="textarea" rows="2">${escapeHtml(asset.evidence || "")}</textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">可对外表达版本</label>
+            <textarea id="asset-edit-external-expression" class="textarea" rows="2">${escapeHtml(asset.external_expression || "")}</textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">可迁移场景</label>
+            <textarea id="asset-edit-transferable-scene" class="textarea" rows="2">${escapeHtml(asset.transferable_scene || "")}</textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">下一步产品化可能</label>
+            <textarea id="asset-edit-productization-next-step" class="textarea" rows="2">${escapeHtml(asset.productization_next_step || "")}</textarea>
           </div>
           <div class="form-row">
             <span class="form-label">关联能力模块</span>
@@ -210,6 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const title = document.getElementById("asset-edit-title").value.trim();
         const assetType = document.getElementById("asset-edit-type").value;
         const maturity = document.getElementById("asset-edit-maturity").value;
+        const assetLevel = document.getElementById("asset-edit-level").value;
         const fields = readAssetEditFields();
         if (!title) {
           throw new Error("标题不能为空");
@@ -218,9 +247,20 @@ document.addEventListener("DOMContentLoaded", () => {
           title,
           asset_type: assetType,
           maturity,
+          asset_level: assetLevel,
           fields,
           reusable_scenario: document
             .getElementById("asset-edit-reusable")
+            .value.trim(),
+          evidence: document.getElementById("asset-edit-evidence").value.trim(),
+          external_expression: document
+            .getElementById("asset-edit-external-expression")
+            .value.trim(),
+          transferable_scene: document
+            .getElementById("asset-edit-transferable-scene")
+            .value.trim(),
+          productization_next_step: document
+            .getElementById("asset-edit-productization-next-step")
             .value.trim(),
           capability_tags: Array.from(
             document.querySelectorAll(".asset-edit-tag:checked")
@@ -489,6 +529,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="asset-archive-item-topline">
               <h3 class="asset-archive-item-title">${escapeHtml(asset.title)}</h3>
               <span class="tag asset-maturity ${maturityClass}">${escapeHtml(asset.maturity || "草稿")}</span>
+              <span class="tag">${escapeHtml(asset.asset_level || "资料")}</span>
               ${tagsHtml ? `<span class="asset-archive-tags-inline">${tagsHtml}</span>` : ""}
               <span class="asset-meta-chip">复用 ${asset.reuse_count || 0}</span>
               <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
@@ -505,6 +546,10 @@ document.addEventListener("DOMContentLoaded", () => {
           ${renderFieldPreview(asset, fieldPreviewEntries)}
           <div class="asset-card-meta-grid asset-detail-meta-grid">
             <div><span class="meta-label">复用场景</span><span class="meta-value">${formatText(asset.reusable_scenario)}</span></div>
+            <div><span class="meta-label">证据</span><span class="meta-value">${formatText(asset.evidence)}</span></div>
+            <div><span class="meta-label">对外表达</span><span class="meta-value">${formatText(asset.external_expression)}</span></div>
+            <div><span class="meta-label">可迁移场景</span><span class="meta-value">${formatText(asset.transferable_scene)}</span></div>
+            <div><span class="meta-label">产品化下一步</span><span class="meta-value">${formatText(asset.productization_next_step)}</span></div>
           </div>
           <div class="asset-ai-actions">
             <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
@@ -706,9 +751,17 @@ document.addEventListener("DOMContentLoaded", () => {
       title,
       asset_type: assetTypeSelect.value,
       maturity: maturitySelect.value,
+      asset_level: assetLevelSelect?.value || "资料",
       fields: readDynamicFields(),
       capability_tags: getSelectedTags(),
       source_review_id: sourceId,
+      evidence: document.getElementById("asset-evidence")?.value.trim() || "",
+      external_expression:
+        document.getElementById("asset-external-expression")?.value.trim() || "",
+      transferable_scene:
+        document.getElementById("asset-transferable-scene")?.value.trim() || "",
+      productization_next_step:
+        document.getElementById("asset-productization-next-step")?.value.trim() || "",
     };
     await apiRequest("/api/assets", {
       method: "POST",

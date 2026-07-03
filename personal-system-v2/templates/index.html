@@ -20,6 +20,24 @@
 </header>
 
 <div class="dashboard-layout dashboard-workbench dashboard-stack">
+  <section class="section-card dashboard-span-full value-dashboard-section" id="value-dashboard">
+    <div class="section-header-row">
+      <div>
+        <h2>PSY-2.0 价值实验</h2>
+        <p class="form-hint section-hint">机会 → 实验 → 反馈 → 案例资产</p>
+      </div>
+      <div class="value-action-row">
+        <a href="{{ url_for('opportunities') }}" class="btn btn-sm">审计机会</a>
+        <a href="{{ url_for('experiments') }}" class="btn btn-sm btn-ghost">启动实验</a>
+        <a href="{{ url_for('feedback_page') }}" class="btn btn-sm btn-ghost">记录反馈</a>
+        <a href="{{ url_for('assets') }}" class="btn btn-sm btn-ghost">沉淀案例</a>
+      </div>
+    </div>
+    <div id="value-dashboard-content" class="value-dashboard-grid">
+      <div class="empty-state">正在读取价值实验数据</div>
+    </div>
+  </section>
+
   <section class="section-card dashboard-span-full dashboard-section-goal" id="dashboard-goal">
     <div class="section-header-row">
       <h2>当前主线目标</h2>
