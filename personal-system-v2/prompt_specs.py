@@ -166,7 +166,7 @@ SCENE_SPECS = {
     },
     ("inbox", "analyze"): {
         "label": "智能归档解析",
-        "purpose": "将非结构化输入拆解为目标、项目、任务、复盘、结构化资产、能力记录等归档建议。",
+        "purpose": "将非结构化输入拆解为目标、项目、任务、复盘、结构化资产、能力记录、机会、实验、反馈等归档建议。",
         "json_schema": (
             "items: 对象数组，每项含 target_type、title、content、"
             "summary（可选）、confidence（0-1）、reason、action（asset 可选）、"

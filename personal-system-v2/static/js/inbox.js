@@ -25,9 +25,24 @@ document.addEventListener("DOMContentLoaded", () => {
     review: "复盘",
     asset: "知识卡片",
     capability_entry: "能力记录",
+    opportunity: "机会",
+    experiment: "实验",
+    feedback: "反馈",
     uncertain: "不确定",
     ignored: "忽略",
   };
+  const EDITABLE_TARGET_TYPES = [
+    "goal",
+    "project",
+    "task",
+    "review",
+    "asset",
+    "capability_entry",
+    "opportunity",
+    "experiment",
+    "feedback",
+    "uncertain",
+  ];
 
   let currentEntryId = null;
   let suggestions = [];
@@ -113,6 +128,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const base = { ...(suggestion.suggested_payload || {}) };
     const override = overridePayloads[suggestion.id] || {};
     return { ...base, ...override };
+  }
+
+  function renderTargetTypeSelect(suggestion) {
+    if (suggestion.status !== "pending") {
+      return `<span class="tag inbox-type-tag">${escapeHtml(TYPE_LABELS[suggestion.target_type] || suggestion.target_type)}</span>`;
+    }
+    const options = EDITABLE_TARGET_TYPES.map(
+      (type) =>
+        `<option value="${type}"${type === suggestion.target_type ? " selected" : ""}>${escapeHtml(TYPE_LABELS[type] || type)}</option>`
+    ).join("");
+    return `
+      <label class="inbox-type-select-label">
+        <span class="sr-only">归档类型</span>
+        <select class="select inbox-type-select" data-id="${suggestion.id}">${options}</select>
+      </label>`;
   }
 
   function findBatchProjectByRef(ref) {
@@ -354,6 +384,21 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
+    suggestionsEl.querySelectorAll(".inbox-type-select").forEach((select) => {
+      select.addEventListener("change", () => {
+        const id = Number(select.dataset.id);
+        const targetType = select.value;
+        suggestions = suggestions.map((item) =>
+          item.id === id ? { ...item, target_type: targetType } : item
+        );
+        overridePayloads[id] = {
+          ...(overridePayloads[id] || {}),
+          target_type: targetType,
+        };
+        renderSuggestions();
+      });
+    });
+
     suggestionsEl.querySelectorAll(".inbox-select").forEach((input) => {
       input.addEventListener("change", updateSelectedCount);
     });
@@ -429,7 +474,7 @@ document.addEventListener("DOMContentLoaded", () => {
               </label>
               <div class="inbox-card-body">
                 <div class="inbox-card-meta">
-                  <span class="tag inbox-type-tag">${escapeHtml(TYPE_LABELS[suggestion.target_type] || suggestion.target_type)}</span>
+                  ${renderTargetTypeSelect(suggestion)}
                   ${renderConfidenceBar(suggestion.confidence)}
                   ${statusTag}
                 </div>
@@ -525,11 +570,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function buildOverridePayload() {
     return Object.entries(overridePayloads)
-      .filter(([, value]) => value && (value.goal_id || value.project_id))
+      .filter(([, value]) => value && (value.goal_id || value.project_id || value.target_type))
       .map(([id, value]) => {
         const item = { suggestion_id: Number(id) };
         if (value.goal_id) item.goal_id = value.goal_id;
         if (value.project_id) item.project_id = value.project_id;
+        if (value.target_type) item.target_type = value.target_type;
         return item;
       });
   }
@@ -544,6 +590,9 @@ document.addEventListener("DOMContentLoaded", () => {
       reviews: "复盘",
       assets: "知识卡片",
       capability_entries: "能力记录",
+      opportunities: "机会",
+      experiments: "实验",
+      feedback_items: "反馈",
     };
     const parts = Object.entries(created)
       .filter(([, count]) => count > 0)

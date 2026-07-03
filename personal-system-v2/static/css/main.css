@@ -137,6 +137,18 @@ html.theme-dark-warm {
   justify-content: flex-end;
 }
 
+.inbox-type-select-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.inbox-type-select {
+  min-height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  font-size: 0.82rem;
+}
+
 .value-dashboard-grid {
   display: grid;
   gap: 12px;

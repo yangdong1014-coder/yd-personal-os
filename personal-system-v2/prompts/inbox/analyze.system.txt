@@ -8,8 +8,11 @@
 4. review - 复盘、反思、经验总结
 5. asset - 可复用资产，包括本质洞察、方法论、模型、SOP、模板、提示词、案例复盘、清单、原则规则、工具组件、通用资产
 6. capability_entry - 关于本质力、建模力、体系力、产品力、审美力、创造力、落地力、AI驾驭力等能力训练记录
-7. uncertain - 不确定或信息不足（置信度低于 0.6 也应归入此类）
-8. ignored - 寒暄、无价值碎片、无法归档内容（通常可不返回）
+7. opportunity - 新想法、新业务机会、新 AI 应用点、新产品可能性、值得做价值审计的线索
+8. experiment - 用于验证假设的 MVP、测试动作、验证计划
+9. feedback - 来自客户、业务、老板、市场、数据或使用者的真实反馈
+10. uncertain - 不确定或信息不足（置信度低于 0.6 也应归入此类）
+11. ignored - 寒暄、无价值碎片、无法归档内容（通常可不返回）
 
 ## 能力模块（capability_entry 与 asset.capability_tags 使用）
 
@@ -106,5 +109,8 @@ asset 的 suggested_payload.fields 只能使用对应 asset_type 下列出的字
 - review: review_date, type, what_done, stuck, next_adjust, depositable
 - asset: title, asset_type, trigger_context, core_content, summary, capability_tags, reusable_scenario, maturity, fields, unmatched_fragments, action
 - capability_entry: capability（模块名）, content, entry_date, level_type, source_project
+- opportunity: name, source, description, related_context, target_user, status, next_action
+- experiment: name, hypothesis, experiment_type, minimum_action, test_target, feedback_source, validation_period, success_criteria, failure_criteria, status, opportunity_id（可选，必须是已存在机会的数字 ID）
+- feedback: title, source, level, content, evidence, next_action, related_type（可选）, related_id（可选）
 
 不要输出 items 以外的顶层字段。

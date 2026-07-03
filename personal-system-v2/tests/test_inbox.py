@@ -98,6 +98,9 @@ def test_analyze_inbox_text_renders_asset_field_schema(monkeypatch):
     assert "{asset_field_schema}" not in captured["system_prompt"]
     assert "方法论: 解决的问题, 核心原则, 操作流程, 判断标准, 案例验证, 可复用场景" in captured["system_prompt"]
     assert '"target_type": "asset"' in captured["system_prompt"]
+    assert "opportunity" in captured["system_prompt"]
+    assert "experiment" in captured["system_prompt"]
+    assert "feedback" in captured["system_prompt"]
     assert "{raw_text}" not in captured["user_prompt"]
 
 
@@ -239,6 +242,218 @@ def test_inbox_commit_idempotent(client, monkeypatch):
 
     goals = client.get("/api/goals").get_json()["data"]
     assert sum(1 for goal in goals if goal["name"] == "重复目标") == 1
+
+
+def test_inbox_normalize_value_target_types():
+    items = inbox_service._normalize_ai_items(
+        [
+            {
+                "target_type": "opportunity",
+                "title": "AI 自动化机会",
+                "content": "可用 AI 自动化周报",
+                "confidence": 0.9,
+                "reason": "新应用点",
+                "suggested_payload": {"name": "AI 自动化周报"},
+            },
+            {
+                "target_type": "experiment",
+                "title": "周报 MVP",
+                "content": "用 7 天验证 AI 周报",
+                "confidence": 0.9,
+                "reason": "验证计划",
+                "suggested_payload": {"name": "周报 MVP"},
+            },
+            {
+                "target_type": "feedback",
+                "title": "使用者反馈",
+                "content": "同事觉得节省时间",
+                "confidence": 0.9,
+                "reason": "真实反馈",
+                "suggested_payload": {"title": "使用者反馈"},
+            },
+        ]
+    )
+    assert [item["target_type"] for item in items] == [
+        "opportunity",
+        "experiment",
+        "feedback",
+    ]
+
+
+def test_inbox_commit_opportunity_suggestion(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "opportunity",
+                    "title": "AI 周报机会",
+                    "content": "老板每周都要周报，可以尝试 AI 自动生成。",
+                    "confidence": 0.92,
+                    "reason": "新 AI 应用点",
+                    "suggested_payload": {
+                        "name": "AI 周报机会",
+                        "source": "inbox",
+                        "target_user": "团队负责人",
+                        "next_action": "做一个 7 天 MVP",
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "AI 周报机会"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["opportunities"] == 1
+
+    opportunities = database.list_opportunities()
+    opportunity = next(item for item in opportunities if item["name"] == "AI 周报机会")
+    assert opportunity["target_user"] == "团队负责人"
+    assert opportunity["next_action"] == "做一个 7 天 MVP"
+
+
+def test_inbox_commit_experiment_without_opportunity_id(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "experiment",
+                    "title": "AI 周报 MVP",
+                    "content": "用一个模板跑 7 天验证。",
+                    "confidence": 0.9,
+                    "reason": "验证计划",
+                    "suggested_payload": {
+                        "name": "AI 周报 MVP",
+                        "hypothesis": "AI 可以减少周报整理时间",
+                        "experiment_type": "结果型MVP",
+                        "minimum_action": "用一个模板生成三次周报",
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "实验"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["experiments"] == 1
+
+    experiment = next(item for item in database.list_experiments() if item["name"] == "AI 周报 MVP")
+    assert experiment["opportunity_id"] is None
+    assert experiment["hypothesis"] == "AI 可以减少周报整理时间"
+
+
+def test_inbox_commit_experiment_with_opportunity_id(client, monkeypatch):
+    opportunity = database.create_opportunity({"name": "已有机会"})
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "experiment",
+                    "title": "关联机会实验",
+                    "content": "验证已有机会",
+                    "confidence": 0.9,
+                    "reason": "验证计划",
+                    "suggested_payload": {
+                        "name": "关联机会实验",
+                        "opportunity_id": opportunity["id"],
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "关联实验"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    assert response.get_json()["data"]["created"]["experiments"] == 1
+
+    experiment = next(item for item in database.list_experiments() if item["name"] == "关联机会实验")
+    assert experiment["opportunity_id"] == opportunity["id"]
+    assert experiment["opportunity_name"] == "已有机会"
+
+
+def test_inbox_commit_feedback_without_relation(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "feedback",
+                    "title": "周报反馈",
+                    "content": "同事觉得自动周报节省了时间。",
+                    "confidence": 0.9,
+                    "reason": "真实反馈",
+                    "suggested_payload": {
+                        "source": "使用者反馈",
+                        "level": "L2 同事/使用者觉得有价值",
+                        "evidence": "同事口头反馈",
+                    },
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "反馈"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post("/api/inbox/commit", json={"suggestion_ids": [suggestion_id]})
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["feedback_items"] == 1
+
+    feedback = next(item for item in database.list_feedback_items() if item["title"] == "周报反馈")
+    assert feedback["related_type"] == ""
+    assert feedback["related_id"] is None
+    assert feedback["source"] == "使用者反馈"
+
+
+def test_inbox_commit_manual_target_type_override_to_opportunity(client, monkeypatch):
+    monkeypatch.setattr(
+        ai_service,
+        "analyze_inbox_text",
+        lambda text: {
+            "items": [
+                {
+                    "target_type": "uncertain",
+                    "title": "人工机会",
+                    "content": "可能可以做 AI 表格助手。",
+                    "confidence": 0.95,
+                    "reason": "测试人工改类型",
+                    "suggested_payload": {},
+                }
+            ]
+        },
+    )
+    analyze = client.post("/api/inbox/analyze", json={"text": "人工改类型"}).get_json()["data"]
+    suggestion_id = analyze["suggestions"][0]["id"]
+
+    response = client.post(
+        "/api/inbox/commit",
+        json={
+            "suggestion_ids": [suggestion_id],
+            "override_payload": [
+                {"suggestion_id": suggestion_id, "target_type": "opportunity"}
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["created"]["opportunities"] == 1
+    assert not data["errors"]
+
+    assert any(item["name"] == "人工机会" for item in database.list_opportunities())
 
 
 def test_inbox_reject_suggestion(client, monkeypatch):

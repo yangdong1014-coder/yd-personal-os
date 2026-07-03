@@ -37,6 +37,9 @@ INBOX_TARGET_TYPES = (
     "review",
     "asset",
     "capability_entry",
+    "opportunity",
+    "experiment",
+    "feedback",
     "uncertain",
     "ignored",
 )
@@ -47,6 +50,9 @@ INBOX_COMMITTABLE_TYPES = (
     "review",
     "asset",
     "capability_entry",
+    "opportunity",
+    "experiment",
+    "feedback",
 )
 OPPORTUNITY_STATUSES = ("待审计", "值得测试", "已进入MVP", "已转项目", "暂停", "删除")
 EXPERIMENT_TYPES = ("交易型MVP", "结果型MVP", "反证型MVP", "功能型MVP")
@@ -131,7 +137,7 @@ EXPERIMENT_TEXT_FIELDS = (
     "next_decision",
     "review_conclusion",
 )
-INBOX_OVERRIDE_FIELDS = frozenset({"goal_id", "project_id"})
+INBOX_OVERRIDE_FIELDS = frozenset({"goal_id", "project_id", "target_type"})
 INBOX_COMMIT_ORDER = {
     "goal": 0,
     "project": 1,
@@ -139,6 +145,9 @@ INBOX_COMMIT_ORDER = {
     "asset": 3,
     "capability_entry": 4,
     "task": 5,
+    "opportunity": 6,
+    "experiment": 7,
+    "feedback": 8,
 }
 ASSET_ACTIONS = ("create", "append", "merge", "stash")
 ASSET_TYPE_ALIASES = {
@@ -3863,6 +3872,31 @@ def _map_asset_maturity(raw, default="可用"):
     return MATURITY_ALIASES.get(value.lower(), default)
 
 
+def _map_opportunity_status(raw):
+    value = _as_text(raw)
+    return value if value in OPPORTUNITY_STATUSES else "待审计"
+
+
+def _map_experiment_type(raw):
+    value = _as_text(raw)
+    return value if value in EXPERIMENT_TYPES else "结果型MVP"
+
+
+def _map_experiment_status(raw):
+    value = _as_text(raw)
+    return value if value in EXPERIMENT_STATUSES else "设计中"
+
+
+def _map_feedback_source(raw):
+    value = _as_text(raw)
+    return value if value in FEEDBACK_SOURCES else "自我判断"
+
+
+def _map_feedback_level(raw):
+    value = _as_text(raw)
+    return value if value in FEEDBACK_LEVELS else "L0 只是想法"
+
+
 def _clean_asset_fields_for_type(asset_type, raw_fields):
     fields = asset_schemas.parse_fields(raw_fields)
     if not fields:
@@ -3899,10 +3933,13 @@ def _merge_suggestion_override(suggestion, override_map):
     if sid not in override_map:
         return suggestion
     payload = dict(suggestion["suggested_payload"])
-    for key, value in override_map[sid].items():
-        if key in INBOX_OVERRIDE_FIELDS:
-            payload[key] = value
     merged = dict(suggestion)
+    for key, value in override_map[sid].items():
+        if key == "target_type":
+            if value in INBOX_TARGET_TYPES:
+                merged["target_type"] = value
+        elif key in INBOX_OVERRIDE_FIELDS:
+            payload[key] = value
     merged["suggested_payload"] = payload
     return merged
 
@@ -4024,6 +4061,37 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
         entry_content = (payload.get("content") or content).strip()
         if not entry_content:
             return f"建议 #{sid}（能力记录）：缺少内容"
+        return None
+
+    if target_type == "opportunity":
+        name = _as_text(payload.get("name"), _as_text(title))
+        if not name:
+            return f"建议 #{sid}（机会）：缺少名称"
+        return None
+
+    if target_type == "experiment":
+        name = _as_text(payload.get("name"), _as_text(title))
+        opportunity_id = _coerce_positive_int(payload.get("opportunity_id"))
+        if not name:
+            return f"建议 #{sid}（实验）：缺少名称"
+        if payload.get("opportunity_id") not in (None, "") and not opportunity_id:
+            return f"建议 #{sid}（实验）：opportunity_id 需为数字 ID"
+        if opportunity_id and not conn.execute(
+            "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
+        ).fetchone():
+            return f"建议 #{sid}（实验）：关联机会 #{opportunity_id} 不存在"
+        return None
+
+    if target_type == "feedback":
+        feedback_title = _as_text(payload.get("title"), _as_text(title))
+        related_type = _as_text(payload.get("related_type"))
+        related_id = _coerce_positive_int(payload.get("related_id"))
+        if not feedback_title:
+            return f"建议 #{sid}（反馈）：缺少标题"
+        if related_type and related_type not in FEEDBACK_RELATED_TYPES:
+            return f"建议 #{sid}（反馈）：关联类型无效"
+        if payload.get("related_id") not in (None, "") and not related_id:
+            return f"建议 #{sid}（反馈）：related_id 需为数字 ID"
         return None
 
     return f"建议 #{sid} 类型为 {target_type}，不可入库"
@@ -4206,6 +4274,97 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         )
         return "capability_entries", cur.lastrowid
 
+    if target_type == "opportunity":
+        now = _now()
+        name = _as_text(payload.get("name"), _as_text(title))
+        if not name:
+            raise ValueError("机会名称不能为空")
+        cur = conn.execute(
+            """
+            INSERT INTO opportunities (
+                name, source, description, related_context, target_user,
+                status, next_action, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                _as_text(payload.get("source")),
+                _as_text(payload.get("description"), _as_text(content)),
+                _as_text(payload.get("related_context")),
+                _as_text(payload.get("target_user")),
+                _map_opportunity_status(payload.get("status")),
+                _as_text(payload.get("next_action")),
+                now,
+                now,
+            ),
+        )
+        return "opportunities", cur.lastrowid
+
+    if target_type == "experiment":
+        now = _now()
+        name = _as_text(payload.get("name"), _as_text(title))
+        opportunity_id = _coerce_positive_int(payload.get("opportunity_id"))
+        if not name:
+            raise ValueError("实验名称不能为空")
+        cur = conn.execute(
+            """
+            INSERT INTO experiments (
+                opportunity_id, name, hypothesis, experiment_type,
+                minimum_action, test_target, feedback_source,
+                validation_period, success_criteria, failure_criteria,
+                status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                opportunity_id,
+                name,
+                _as_text(payload.get("hypothesis"), _as_text(content)),
+                _map_experiment_type(payload.get("experiment_type")),
+                _as_text(payload.get("minimum_action")),
+                _as_text(payload.get("test_target")),
+                _as_text(payload.get("feedback_source")),
+                _as_text(payload.get("validation_period")),
+                _as_text(payload.get("success_criteria")),
+                _as_text(payload.get("failure_criteria")),
+                _map_experiment_status(payload.get("status")),
+                now,
+                now,
+            ),
+        )
+        return "experiments", cur.lastrowid
+
+    if target_type == "feedback":
+        now = _now()
+        feedback_title = _as_text(payload.get("title"), _as_text(title))
+        if not feedback_title:
+            raise ValueError("反馈标题不能为空")
+        related_type = _as_text(payload.get("related_type"))
+        related_id = _coerce_positive_int(payload.get("related_id"))
+        if related_type not in FEEDBACK_RELATED_TYPES:
+            related_type = ""
+            related_id = None
+        cur = conn.execute(
+            """
+            INSERT INTO feedback_items (
+                related_type, related_id, title, source, level,
+                content, evidence, next_action, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                related_type,
+                related_id,
+                feedback_title,
+                _map_feedback_source(payload.get("source")),
+                _map_feedback_level(payload.get("level")),
+                _as_text(payload.get("content"), _as_text(content)),
+                _as_text(payload.get("evidence")),
+                _as_text(payload.get("next_action")),
+                now,
+                now,
+            ),
+        )
+        return "feedback_items", cur.lastrowid
+
     raise ValueError(f"类型 {target_type} 不可入库")
 
 
@@ -4229,6 +4388,9 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
         "reviews": 0,
         "assets": 0,
         "capability_entries": 0,
+        "opportunities": 0,
+        "experiments": 0,
+        "feedback_items": 0,
     }
     skipped = 0
     errors = []
