@@ -2819,6 +2819,8 @@ def _normalize_import_record(table, raw):
                 record[key] = "L0 只是想法"
             elif key == "asset_level":
                 record[key] = "资料"
+            elif key == "source_type":
+                record[key] = ""
             elif key == "source_id":
                 record[key] = None
             elif (
@@ -3886,6 +3888,28 @@ def get_value_dashboard():
     experiments = list_experiments()
     feedback = list_feedback_items()
     assets = list_assets()
+    projects = list_projects()
+    experiment_opportunity_ids = {
+        item.get("opportunity_id") for item in experiments if item.get("opportunity_id")
+    }
+    feedback_ids_with_assets = {
+        item.get("source_id") for item in assets
+        if item.get("source_type") == "feedback" and item.get("source_id")
+    }
+    feedback_experiment_ids = {
+        item.get("related_id") for item in feedback
+        if item.get("related_type") == "experiment" and item.get("related_id")
+    }
+    experiment_ids_with_case_assets = {
+        item.get("source_id") for item in assets
+        if item.get("source_type") == "experiment" and item.get("source_id")
+    }
+    experiment_ids_with_feedback_assets = {
+        item.get("related_id") for item in feedback
+        if item.get("id") in feedback_ids_with_assets
+        and item.get("related_type") == "experiment"
+        and item.get("related_id")
+    }
     return {
         "high_score_opportunities": opportunities[:5],
         "running_experiments": [
@@ -3899,6 +3923,43 @@ def get_value_dashboard():
         "case_assets": [
             item for item in assets
             if item.get("asset_level") in ("案例", "产品", "筹码")
+        ][:5],
+        "pending_validation": [
+            item for item in opportunities
+            if item.get("status") == "值得测试"
+            or (
+                int(item.get("total_score") or 0) >= 15
+                and item.get("id") not in experiment_opportunity_ids
+            )
+        ][:5],
+        "pending_deposit": [
+            item for item in feedback
+            if (
+                (item.get("level") or "").startswith("L4")
+                or (item.get("level") or "").startswith("L5")
+            )
+            and item.get("id") not in feedback_ids_with_assets
+        ][:5],
+        "completed_experiments_without_assets": [
+            item for item in experiments
+            if item.get("status") == "已验证"
+            and item.get("id") not in experiment_ids_with_case_assets
+            and item.get("id") not in experiment_ids_with_feedback_assets
+        ][:5],
+        "pending_stop_review": [
+            item for item in opportunities
+            if item.get("status") in ("暂停", "观察", "停止")
+        ][:5]
+        + [
+            item for item in experiments
+            if item.get("status") in ("已暂停", "未验证", "暂停", "停止")
+            or (
+                item.get("failure_criteria")
+                and item.get("status") in ("设计中", "进行中")
+            )
+        ][:5]
+        + [
+            item for item in projects if item.get("stop_condition")
         ][:5],
     }
 

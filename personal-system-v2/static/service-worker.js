@@ -1,4 +1,4 @@
-const CACHE_NAME = "psy-2-pwa-v2.0.0-rc.1-hotfix1";
+const CACHE_NAME = "psy-2-pwa-v2.0.0-rc.3";
 
 const APP_SHELL_URLS = [
   "/",

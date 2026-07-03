@@ -434,7 +434,7 @@ def test_export_import_v2_and_legacy_v1_compatibility(client):
 
 def test_health_and_homepage_for_value_rc1(client):
     health = client.get("/api/health").get_json()["data"]
-    assert health["version"] == "v2.0.0-rc.1"
+    assert health["version"] == "v2.0.0-rc.3"
 
     home = client.get("/")
     assert home.status_code == 200
@@ -444,9 +444,55 @@ def test_health_and_homepage_for_value_rc1(client):
 
 
 def test_value_discipline_pages_render(client):
-    for path in ("/opportunities", "/experiments", "/goals", "/assets"):
+    for path in ("/", "/opportunities", "/experiments", "/feedback", "/assets", "/goals", "/inbox"):
         response = client.get(path)
         assert response.status_code == 200
+
+
+def test_value_dashboard_rc3_signals(client):
+    opportunity = client.post(
+        "/api/opportunities",
+        json={
+            "name": "待验证机会",
+            "status": "值得测试",
+            "importance_score": 5,
+            "feedback_speed_score": 5,
+            "revenue_score": 5,
+        },
+    ).get_json()["data"]
+    experiment = client.post(
+        "/api/experiments",
+        json={
+            "name": "待沉淀实验",
+            "status": "已验证",
+            "success_criteria": "完成验证",
+        },
+    ).get_json()["data"]
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "待沉淀强反馈",
+            "source": "客户反馈",
+            "level": "L5 带来收入、降本、加薪、资源、外部机会",
+        },
+    ).get_json()["data"]
+    paused = client.post(
+        "/api/experiments",
+        json={
+            "name": "待停止观察实验",
+            "status": "进行中",
+            "failure_criteria": "三天无反馈",
+        },
+    ).get_json()["data"]
+
+    data = client.get("/api/value-dashboard").get_json()["data"]
+    assert any(item["id"] == opportunity["id"] for item in data["pending_validation"])
+    assert any(item["id"] == feedback["id"] for item in data["pending_deposit"])
+    assert any(
+        item["id"] == experiment["id"]
+        for item in data["completed_experiments_without_assets"]
+    )
+    assert any(item["id"] == paused["id"] for item in data["pending_stop_review"])
 
 
 def test_project_value_discipline_fields_do_not_break_project_api(client):
@@ -508,3 +554,55 @@ def test_asset_delete_api_still_works_for_case_asset(client):
     response = client.delete(f"/api/assets/{asset['id']}")
     assert response.status_code == 200
     assert response.get_json()["data"]["deleted"] is True
+
+
+def test_links_api_handles_missing_relations_without_500(client):
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "断链反馈",
+            "related_type": "experiment",
+            "related_id": 999999,
+        },
+    ).get_json()["data"]
+    asset = client.post(
+        "/api/assets",
+        json={
+            "title": "断链资产",
+            "asset_type": "案例复盘",
+            "asset_level": "案例",
+            "fields": {"资产说明": "断链来源"},
+        },
+    ).get_json()["data"]
+
+    conn = database.get_connection()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute(
+        "UPDATE assets SET source_type = ?, source_id = ? WHERE id = ?",
+        ("feedback", 999999, asset["id"]),
+    )
+    conn.execute(
+        """
+        INSERT INTO experiments (
+            id, opportunity_id, name, hypothesis, experiment_type,
+            minimum_action, test_target, feedback_source, validation_period,
+            success_criteria, failure_criteria, progress, real_feedback,
+            data_result, next_decision, review_conclusion, status, created_at, updated_at
+        ) VALUES (?, ?, ?, '', '结果型MVP', '', '', '', '', '', '', '', '', '', '', '', '设计中', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+        """,
+        (999998, 999997, "断链实验"),
+    )
+    conn.commit()
+    conn.close()
+
+    feedback_links = client.get(f"/api/feedback/{feedback['id']}/links")
+    assert feedback_links.status_code == 200
+    assert feedback_links.get_json()["data"]["related"] is None
+
+    asset_links = client.get(f"/api/assets/{asset['id']}/links")
+    assert asset_links.status_code == 200
+    assert asset_links.get_json()["data"]["source"] is None
+
+    experiment_links = client.get("/api/experiments/999998/links")
+    assert experiment_links.status_code == 200
+    assert experiment_links.get_json()["data"]["opportunity"] is None

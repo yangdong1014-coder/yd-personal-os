@@ -686,6 +686,116 @@ def test_import_invalid_structure_rolls_back(client):
     assert len(client.get("/api/goals").get_json()["data"]) == before_count
 
 
+def test_export_preserves_value_v2_objects_and_fields(client):
+    goal = client.post(
+        "/api/goals",
+        json={"name": "导出价值目标", "type": "年度"},
+    ).get_json()["data"]
+    project = client.post(
+        "/api/projects",
+        json={"goal_id": goal["id"], "name": "导出价值项目"},
+    ).get_json()["data"]
+    client.patch(
+        f"/api/projects/{project['id']}",
+        json={
+            "stop_condition": "没有真实反馈则停止",
+            "disconfirming_signal": "用户不愿试用",
+            "value_capture": "形成案例证明",
+            "result_data": "转化提升 8%",
+            "asset_deposit": "案例资产",
+        },
+    )
+    opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "导出机会", "importance_score": 5},
+    ).get_json()["data"]
+    experiment = client.post(
+        "/api/experiments",
+        json={"opportunity_id": opportunity["id"], "name": "导出实验"},
+    ).get_json()["data"]
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "导出反馈",
+            "related_type": "experiment",
+            "related_id": experiment["id"],
+            "source": "客户反馈",
+            "level": "L4 产生可量化结果",
+            "content": "愿意继续使用",
+            "evidence": "给出预算",
+            "next_action": "沉淀案例",
+        },
+    ).get_json()["data"]
+    asset = client.post(f"/api/feedback/{feedback['id']}/asset").get_json()["data"]
+
+    backup = client.get("/api/export").get_json()
+    assert backup["meta"]["version"] == "2.0"
+    assert {item["id"] for item in backup["opportunities"]} == {opportunity["id"]}
+    assert {item["id"] for item in backup["experiments"]} == {experiment["id"]}
+    assert {item["id"] for item in backup["feedback_items"]} == {feedback["id"]}
+
+    exported_project = next(item for item in backup["projects"] if item["id"] == project["id"])
+    assert exported_project["stop_condition"] == "没有真实反馈则停止"
+    assert exported_project["disconfirming_signal"] == "用户不愿试用"
+    assert exported_project["value_capture"] == "形成案例证明"
+    assert exported_project["result_data"] == "转化提升 8%"
+    assert exported_project["asset_deposit"] == "案例资产"
+
+    exported_asset = next(item for item in backup["assets"] if item["id"] == asset["id"])
+    assert exported_asset["source_type"] == "feedback"
+    assert exported_asset["source_id"] == feedback["id"]
+    assert exported_asset["asset_level"] == "案例"
+    assert exported_asset["evidence"] == "给出预算"
+    assert exported_asset["external_expression"]
+    assert "transferable_scene" in exported_asset
+    assert exported_asset["productization_next_step"] == "沉淀案例"
+
+
+def test_legacy_v1_import_defaults_value_v2_fields(client):
+    backup = _empty_backup()
+    backup["goals"] = [
+        {"id": 1001, "name": "旧目标", "type": "年度", "created_at": "2026-01-01 00:00:00"}
+    ]
+    backup["projects"] = [
+        {
+            "id": 1002,
+            "goal_id": 1001,
+            "name": "旧项目",
+            "created_at": "2026-01-01 00:00:00",
+        }
+    ]
+    backup["assets"] = [
+        {
+            "id": 1003,
+            "title": "旧资产",
+            "trigger_context": "",
+            "core_content": "旧内容",
+            "asset_type": "知识卡片",
+            "capability_tags": "[]",
+            "source_review_id": None,
+            "created_at": "2026-01-01 00:00:00",
+        }
+    ]
+
+    response = client.post("/api/import", json=backup)
+    assert response.status_code == 200
+    assert response.get_json()["data"]["failed"] == 0
+
+    project = next(item for item in client.get("/api/projects").get_json()["data"] if item["id"] == 1002)
+    assert project["stop_condition"] == ""
+    assert project["disconfirming_signal"] == ""
+    assert project["value_capture"] == ""
+
+    asset = next(item for item in client.get("/api/assets").get_json()["data"] if item["id"] == 1003)
+    assert asset["asset_level"] == "资料"
+    assert asset["source_type"] == ""
+    assert asset["source_id"] is None
+    assert asset["evidence"] == ""
+    assert asset["external_expression"] == ""
+    assert asset["transferable_scene"] == ""
+    assert asset["productization_next_step"] == ""
+
+
 @pytest.mark.parametrize(
     "path",
     [

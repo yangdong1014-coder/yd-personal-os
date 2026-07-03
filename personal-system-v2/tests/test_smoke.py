@@ -52,6 +52,17 @@ def test_base_template_has_compact_theme_toggle(client):
     assert "外观：深色暖色</span>" not in html
 
 
+def test_base_template_hides_low_frequency_data_buttons(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'id="export-data-btn"' not in html
+    assert 'id="export-obsidian-btn"' not in html
+    assert 'id="import-data-btn"' not in html
+    assert 'id="import-data-input"' not in html
+    assert 'id="theme-toggle-btn"' in html
+
+
 def test_theme_toggle_css_keeps_button_chrome_minimal():
     css = (PROJECT_ROOT / "static" / "css" / "main.css").read_text(encoding="utf-8")
     assert ".theme-toggle {" in css
@@ -93,6 +104,7 @@ def test_service_worker_is_available(client):
     script = response.get_data(as_text=True)
     assert '"/api/"' in script
     assert "caches.open" in script
+    assert "psy-2-pwa-v2.0.0-rc.3" in script
 
 
 def test_positioning_page(client):
@@ -110,7 +122,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v2.0.0-rc.1"
+    assert payload["data"]["current"] == "v2.0.0-rc.3"
     assert isinstance(payload["data"]["entries"], list)
 
 

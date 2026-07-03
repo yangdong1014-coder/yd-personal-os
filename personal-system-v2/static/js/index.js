@@ -567,9 +567,57 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function valueSignalItem(title, meta, tone = "default") {
+    return `
+      <article class="value-dashboard-item value-signal-item value-signal-${tone}">
+        <strong>${escapeHtml(title || "未命名")}</strong>
+        <span>${escapeHtml(meta || "")}</span>
+      </article>
+    `;
+  }
+
+  function renderValueSignalRows(data) {
+    const pendingValidation = (data.pending_validation || []).map((item) =>
+      valueSignalItem(item.name, `${item.total_score || 0} 分 · 等待 7 天 MVP`, "validate")
+    );
+    const pendingDeposit = [
+      ...(data.pending_deposit || []).map((item) =>
+        valueSignalItem(item.title, `${item.level || ""} · 待沉淀案例资产`, "deposit")
+      ),
+      ...(data.completed_experiments_without_assets || []).map((item) =>
+        valueSignalItem(item.name, `${item.status || ""} · 待沉淀反馈或案例`, "deposit")
+      ),
+    ];
+    const pendingStop = (data.pending_stop_review || []).map((item) =>
+      valueSignalItem(
+        item.name || item.title || "未命名",
+        `${item.status || "有停止条件"} · 待停止观察`,
+        "stop"
+      )
+    );
+    const groups = [
+      ["待验证", pendingValidation, "暂无待验证机会"],
+      ["待沉淀", pendingDeposit, "暂无待沉淀反馈或实验"],
+      ["待停止观察", pendingStop, "暂无暂停/停止观察项"],
+    ];
+    return `
+      <section class="value-dashboard-signals">
+        ${groups.map(([title, items, empty]) => `
+          <div class="value-signal-group">
+            <h3>${escapeHtml(title)}</h3>
+            <div class="value-dashboard-list">
+              ${items.length ? items.slice(0, 4).join("") : `<p class="muted value-dashboard-empty">${escapeHtml(empty)}</p>`}
+            </div>
+          </div>
+        `).join("")}
+      </section>
+    `;
+  }
+
   function renderValueDashboard(data) {
     if (!valueEl) return;
     valueEl.innerHTML = [
+      renderValueSignalRows(data),
       valueList(
         "高分机会",
         data.high_score_opportunities || [],
