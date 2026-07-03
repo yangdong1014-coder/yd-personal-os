@@ -148,6 +148,42 @@
     `;
   }
 
+  function hasContent(value) {
+    return String(value || "").trim().length > 0;
+  }
+
+  function renderKernelTags(item) {
+    const tags = [];
+    if (hasContent(item.hypothesis)) tags.push(["有假设", "positive"]);
+    if (hasContent(item.minimum_action)) tags.push(["有最小行动", "positive"]);
+    if (hasContent(item.failure_criteria)) tags.push(["有失败标准", "warning"]);
+    if (hasContent(item.next_decision)) tags.push(["有下一决策", "muted"]);
+    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+  }
+
+  function renderMvpLayerTag(item) {
+    const type = item.experiment_type || "";
+    let label = "表达 MVP";
+    let tone = "expression";
+    if (type === "交易型MVP") {
+      label = "交易 MVP";
+      tone = "transaction";
+    } else if (type === "反证型MVP") {
+      label = "想法 MVP";
+      tone = "idea";
+    } else if (type === "功能型MVP") {
+      label = "流程 MVP";
+      tone = "process";
+    } else if (type === "结果型MVP" && (hasContent(item.real_feedback) || hasContent(item.data_result))) {
+      label = "流程 MVP";
+      tone = "process";
+    } else if (hasContent(item.minimum_action) && hasContent(item.failure_criteria)) {
+      label = "流程 MVP";
+      tone = "process";
+    }
+    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+  }
+
   async function toggleLinks(el, item) {
     const panel = el.querySelector(".value-link-panel");
     const summary = el.querySelector(".value-link-summary");
@@ -189,6 +225,8 @@
           ${item.real_feedback ? `<span class="tag">已有反馈</span>` : ""}
           ${item.data_result ? `<span class="tag">有结果数据</span>` : ""}
         </div>
+        ${renderMvpLayerTag(item)}
+        <div class="kernel-tag-row">${renderKernelTags(item)}</div>
         <div class="value-link-strip">
           <span class="value-link-summary">关联链路：待查看</span>
           <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>

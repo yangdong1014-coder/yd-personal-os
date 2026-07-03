@@ -617,6 +617,39 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function hasContent(value) {
+    return String(value || "").trim().length > 0;
+  }
+
+  function renderKernelTags(asset) {
+    const tags = [];
+    if (hasContent(asset.evidence)) tags.push(["有证据", "positive"]);
+    if (hasContent(asset.external_expression)) tags.push(["有对外表达", "positive"]);
+    if (hasContent(asset.transferable_scene)) tags.push(["可迁移", "muted"]);
+    if (hasContent(asset.productization_next_step)) tags.push(["有产品化下一步", "warning"]);
+    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+  }
+
+  function renderMvpLayerTag(asset) {
+    const level = normalizedAssetLevel(asset);
+    let label = "资产 MVP 候选";
+    let tone = "asset";
+    if (["案例", "产品", "筹码"].includes(level)) {
+      label = "资产 MVP";
+      tone = "asset";
+    } else if (hasContent(asset.productization_next_step)) {
+      label = "交易 MVP 后续";
+      tone = "transaction";
+    } else if (hasContent(asset.transferable_scene)) {
+      label = "流程 MVP 沉淀";
+      tone = "process";
+    } else if (hasContent(asset.external_expression)) {
+      label = "表达 MVP 沉淀";
+      tone = "expression";
+    }
+    return `<div class="mvp-layer-tag-row asset-mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+  }
+
   function renderAssetArchiveItem(asset) {
     const tagsHtml = (asset.capability_tags || [])
       .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
@@ -641,6 +674,8 @@ document.addEventListener("DOMContentLoaded", () => {
               <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
               <span class="asset-meta-chip">来源 ${escapeHtml(sourceTypeLabel(asset.source_type))}</span>
             </div>
+            ${renderMvpLayerTag(asset)}
+            <div class="kernel-tag-row asset-kernel-tag-row">${renderKernelTags(asset)}</div>
             ${previewLine}
             <p class="asset-archive-preview-line asset-source-title">来源标题：待查看</p>
             ${renderCaseAssetBlock(asset)}
@@ -656,13 +691,38 @@ document.addEventListener("DOMContentLoaded", () => {
         <div class="asset-card-details" hidden>
           ${renderFieldPreview(asset, fieldPreviewEntries)}
           ${valueRows ? `<div class="asset-card-meta-grid asset-detail-meta-grid">${valueRows}</div>` : ""}
-          <div class="asset-ai-actions">
-            <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
-            <button type="button" class="btn btn-sm btn-ai btn-classify">AI归类</button>
-            <button type="button" class="btn btn-sm btn-ai btn-sop">转SOP</button>
-            <button type="button" class="btn btn-sm btn-ai btn-model">转模型</button>
-            <button type="button" class="btn btn-sm btn-ai btn-method">转方法论</button>
-            <button type="button" class="btn btn-sm btn-ai btn-prompt">转提示词</button>
+          <div class="asset-ai-actions module-ai-entry module-ai-entry--inline">
+            <div class="module-ai-entry-header">
+              <span class="module-kernel-label">AI 加速入口</span>
+              <p>已有能力按推进、审查、审计收敛展示。</p>
+            </div>
+            <div class="module-ai-action-groups">
+              <div class="module-ai-action-group">
+                <span class="ai-action-label">AI 推进</span>
+                <div class="module-ai-actions">
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-optimize">AI优化</button>
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-sop">转SOP</button>
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-model">转模型</button>
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-method">转方法论</button>
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-prompt">转提示词</button>
+                </div>
+              </div>
+              <div class="module-ai-action-group">
+                <span class="ai-action-label">AI 对抗性审查</span>
+                <button type="button" class="ai-action-card ai-action-card--disabled" disabled>
+                  <span class="ai-action-note">资产真伪审查待接入</span>
+                </button>
+              </div>
+              <div class="module-ai-action-group">
+                <span class="ai-action-label">AI 审计</span>
+                <div class="module-ai-actions">
+                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-classify">AI归类</button>
+                  <span class="ai-action-card ai-action-card--disabled" aria-disabled="true">
+                    <span class="ai-action-note">资产等级判断待接入</span>
+                  </span>
+                </div>
+              </div>
+            </div>
             <button type="button" class="btn btn-sm btn-ghost btn-delete-asset">删除</button>
           </div>
         </div>

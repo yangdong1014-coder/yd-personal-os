@@ -24,22 +24,76 @@ def inject_globals():
     return {
         "ai_enabled": config.is_ai_enabled(),
         "current_version": changelog.get_current_version(),
+        "nav_groups": NAV_GROUPS,
     }
 
 NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},
+    {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
+    {"endpoint": "goals", "label": "目标", "path": "/goals"},
     {"endpoint": "opportunities", "label": "机会", "path": "/opportunities"},
     {"endpoint": "experiments", "label": "实验", "path": "/experiments"},
     {"endpoint": "feedback_page", "label": "反馈", "path": "/feedback"},
-    {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
-    {"endpoint": "goals", "label": "目标", "path": "/goals"},
-    {"endpoint": "tasks", "label": "任务", "path": "/tasks"},
+    {"endpoint": "tasks", "label": "项目 / 任务", "path": "/tasks"},
     {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
     {"endpoint": "assets", "label": "资产", "path": "/assets"},
     {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
     {"endpoint": "inbox", "label": "智能归档", "path": "/inbox"},
-    {"endpoint": "prompts", "label": "AI管理", "path": "/prompts"},
+    {"endpoint": "prompts", "label": "AI 管理 / 提示词", "path": "/prompts"},
     {"endpoint": "changelog", "label": "版本日志", "path": "/changelog"},
+]
+
+NAV_GROUPS = [
+    {
+        "label": "",
+        "items": [
+            {"endpoint": "index", "label": "首页", "path": "/"},
+        ],
+    },
+    {
+        "label": "战略层",
+        "items": [
+            {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
+            {"endpoint": "goals", "label": "目标", "path": "/goals"},
+        ],
+    },
+    {
+        "label": "价值验证层",
+        "items": [
+            {"endpoint": "opportunities", "label": "机会", "path": "/opportunities"},
+            {"endpoint": "experiments", "label": "实验", "path": "/experiments"},
+            {"endpoint": "feedback_page", "label": "反馈", "path": "/feedback"},
+        ],
+    },
+    {
+        "label": "执行推进层",
+        "items": [
+            {"endpoint": "tasks", "label": "项目 / 任务", "path": "/tasks"},
+            {"endpoint": "reviews", "label": "复盘", "path": "/reviews"},
+        ],
+    },
+    {
+        "label": "资产复利层",
+        "items": [
+            {"endpoint": "assets", "label": "资产", "path": "/assets"},
+            {"endpoint": "capabilities", "label": "能力", "path": "/capabilities"},
+        ],
+    },
+    {
+        "label": "AI 工作台",
+        "muted": True,
+        "items": [
+            {"endpoint": "inbox", "label": "智能归档", "path": "/inbox"},
+            {"endpoint": "prompts", "label": "AI 管理 / 提示词", "path": "/prompts"},
+        ],
+    },
+    {
+        "label": "系统",
+        "muted": True,
+        "items": [
+            {"endpoint": "changelog", "label": "版本日志", "path": "/changelog"},
+        ],
+    },
 ]
 
 

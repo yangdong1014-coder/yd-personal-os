@@ -123,6 +123,39 @@
     `;
   }
 
+  function hasContent(value) {
+    return String(value || "").trim().length > 0;
+  }
+
+  function renderKernelTags(item, strongFeedback) {
+    const tags = [];
+    if (hasContent(item.related_type) && item.related_id) {
+      tags.push(["有上游链路", "muted"]);
+    } else {
+      tags.push(["待关联对象", "warning"]);
+    }
+    if (hasContent(item.next_action)) tags.push(["有后续动作", "positive"]);
+    if (hasContent(item.evidence) && !strongFeedback) tags.push(["待证据升级", "warning"]);
+    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+  }
+
+  function renderMvpLayerTag(item) {
+    const level = item.level || "";
+    let label = "想法 MVP 信号";
+    let tone = "idea";
+    if (level.startsWith("L4") || level.startsWith("L5")) {
+      label = "交易 MVP 信号";
+      tone = "transaction";
+    } else if (level.startsWith("L3")) {
+      label = "流程 MVP 信号";
+      tone = "process";
+    } else if (level.startsWith("L2")) {
+      label = "表达 MVP 信号";
+      tone = "expression";
+    }
+    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+  }
+
   async function toggleLinks(el, item) {
     const panel = el.querySelector(".value-link-panel");
     const summary = el.querySelector(".value-link-summary");
@@ -163,6 +196,8 @@
           ${item.evidence ? `<span class="tag">有证据</span>` : ""}
           ${strongFeedback ? `<span class="tag">强反馈：适合沉淀为案例资产</span>` : ""}
         </div>
+        ${renderMvpLayerTag(item)}
+        <div class="kernel-tag-row">${renderKernelTags(item, strongFeedback)}</div>
         <div class="value-link-strip">
           <span class="value-link-summary">已生成案例资产：待查看</span>
           <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
