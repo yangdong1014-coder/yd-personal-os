@@ -514,6 +514,58 @@ document.addEventListener("DOMContentLoaded", () => {
       .filter(Boolean);
   }
 
+  function sourceTypeLabel(type) {
+    return ({
+      feedback: "feedback",
+      opportunity: "opportunity",
+      experiment: "experiment",
+      review: "review",
+      manual: "manual",
+    })[type || ""] || "manual";
+  }
+
+  function renderAssetLinks(links) {
+    const upstream = links.upstream || {};
+    const sourceTitle = links.source?.title || links.source?.name || links.source?.review_date || "未解析";
+    const upstreamItems = [
+      upstream.feedback ? `反馈：${upstream.feedback.title}` : "",
+      upstream.experiment ? `实验：${upstream.experiment.name}` : "",
+      upstream.opportunity ? `机会：${upstream.opportunity.name}` : "",
+    ].filter(Boolean);
+    return `
+      <div class="value-link-counts">
+        <span>来源类型：${escapeHtml(links.source_type || "manual")}</span>
+        <span>来源标题：${escapeHtml(sourceTitle)}</span>
+      </div>
+      ${upstreamItems.length ? `<div class="value-link-row"><strong>上游</strong><span>${escapeHtml(upstreamItems.join(" · "))}</span></div>` : `<div class="value-link-row"><strong>上游</strong><span>暂无关联</span></div>`}
+    `;
+  }
+
+  async function toggleAssetLinks(itemEl, asset) {
+    const button = itemEl.querySelector(".btn-links");
+    const panel = itemEl.querySelector(".value-link-panel");
+    const sourceTitleEl = itemEl.querySelector(".asset-source-title");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "查看链路";
+      panel.hidden = true;
+      return;
+    }
+    button.setAttribute("aria-expanded", "true");
+    button.textContent = "收起链路";
+    panel.hidden = false;
+    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    try {
+      const links = await apiRequest(`/api/assets/${asset.id}/links`);
+      const sourceTitle = links.source?.title || links.source?.name || links.source?.review_date || "未解析";
+      sourceTitleEl.textContent = `来源标题：${sourceTitle}`;
+      panel.innerHTML = renderAssetLinks(links);
+    } catch (err) {
+      panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
   function renderAssetArchiveItem(asset) {
     const tagsHtml = (asset.capability_tags || [])
       .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
@@ -533,15 +585,19 @@ document.addEventListener("DOMContentLoaded", () => {
               ${tagsHtml ? `<span class="asset-archive-tags-inline">${tagsHtml}</span>` : ""}
               <span class="asset-meta-chip">复用 ${asset.reuse_count || 0}</span>
               <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
+              <span class="asset-meta-chip">来源 ${escapeHtml(sourceTypeLabel(asset.source_type))}</span>
             </div>
             ${previewLine}
+            <p class="asset-archive-preview-line asset-source-title">来源标题：待查看</p>
           </div>
           <div class="asset-archive-item-actions">
             <button type="button" class="btn btn-sm btn-ghost btn-edit-asset">编辑</button>
             <button type="button" class="btn btn-sm btn-ghost btn-reuse" title="记录一次复用">+复用</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
             <button type="button" class="btn btn-sm btn-ghost btn-toggle-asset" aria-expanded="false">展开</button>
           </div>
         </div>
+        <div class="value-link-panel" hidden></div>
         <div class="asset-card-details" hidden>
           ${renderFieldPreview(asset, fieldPreviewEntries)}
           <div class="asset-card-meta-grid asset-detail-meta-grid">
@@ -591,6 +647,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     itemEl.querySelector(".btn-reuse").addEventListener("click", (e) => {
       handleReuse(asset, e.currentTarget);
+    });
+    itemEl.querySelector(".btn-links").addEventListener("click", () => {
+      toggleAssetLinks(itemEl, asset).catch((err) => showToast(err.message, "error"));
     });
     itemEl.querySelector(".btn-optimize").addEventListener("click", (e) => {
       handleAIOptimize(asset, e.currentTarget);

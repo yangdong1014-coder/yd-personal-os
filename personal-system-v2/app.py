@@ -435,6 +435,14 @@ def api_delete_opportunity(opportunity_id):
         return _error(str(exc), 409)
 
 
+@app.route("/api/opportunities/<int:opportunity_id>/links", methods=["GET"])
+def api_opportunity_links(opportunity_id):
+    try:
+        return jsonify({"ok": True, "data": database.get_opportunity_links(opportunity_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+
+
 @app.route("/api/experiments", methods=["GET"])
 def api_list_experiments():
     return jsonify({"ok": True, "data": database.list_experiments()})
@@ -470,6 +478,14 @@ def api_delete_experiment(experiment_id):
         return _error(str(exc), 404)
     except database.DeleteError as exc:
         return _error(str(exc), 409)
+
+
+@app.route("/api/experiments/<int:experiment_id>/links", methods=["GET"])
+def api_experiment_links(experiment_id):
+    try:
+        return jsonify({"ok": True, "data": database.get_experiment_links(experiment_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
 
 
 @app.route("/api/feedback", methods=["GET"])
@@ -521,6 +537,14 @@ def api_create_asset_from_feedback(feedback_id):
         return _error(str(exc), status)
     except TypeError as exc:
         return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/feedback/<int:feedback_id>/links", methods=["GET"])
+def api_feedback_links(feedback_id):
+    try:
+        return jsonify({"ok": True, "data": database.get_feedback_links(feedback_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
 
 
 @app.route("/api/export", methods=["GET"])
@@ -691,6 +715,14 @@ def api_update_asset(asset_id):
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
         return _error(str(exc))
+
+
+@app.route("/api/assets/<int:asset_id>/links", methods=["GET"])
+def api_asset_links(asset_id):
+    try:
+        return jsonify({"ok": True, "data": database.get_asset_links(asset_id)})
+    except ValueError as exc:
+        return _error(str(exc), 404)
 
 
 @app.route("/api/assets/<int:asset_id>/reuse", methods=["POST"])

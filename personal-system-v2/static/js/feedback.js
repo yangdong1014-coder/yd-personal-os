@@ -84,6 +84,69 @@
     await load();
   }
 
+  function relationLabel(item) {
+    if (!item.related_type) return "无";
+    const names = {
+      opportunity: "机会",
+      experiment: "实验",
+      project: "项目",
+      asset: "资产",
+      review: "复盘",
+    };
+    return `${names[item.related_type] || item.related_type} #${item.related_id || ""}`.trim();
+  }
+
+  function linkList(title, items, labelKey) {
+    if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
+    return `
+      <div class="value-link-row">
+        <strong>${title}</strong>
+        <ul>${items.map((row) => `<li>${escapeHtml(row[labelKey] || row.title || row.name || `#${row.id}`)}</li>`).join("")}</ul>
+      </div>
+    `;
+  }
+
+  function renderLinks(links) {
+    const upstream = links.upstream || {};
+    const upstreamItems = [
+      upstream.opportunity ? `机会：${upstream.opportunity.name}` : "",
+      upstream.experiment ? `实验：${upstream.experiment.name}` : "",
+      upstream.project ? `项目：${upstream.project.name}` : "",
+    ].filter(Boolean);
+    return `
+      <div class="value-link-counts">
+        <span>关联对象：${escapeHtml(links.related?.name || links.related?.title || "无")}</span>
+        <span>案例资产 ${links.counts?.assets || 0}</span>
+      </div>
+      ${upstreamItems.length ? `<div class="value-link-row"><strong>上游</strong><span>${escapeHtml(upstreamItems.join(" · "))}</span></div>` : ""}
+      ${linkList("案例资产", links.assets || [], "title")}
+    `;
+  }
+
+  async function toggleLinks(el, item) {
+    const panel = el.querySelector(".value-link-panel");
+    const summary = el.querySelector(".value-link-summary");
+    const button = el.querySelector(".btn-links");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "查看链路";
+      panel.hidden = true;
+      return;
+    }
+    button.setAttribute("aria-expanded", "true");
+    button.textContent = "收起链路";
+    panel.hidden = false;
+    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    try {
+      const links = await apiRequest(`/api/feedback/${item.id}/links`);
+      summary.textContent = `关联对象：${links.related?.name || links.related?.title || relationLabel(item)} · 案例资产 ${links.counts?.assets || 0}`;
+      panel.innerHTML = renderLinks(links);
+    } catch (err) {
+      panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
   function card(item) {
     const strongFeedback = isStrongFeedback(item);
     return `
@@ -96,10 +159,15 @@
         </div>
         <p class="value-card-summary">${formatText(item.content || item.evidence || "暂无反馈内容")}</p>
         <div class="value-card-meta">
-          ${item.related_type ? `<span class="tag">${escapeHtml(item.related_type)} #${escapeHtml(item.related_id || "")}</span>` : ""}
+          <span class="tag">关联对象：${escapeHtml(relationLabel(item))}</span>
           ${item.evidence ? `<span class="tag">有证据</span>` : ""}
           ${strongFeedback ? `<span class="tag">强反馈：适合沉淀为案例资产</span>` : ""}
         </div>
+        <div class="value-link-strip">
+          <span class="value-link-summary">已生成案例资产：待查看</span>
+          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
+        </div>
+        <div class="value-link-panel" hidden></div>
         <div class="entity-actions">
           <button type="button" class="btn btn-sm btn-primary btn-create-asset">生成案例资产</button>
           <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
@@ -118,6 +186,9 @@
     listEl.innerHTML = items.map(card).join("");
     listEl.querySelectorAll(".value-card").forEach((el) => {
       const item = items.find((row) => row.id === Number(el.dataset.id));
+      el.querySelector(".btn-links").addEventListener("click", () => {
+        toggleLinks(el, item).catch((err) => showToast(err.message, "error"));
+      });
       el.querySelector(".btn-create-asset").addEventListener("click", () => {
         createCaseAsset(item).catch((err) => showToast(err.message, "error"));
       });

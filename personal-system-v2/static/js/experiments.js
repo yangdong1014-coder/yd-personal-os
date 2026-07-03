@@ -94,6 +94,52 @@
     showToast("已生成反馈记录", "success");
   }
 
+  function linkList(title, items, labelKey) {
+    if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
+    return `
+      <div class="value-link-row">
+        <strong>${title}</strong>
+        <ul>${items.map((row) => `<li>${escapeHtml(row[labelKey] || row.title || row.name || `#${row.id}`)}</li>`).join("")}</ul>
+      </div>
+    `;
+  }
+
+  function renderLinks(links) {
+    return `
+      <div class="value-link-counts">
+        <span>来源机会：${escapeHtml(links.opportunity?.name || "无")}</span>
+        <span>反馈 ${links.counts?.feedback || 0}</span>
+        <span>案例资产 ${links.counts?.assets || 0}</span>
+      </div>
+      ${linkList("反馈", links.feedback || [], "title")}
+      ${linkList("案例资产", links.assets || [], "title")}
+    `;
+  }
+
+  async function toggleLinks(el, item) {
+    const panel = el.querySelector(".value-link-panel");
+    const summary = el.querySelector(".value-link-summary");
+    const button = el.querySelector(".btn-links");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "查看链路";
+      panel.hidden = true;
+      return;
+    }
+    button.setAttribute("aria-expanded", "true");
+    button.textContent = "收起链路";
+    panel.hidden = false;
+    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    try {
+      const links = await apiRequest(`/api/experiments/${item.id}/links`);
+      summary.textContent = `来源机会：${links.opportunity?.name || "无"} · 反馈 ${links.counts?.feedback || 0} · 案例资产 ${links.counts?.assets || 0}`;
+      panel.innerHTML = renderLinks(links);
+    } catch (err) {
+      panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
   function card(item) {
     return `
       <article class="entity-card value-card" data-id="${item.id}">
@@ -105,10 +151,16 @@
         </div>
         <p class="value-card-summary">${formatText(item.hypothesis || item.minimum_action || "暂无实验假设")}</p>
         <div class="value-card-meta">
+          <span class="tag">来源机会：${escapeHtml(item.opportunity_name || "无")}</span>
           ${item.success_criteria ? `<span class="tag">成功标准</span>` : ""}
           ${item.real_feedback ? `<span class="tag">已有反馈</span>` : ""}
           ${item.data_result ? `<span class="tag">有结果数据</span>` : ""}
         </div>
+        <div class="value-link-strip">
+          <span class="value-link-summary">关联链路：待查看</span>
+          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
+        </div>
+        <div class="value-link-panel" hidden></div>
         <div class="entity-actions">
           <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-feedback">生成反馈</button>
@@ -131,6 +183,7 @@
     listEl.innerHTML = items.map(card).join("");
     listEl.querySelectorAll(".value-card").forEach((el) => {
       const item = items.find((row) => row.id === Number(el.dataset.id));
+      el.querySelector(".btn-links").addEventListener("click", () => toggleLinks(el, item));
       el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
       el.querySelector(".btn-feedback").addEventListener("click", () => createFeedback(item));
       el.querySelector(".btn-delete").addEventListener("click", async () => {

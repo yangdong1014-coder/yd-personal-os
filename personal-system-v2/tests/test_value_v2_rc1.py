@@ -268,6 +268,110 @@ def test_strong_feedback_can_generate_case_asset_with_default_next_step(client):
     assert asset["source_id"] == feedback["id"]
 
 
+def test_value_chain_links_across_opportunity_experiment_feedback_asset(client):
+    opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "链路机会", "status": "值得测试"},
+    ).get_json()["data"]
+    experiment = client.post(
+        "/api/experiments",
+        json={
+            "opportunity_id": opportunity["id"],
+            "name": "链路实验",
+            "status": "进行中",
+        },
+    ).get_json()["data"]
+    feedback = client.post(
+        "/api/feedback",
+        json={
+            "title": "链路反馈",
+            "related_type": "experiment",
+            "related_id": experiment["id"],
+            "source": "客户反馈",
+            "level": "L4 产生可量化结果",
+            "content": "客户愿意继续试用",
+            "evidence": "给出明确改进建议",
+        },
+    ).get_json()["data"]
+    asset = client.post(f"/api/feedback/{feedback['id']}/asset").get_json()["data"]
+
+    opportunity_links = client.get(
+        f"/api/opportunities/{opportunity['id']}/links"
+    ).get_json()["data"]
+    assert opportunity_links["opportunity"]["id"] == opportunity["id"]
+    assert [item["id"] for item in opportunity_links["experiments"]] == [experiment["id"]]
+    assert [item["id"] for item in opportunity_links["feedback"]] == [feedback["id"]]
+    assert [item["id"] for item in opportunity_links["assets"]] == [asset["id"]]
+    assert opportunity_links["counts"] == {"experiments": 1, "feedback": 1, "assets": 1}
+
+    experiment_links = client.get(
+        f"/api/experiments/{experiment['id']}/links"
+    ).get_json()["data"]
+    assert experiment_links["experiment"]["id"] == experiment["id"]
+    assert experiment_links["opportunity"]["id"] == opportunity["id"]
+    assert [item["id"] for item in experiment_links["feedback"]] == [feedback["id"]]
+    assert [item["id"] for item in experiment_links["assets"]] == [asset["id"]]
+
+    feedback_links = client.get(
+        f"/api/feedback/{feedback['id']}/links"
+    ).get_json()["data"]
+    assert feedback_links["feedback"]["id"] == feedback["id"]
+    assert feedback_links["related_type"] == "experiment"
+    assert feedback_links["related"]["id"] == experiment["id"]
+    assert feedback_links["upstream"]["opportunity"]["id"] == opportunity["id"]
+    assert [item["id"] for item in feedback_links["assets"]] == [asset["id"]]
+
+    asset_links = client.get(f"/api/assets/{asset['id']}/links").get_json()["data"]
+    assert asset_links["asset"]["id"] == asset["id"]
+    assert asset_links["source_type"] == "feedback"
+    assert asset_links["source"]["id"] == feedback["id"]
+    assert asset_links["upstream"]["feedback"]["id"] == feedback["id"]
+    assert asset_links["upstream"]["experiment"]["id"] == experiment["id"]
+    assert asset_links["upstream"]["opportunity"]["id"] == opportunity["id"]
+
+
+def test_value_links_return_empty_arrays_without_related_data(client):
+    opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "孤立机会"},
+    ).get_json()["data"]
+    experiment = client.post(
+        "/api/experiments",
+        json={"name": "孤立实验"},
+    ).get_json()["data"]
+    feedback = client.post(
+        "/api/feedback",
+        json={"title": "孤立反馈"},
+    ).get_json()["data"]
+
+    opportunity_links = client.get(
+        f"/api/opportunities/{opportunity['id']}/links"
+    ).get_json()["data"]
+    assert opportunity_links["experiments"] == []
+    assert opportunity_links["feedback"] == []
+    assert opportunity_links["assets"] == []
+
+    experiment_links = client.get(
+        f"/api/experiments/{experiment['id']}/links"
+    ).get_json()["data"]
+    assert experiment_links["opportunity"] is None
+    assert experiment_links["feedback"] == []
+    assert experiment_links["assets"] == []
+
+    feedback_links = client.get(
+        f"/api/feedback/{feedback['id']}/links"
+    ).get_json()["data"]
+    assert feedback_links["related"] is None
+    assert feedback_links["assets"] == []
+
+
+def test_value_links_return_404_for_missing_records(client):
+    assert client.get("/api/opportunities/999999/links").status_code == 404
+    assert client.get("/api/experiments/999999/links").status_code == 404
+    assert client.get("/api/feedback/999999/links").status_code == 404
+    assert client.get("/api/assets/999999/links").status_code == 404
+
+
 def test_project_audit_fields_preserve_old_project(client):
     goal = client.post("/api/goals", json={"name": "目标", "type": "年度"}).get_json()["data"]
     project = client.post("/api/projects", json={"goal_id": goal["id"], "name": "项目"}).get_json()["data"]

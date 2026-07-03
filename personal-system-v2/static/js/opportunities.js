@@ -174,6 +174,53 @@
     });
   }
 
+  function linkList(title, items, labelKey) {
+    if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
+    return `
+      <div class="value-link-row">
+        <strong>${title}</strong>
+        <ul>${items.map((row) => `<li>${escapeHtml(row[labelKey] || row.title || row.name || `#${row.id}`)}</li>`).join("")}</ul>
+      </div>
+    `;
+  }
+
+  function renderLinks(links) {
+    return `
+      <div class="value-link-counts">
+        <span>实验 ${links.counts?.experiments || 0}</span>
+        <span>反馈 ${links.counts?.feedback || 0}</span>
+        <span>案例资产 ${links.counts?.assets || 0}</span>
+      </div>
+      ${linkList("实验", links.experiments || [], "name")}
+      ${linkList("反馈", links.feedback || [], "title")}
+      ${linkList("案例资产", links.assets || [], "title")}
+    `;
+  }
+
+  async function toggleLinks(el, item) {
+    const panel = el.querySelector(".value-link-panel");
+    const summary = el.querySelector(".value-link-summary");
+    const button = el.querySelector(".btn-links");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "查看链路";
+      panel.hidden = true;
+      return;
+    }
+    button.setAttribute("aria-expanded", "true");
+    button.textContent = "收起链路";
+    panel.hidden = false;
+    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    try {
+      const links = await apiRequest(`/api/opportunities/${item.id}/links`);
+      summary.textContent = `关联链路：实验 ${links.counts?.experiments || 0} · 反馈 ${links.counts?.feedback || 0} · 案例资产 ${links.counts?.assets || 0}`;
+      panel.innerHTML = renderLinks(links);
+    } catch (err) {
+      panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
   function card(item) {
     const total = Number(item.total_score || 0);
     return `
@@ -190,6 +237,11 @@
           <span class="tag">${escapeHtml(advice(total))}</span>
           ${item.target_user ? `<span class="tag">${escapeHtml(item.target_user)}</span>` : ""}
         </div>
+        <div class="value-link-strip">
+          <span class="value-link-summary">关联链路：待查看</span>
+          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
+        </div>
+        <div class="value-link-panel" hidden></div>
         <div class="entity-actions">
           <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-create-exp">创建实验</button>
@@ -208,6 +260,7 @@
     listEl.innerHTML = items.map(card).join("");
     listEl.querySelectorAll(".value-card").forEach((el) => {
       const item = items.find((row) => row.id === Number(el.dataset.id));
+      el.querySelector(".btn-links").addEventListener("click", () => toggleLinks(el, item));
       el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
       el.querySelector(".btn-create-exp").addEventListener("click", () => createExperiment(item));
       el.querySelector(".btn-delete").addEventListener("click", async () => {

@@ -235,6 +235,52 @@ html.theme-dark-warm {
   gap: 8px;
 }
 
+.value-link-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.value-link-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.value-link-counts,
+.value-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.value-link-counts span {
+  color: var(--text);
+}
+
+.value-link-row strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.value-link-row ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .value-score-field {
   display: grid;
   gap: 4px;

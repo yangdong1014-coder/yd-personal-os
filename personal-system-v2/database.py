@@ -3630,6 +3630,254 @@ def delete_feedback_item(feedback_id):
     return _delete_entity("feedback_items", feedback_id, "反馈")
 
 
+def _brief_item(item, fields):
+    if not item:
+        return None
+    return {field: item.get(field) for field in fields if field in item}
+
+
+def _brief_opportunity(item):
+    return _brief_item(
+        item,
+        ("id", "name", "status", "source", "total_score", "next_action"),
+    )
+
+
+def _brief_experiment(item):
+    return _brief_item(
+        item,
+        (
+            "id",
+            "opportunity_id",
+            "opportunity_name",
+            "name",
+            "status",
+            "experiment_type",
+            "next_decision",
+        ),
+    )
+
+
+def _brief_feedback(item):
+    return _brief_item(
+        item,
+        (
+            "id",
+            "related_type",
+            "related_id",
+            "title",
+            "source",
+            "level",
+            "next_action",
+        ),
+    )
+
+
+def _brief_asset(item):
+    return _brief_item(
+        item,
+        (
+            "id",
+            "title",
+            "asset_type",
+            "asset_level",
+            "source_type",
+            "source_id",
+            "maturity",
+        ),
+    )
+
+
+def _feedback_for_related(related_type, related_id):
+    return [
+        item for item in list_feedback_items()
+        if item.get("related_type") == related_type and item.get("related_id") == related_id
+    ]
+
+
+def _assets_for_source(source_type, source_ids):
+    ids = {int(source_id) for source_id in source_ids if source_id is not None}
+    if not ids:
+        return []
+    return [
+        item for item in list_assets()
+        if item.get("source_type") == source_type and item.get("source_id") in ids
+    ]
+
+
+def _source_object(source_type, source_id):
+    if source_id in (None, ""):
+        return None
+    try:
+        source_id = int(source_id)
+    except (TypeError, ValueError):
+        return None
+    if source_type == "feedback":
+        return _brief_feedback(get_feedback_item(source_id))
+    if source_type == "opportunity":
+        return _brief_opportunity(get_opportunity(source_id))
+    if source_type == "experiment":
+        return _brief_experiment(get_experiment(source_id))
+    if source_type == "review":
+        return _brief_item(get_review(source_id), ("id", "review_date", "type", "depositable"))
+    return None
+
+
+def get_opportunity_links(opportunity_id):
+    opportunity = get_opportunity(opportunity_id)
+    if not opportunity:
+        raise ValueError("机会不存在")
+    experiments = [
+        item for item in list_experiments()
+        if item.get("opportunity_id") == opportunity_id
+    ]
+    experiment_ids = {item["id"] for item in experiments}
+    feedback = [
+        item for item in list_feedback_items()
+        if (
+            item.get("related_type") == "opportunity"
+            and item.get("related_id") == opportunity_id
+        )
+        or (
+            item.get("related_type") == "experiment"
+            and item.get("related_id") in experiment_ids
+        )
+    ]
+    feedback_ids = {item["id"] for item in feedback}
+    assets = [
+        item for item in list_assets()
+        if (
+            item.get("source_type") == "opportunity"
+            and item.get("source_id") == opportunity_id
+        )
+        or (
+            item.get("source_type") == "feedback"
+            and item.get("source_id") in feedback_ids
+        )
+    ]
+    return {
+        "opportunity": _brief_opportunity(opportunity),
+        "experiments": [_brief_experiment(item) for item in experiments],
+        "feedback": [_brief_feedback(item) for item in feedback],
+        "assets": [_brief_asset(item) for item in assets],
+        "counts": {
+            "experiments": len(experiments),
+            "feedback": len(feedback),
+            "assets": len(assets),
+        },
+    }
+
+
+def get_experiment_links(experiment_id):
+    experiment = get_experiment(experiment_id)
+    if not experiment:
+        raise ValueError("实验不存在")
+    opportunity = (
+        get_opportunity(experiment.get("opportunity_id"))
+        if experiment.get("opportunity_id")
+        else None
+    )
+    feedback = _feedback_for_related("experiment", experiment_id)
+    feedback_ids = {item["id"] for item in feedback}
+    assets = [
+        item for item in list_assets()
+        if (
+            item.get("source_type") == "experiment"
+            and item.get("source_id") == experiment_id
+        )
+        or (
+            item.get("source_type") == "feedback"
+            and item.get("source_id") in feedback_ids
+        )
+    ]
+    return {
+        "experiment": _brief_experiment(experiment),
+        "opportunity": _brief_opportunity(opportunity),
+        "feedback": [_brief_feedback(item) for item in feedback],
+        "assets": [_brief_asset(item) for item in assets],
+        "counts": {
+            "feedback": len(feedback),
+            "assets": len(assets),
+        },
+    }
+
+
+def get_feedback_links(feedback_id):
+    feedback = get_feedback_item(feedback_id)
+    if not feedback:
+        raise ValueError("反馈不存在")
+    related_type = feedback.get("related_type") or ""
+    related_id = feedback.get("related_id")
+    related = None
+    upstream = {}
+    if related_type == "opportunity":
+        related = _brief_opportunity(get_opportunity(related_id))
+        upstream["opportunity"] = related
+    elif related_type == "experiment":
+        experiment = get_experiment(related_id)
+        related = _brief_experiment(experiment)
+        upstream["experiment"] = related
+        if experiment and experiment.get("opportunity_id"):
+            upstream["opportunity"] = _brief_opportunity(
+                get_opportunity(experiment.get("opportunity_id"))
+            )
+    elif related_type == "project":
+        related = _brief_item(get_project(related_id), ("id", "name", "status", "priority"))
+        upstream["project"] = related
+    elif related_type == "asset":
+        related = _brief_asset(get_asset(related_id))
+        upstream["asset"] = related
+    assets = _assets_for_source("feedback", [feedback_id])
+    return {
+        "feedback": _brief_feedback(feedback),
+        "related_type": related_type,
+        "related": related,
+        "upstream": upstream,
+        "assets": [_brief_asset(item) for item in assets],
+        "counts": {"assets": len(assets)},
+    }
+
+
+def get_asset_links(asset_id):
+    asset = get_asset(asset_id)
+    if not asset:
+        raise ValueError("资产不存在")
+    source_type = asset.get("source_type") or ""
+    source_id = asset.get("source_id")
+    source = _source_object(source_type, source_id)
+    upstream = {}
+    if source_type == "feedback" and source_id:
+        feedback = get_feedback_item(source_id)
+        upstream["feedback"] = _brief_feedback(feedback)
+        if feedback:
+            related_type = feedback.get("related_type") or ""
+            related_id = feedback.get("related_id")
+            if related_type == "experiment":
+                experiment = get_experiment(related_id)
+                upstream["experiment"] = _brief_experiment(experiment)
+                if experiment and experiment.get("opportunity_id"):
+                    upstream["opportunity"] = _brief_opportunity(
+                        get_opportunity(experiment.get("opportunity_id"))
+                    )
+            elif related_type == "opportunity":
+                upstream["opportunity"] = _brief_opportunity(get_opportunity(related_id))
+    elif source_type == "experiment" and source_id:
+        experiment = get_experiment(source_id)
+        upstream["experiment"] = _brief_experiment(experiment)
+        if experiment and experiment.get("opportunity_id"):
+            upstream["opportunity"] = _brief_opportunity(
+                get_opportunity(experiment.get("opportunity_id"))
+            )
+    elif source_type == "opportunity" and source_id:
+        upstream["opportunity"] = _brief_opportunity(get_opportunity(source_id))
+    return {
+        "asset": _brief_asset(asset),
+        "source_type": source_type,
+        "source": source,
+        "upstream": upstream,
+    }
+
+
 def get_value_dashboard():
     opportunities = [
         item for item in list_opportunities()
