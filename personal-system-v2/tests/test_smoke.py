@@ -49,8 +49,17 @@ def test_base_template_has_compact_theme_toggle(client):
     assert 'class="nav-export-label theme-toggle__label"' in html
     assert 'aria-label="当前外观：深色暖色，点击切换"' in html
     assert 'title="当前外观：深色暖色，点击切换"' in html
-    assert ">暖色</span>" in html
     assert "外观：深色暖色</span>" not in html
+
+
+def test_theme_toggle_css_keeps_button_chrome_minimal():
+    css = (PROJECT_ROOT / "static" / "css" / "main.css").read_text(encoding="utf-8")
+    assert ".theme-toggle {" in css
+    assert "background: transparent;" in css
+    assert "box-shadow: none;" in css
+    assert ".theme-toggle__label {\n  display: none;" in css
+    assert "width: 22px;" in css
+    assert "height: 22px;" in css
 
 
 def test_main_js_updates_theme_toggle_accessible_label():
@@ -101,7 +110,7 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v1.19.6"
+    assert payload["data"]["current"] == "v1.19.7"
     assert isinstance(payload["data"]["entries"], list)
 
 
