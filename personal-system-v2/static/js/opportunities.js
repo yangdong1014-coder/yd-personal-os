@@ -174,6 +174,28 @@
     });
   }
 
+  function disciplineForStatus(status) {
+    if (status === "值得测试") {
+      return { className: "value-success", text: "建议进入 7 天 MVP 验证。" };
+    }
+    if (status === "暂停" || status === "观察") {
+      return { className: "value-pause", text: "暂停观察：等待更强反馈或更低成本测试方式。" };
+    }
+    if (status === "删除" || status === "停止") {
+      return { className: "value-stop", text: "已停止：不再投入新资源，除非出现新证据。" };
+    }
+    if (status === "已转项目" || status === "已转化") {
+      return { className: "value-success", text: "已转化：应沉淀为实验、案例或资产。" };
+    }
+    return null;
+  }
+
+  function renderDiscipline(status) {
+    const discipline = disciplineForStatus(status);
+    if (!discipline) return "";
+    return `<div class="value-discipline ${discipline.className}">${escapeHtml(discipline.text)}</div>`;
+  }
+
   function linkList(title, items, labelKey) {
     if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
     return `
@@ -233,6 +255,7 @@
           <span class="value-score-badge">${total}</span>
         </div>
         <p class="value-card-summary">${formatText(item.description || item.related_context || "暂无描述")}</p>
+        ${renderDiscipline(item.status)}
         <div class="value-card-meta">
           <span class="tag">${escapeHtml(advice(total))}</span>
           ${item.target_user ? `<span class="tag">${escapeHtml(item.target_user)}</span>` : ""}

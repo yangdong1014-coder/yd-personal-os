@@ -494,6 +494,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return level;
   }
 
+  function assetDeleteConfirmMessage(asset) {
+    const level = normalizedAssetLevel(asset);
+    if (["案例", "产品", "筹码"].includes(level)) {
+      return `这是高价值资产「${asset.title}」，删除前请确认是否已备份或沉淀到其他位置。\n\n此操作不可恢复，确认删除？`;
+    }
+    return `确认删除资产「${asset.title}」？此操作不可恢复。`;
+  }
+
   function matchesActiveLevel(asset) {
     if (!activeLevel) return true;
     return normalizedAssetLevel(asset) === activeLevel;
@@ -677,7 +685,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     itemEl.querySelector(".btn-delete-asset").addEventListener("click", async () => {
-      if (!window.confirm(`确定删除资产「${asset.title}」？此操作不可撤销。`)) return;
+      if (!window.confirm(assetDeleteConfirmMessage(asset))) return;
       try {
         await apiRequest(`/api/assets/${asset.id}`, { method: "DELETE" });
         showToast("资产已删除", "success");

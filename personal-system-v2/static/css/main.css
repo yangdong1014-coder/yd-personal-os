@@ -281,6 +281,50 @@ html.theme-dark-warm {
   padding-left: 18px;
 }
 
+.value-discipline-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.value-discipline {
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.value-discipline strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.value-warning {
+  border-color: rgba(221, 168, 78, 0.28);
+  background: rgba(221, 168, 78, 0.08);
+}
+
+.value-stop {
+  border-color: rgba(220, 92, 92, 0.26);
+  background: rgba(220, 92, 92, 0.07);
+}
+
+.value-pause {
+  border-color: rgba(132, 150, 170, 0.28);
+  background: rgba(132, 150, 170, 0.08);
+}
+
+.value-success {
+  border-color: rgba(44, 196, 111, 0.24);
+  background: rgba(44, 196, 111, 0.07);
+}
+
+.goal-project-discipline {
+  margin: 0.45rem 0 0.55rem 1.15rem;
+}
+
 .value-score-field {
   display: grid;
   gap: 4px;

@@ -94,6 +94,38 @@
     showToast("已生成反馈记录", "success");
   }
 
+  function disciplineForExperiment(item) {
+    const status = item.status || "";
+    if (["停止", "已停止", "失败", "未验证", "已暂停"].includes(status)) {
+      return { className: "value-stop", text: "实验已停止：请记录失败原因并沉淀复盘。" };
+    }
+    if (status === "进行中" && item.failure_criteria) {
+      return { className: "value-warning", text: "请按失败标准判断是否继续投入。" };
+    }
+    if (["已完成", "成功", "已验证"].includes(status)) {
+      return { className: "value-success", text: "实验已完成：建议沉淀反馈或案例资产。" };
+    }
+    return null;
+  }
+
+  function renderExperimentDiscipline(item) {
+    const rows = [];
+    if (item.success_criteria) rows.push(["成功标准", item.success_criteria]);
+    if (item.failure_criteria) rows.push(["失败标准 / 停止条件", item.failure_criteria]);
+    const discipline = disciplineForExperiment(item);
+    if (!rows.length && !discipline) return "";
+    return `
+      <div class="value-discipline-stack">
+        ${discipline ? `<div class="value-discipline ${discipline.className}">${escapeHtml(discipline.text)}</div>` : ""}
+        ${rows.map(([label, value]) => `
+          <div class="value-discipline value-warning">
+            <strong>${escapeHtml(label)}：</strong>${formatText(value)}
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function linkList(title, items, labelKey) {
     if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
     return `
@@ -150,6 +182,7 @@
           </div>
         </div>
         <p class="value-card-summary">${formatText(item.hypothesis || item.minimum_action || "暂无实验假设")}</p>
+        ${renderExperimentDiscipline(item)}
         <div class="value-card-meta">
           <span class="tag">来源机会：${escapeHtml(item.opportunity_name || "无")}</span>
           ${item.success_criteria ? `<span class="tag">成功标准</span>` : ""}

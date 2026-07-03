@@ -441,3 +441,70 @@ def test_health_and_homepage_for_value_rc1(client):
     html = home.get_data(as_text=True)
     assert "PSY-2.0 价值实验" in html
     assert "审计机会" in html
+
+
+def test_value_discipline_pages_render(client):
+    for path in ("/opportunities", "/experiments", "/goals", "/assets"):
+        response = client.get(path)
+        assert response.status_code == 200
+
+
+def test_project_value_discipline_fields_do_not_break_project_api(client):
+    goal = client.post("/api/goals", json={"name": "纪律目标", "type": "年度"}).get_json()["data"]
+    project = client.post(
+        "/api/projects",
+        json={"goal_id": goal["id"], "name": "纪律项目"},
+    ).get_json()["data"]
+
+    updated = client.patch(
+        f"/api/projects/{project['id']}",
+        json={
+            "stop_condition": "连续两周无真实反馈则停止",
+            "disconfirming_signal": "用户不愿意试用",
+            "value_capture": "形成可对外展示案例",
+        },
+    )
+    assert updated.status_code == 200
+    data = updated.get_json()["data"]
+    assert data["stop_condition"] == "连续两周无真实反馈则停止"
+    assert data["disconfirming_signal"] == "用户不愿意试用"
+    assert data["value_capture"] == "形成可对外展示案例"
+
+
+def test_value_discipline_statuses_do_not_break_value_apis(client):
+    for status in ("值得测试", "暂停", "删除", "已转项目"):
+        response = client.post(
+            "/api/opportunities",
+            json={"name": f"{status}机会", "status": status},
+        )
+        assert response.status_code == 200
+        assert response.get_json()["data"]["status"] == status
+
+    for status in ("进行中", "已验证", "未验证", "已暂停"):
+        response = client.post(
+            "/api/experiments",
+            json={
+                "name": f"{status}实验",
+                "status": status,
+                "success_criteria": "有明确结果",
+                "failure_criteria": "无真实反馈",
+            },
+        )
+        assert response.status_code == 200
+        assert response.get_json()["data"]["status"] == status
+
+
+def test_asset_delete_api_still_works_for_case_asset(client):
+    asset = client.post(
+        "/api/assets",
+        json={
+            "title": "待删除案例资产",
+            "asset_type": "案例复盘",
+            "asset_level": "案例",
+            "fields": {"资产说明": "可删除案例"},
+        },
+    ).get_json()["data"]
+
+    response = client.delete(f"/api/assets/{asset['id']}")
+    assert response.status_code == 200
+    assert response.get_json()["data"]["deleted"] is True

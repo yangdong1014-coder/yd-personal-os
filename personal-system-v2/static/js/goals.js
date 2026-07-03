@@ -530,6 +530,24 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function renderProjectDiscipline(project) {
+    const rows = [
+      ["停止条件", project.stop_condition],
+      ["反证信号", project.disconfirming_signal],
+      ["价值捕获", project.value_capture],
+    ].filter(([, value]) => String(value || "").trim());
+    if (!rows.length) return "";
+    return `
+      <div class="value-discipline-stack goal-project-discipline">
+        ${rows.map(([label, value]) => `
+          <div class="value-discipline ${label === "价值捕获" ? "value-success" : "value-warning"}">
+            <strong>${escapeHtml(label)}：</strong>${formatText(value)}
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function renderProjectItem(project, tasks = []) {
     const stats = project.stats || {};
     const isTasksExpanded = isProjectTasksExpanded(project.id);
@@ -561,6 +579,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <button type="button" class="btn btn-sm btn-ghost btn-delete-project" data-project-id="${project.id}">删除</button>
           </div>
         </div>
+        ${renderProjectDiscipline(project)}
         ${renderProjectTasksPanel(project, tasks)}
       </li>
     `;
@@ -817,4 +836,8 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+function formatText(text) {
+  return escapeHtml(text || "").replace(/\n/g, "<br>");
 }
