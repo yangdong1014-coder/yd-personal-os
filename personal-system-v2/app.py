@@ -955,6 +955,63 @@ def api_ai_dispatch_actions():
         return _error(str(exc))
 
 
+def _value_chain_ai_response(object_type, action):
+    payload = request.get_json(silent=True) or {}
+    entity_id = payload.get("id")
+    if not entity_id:
+        return _error("缺少 id")
+    try:
+        result = ai_service.value_chain_ai_advice(object_type, action, entity_id)
+        return jsonify({"ok": True, "data": result})
+    except ai_service.AIServiceError as exc:
+        return _error(str(exc))
+
+
+@app.route("/api/ai/opportunity-advance", methods=["POST"])
+def api_ai_opportunity_advance():
+    return _value_chain_ai_response("opportunity", "advance")
+
+
+@app.route("/api/ai/opportunity-red-team", methods=["POST"])
+def api_ai_opportunity_red_team():
+    return _value_chain_ai_response("opportunity", "red_team")
+
+
+@app.route("/api/ai/opportunity-audit", methods=["POST"])
+def api_ai_opportunity_audit():
+    return _value_chain_ai_response("opportunity", "audit")
+
+
+@app.route("/api/ai/experiment-advance", methods=["POST"])
+def api_ai_experiment_advance():
+    return _value_chain_ai_response("experiment", "advance")
+
+
+@app.route("/api/ai/experiment-red-team", methods=["POST"])
+def api_ai_experiment_red_team():
+    return _value_chain_ai_response("experiment", "red_team")
+
+
+@app.route("/api/ai/experiment-audit", methods=["POST"])
+def api_ai_experiment_audit():
+    return _value_chain_ai_response("experiment", "audit")
+
+
+@app.route("/api/ai/feedback-advance", methods=["POST"])
+def api_ai_feedback_advance():
+    return _value_chain_ai_response("feedback", "advance")
+
+
+@app.route("/api/ai/feedback-red-team", methods=["POST"])
+def api_ai_feedback_red_team():
+    return _value_chain_ai_response("feedback", "red_team")
+
+
+@app.route("/api/ai/feedback-audit", methods=["POST"])
+def api_ai_feedback_audit():
+    return _value_chain_ai_response("feedback", "audit")
+
+
 @app.route("/api/inbox/analyze", methods=["POST"])
 def api_inbox_analyze():
     payload = request.get_json(silent=True) or {}

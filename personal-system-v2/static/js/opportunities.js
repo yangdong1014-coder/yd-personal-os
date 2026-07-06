@@ -2,6 +2,9 @@
   const listEl = document.getElementById("opportunities-list");
   const createBtn = document.getElementById("create-opportunity-btn");
   const statuses = window.OPPORTUNITY_STATUSES || [];
+  const expandedOpportunityLinks = new Set();
+  const linksCache = new Map();
+  let currentItems = [];
   const scoreFields = [
     ["importance_score", "重要性"],
     ["feedback_speed_score", "反馈速度"],
@@ -196,26 +199,53 @@
     return `<div class="value-discipline ${discipline.className}">${escapeHtml(discipline.text)}</div>`;
   }
 
-  function linkList(title, items, labelKey) {
-    if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
+  function latestItem(items = []) {
+    return items[0] || null;
+  }
+
+  function renderLatestLink(label, item, titleKey, metaParts = []) {
+    if (!item) return "";
+    const meta = metaParts.filter(Boolean).join(" · ");
     return `
-      <div class="value-link-row">
-        <strong>${title}</strong>
-        <ul>${items.map((row) => `<li>${escapeHtml(row[labelKey] || row.title || row.name || `#${row.id}`)}</li>`).join("")}</ul>
+      <div class="opportunity-link-latest">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(item[titleKey] || item.title || item.name || `#${item.id}`)}</strong>
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
       </div>
     `;
   }
 
   function renderLinks(links) {
+    const counts = links.counts || {};
+    const experiment = latestItem(links.experiments || []);
+    const feedback = latestItem(links.feedback || []);
+    const asset = latestItem(links.assets || []);
+    const hasDownstream = Number(counts.experiments || 0) + Number(counts.feedback || 0) + Number(counts.assets || 0) > 0;
+    if (!hasDownstream) {
+      return `
+        <div class="opportunity-link-expanded">
+          <p class="form-hint">暂无下游链路，建议先创建实验验证该机会。</p>
+        </div>
+      `;
+    }
     return `
-      <div class="value-link-counts">
-        <span>实验 ${links.counts?.experiments || 0}</span>
-        <span>反馈 ${links.counts?.feedback || 0}</span>
-        <span>案例资产 ${links.counts?.assets || 0}</span>
+      <div class="opportunity-link-expanded">
+        <div class="value-link-counts">
+          <span>实验 ${counts.experiments || 0}</span>
+          <span>反馈 ${counts.feedback || 0}</span>
+          <span>资产 ${counts.assets || 0}</span>
+        </div>
+        <div class="opportunity-link-latest-grid">
+          ${renderLatestLink("最近实验", experiment, "name", [experiment?.status, experiment?.experiment_type])}
+          ${renderLatestLink("最近反馈", feedback, "title", [feedback?.level, feedback?.source])}
+          ${renderLatestLink("最近资产", asset, "title", [asset?.asset_level, asset?.asset_type])}
+        </div>
+        <div class="opportunity-link-jumps">
+          <a href="/experiments">去实验页</a>
+          <a href="/feedback">去反馈页</a>
+          <a href="/assets">去资产页</a>
+        </div>
       </div>
-      ${linkList("实验", links.experiments || [], "name")}
-      ${linkList("反馈", links.feedback || [], "title")}
-      ${linkList("案例资产", links.assets || [], "title")}
     `;
   }
 
@@ -225,6 +255,7 @@
 
   function renderKernelTags(item) {
     const tags = [];
+    if (item.target_user) tags.push([item.target_user, "muted"]);
     if (hasContent(item.seven_day_mvp)) tags.push(["有 7 天 MVP", "positive"]);
     if (hasContent(item.next_action)) tags.push(["有下一步", "muted"]);
     if (
@@ -235,49 +266,153 @@
     ) {
       tags.push(["价值变化明确", "positive"]);
     }
-    if (!["已转项目", "已转化", "删除", "停止"].includes(item.status || "")) {
+    tags.push([renderMvpLayerLabel(item), "muted"]);
+    if (!["已转项目", "已转化", "删除", "停止", "已归档"].includes(item.status || "")) {
       tags.push(["待实验验证", "warning"]);
     }
-    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+    const visible = tags.slice(0, 4);
+    const hidden = tags.length - visible.length;
+    return [
+      ...visible.map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${escapeHtml(label)}</span>`),
+      hidden > 0 ? `<span class="kernel-tag kernel-tag--muted">+${hidden}</span>` : "",
+    ].join("");
   }
 
-  function renderMvpLayerTag(item) {
+  function renderMvpLayerLabel(item) {
     let label = "想法 MVP";
-    let tone = "idea";
     if (hasContent(item.case_asset_potential)) {
       label = "资产 MVP 候选";
-      tone = "asset";
     } else if (hasContent(item.transaction_potential)) {
       label = "交易 MVP 候选";
-      tone = "transaction";
     } else if (hasContent(item.target_user) && hasContent(item.next_action)) {
       label = "表达 MVP";
-      tone = "expression";
     }
-    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+    return label;
   }
 
-  async function toggleLinks(el, item) {
+  async function renderLinkPanel(el, item) {
     const panel = el.querySelector(".value-link-panel");
     const summary = el.querySelector(".value-link-summary");
     const button = el.querySelector(".btn-links");
-    const expanded = button.getAttribute("aria-expanded") === "true";
-    if (expanded) {
-      button.setAttribute("aria-expanded", "false");
-      button.textContent = "查看链路";
-      panel.hidden = true;
-      return;
-    }
     button.setAttribute("aria-expanded", "true");
     button.textContent = "收起链路";
     panel.hidden = false;
-    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    if (linksCache.has(item.id)) {
+      const links = linksCache.get(item.id);
+      summary.textContent = `关联链路：实验 ${links.counts?.experiments || 0} · 反馈 ${links.counts?.feedback || 0} · 资产 ${links.counts?.assets || 0}`;
+      panel.innerHTML = renderLinks(links);
+      return;
+    }
+    panel.innerHTML = `<p class="form-hint">链路加载中...</p>`;
     try {
       const links = await apiRequest(`/api/opportunities/${item.id}/links`);
-      summary.textContent = `关联链路：实验 ${links.counts?.experiments || 0} · 反馈 ${links.counts?.feedback || 0} · 案例资产 ${links.counts?.assets || 0}`;
+      linksCache.set(item.id, links);
+      summary.textContent = `关联链路：实验 ${links.counts?.experiments || 0} · 反馈 ${links.counts?.feedback || 0} · 资产 ${links.counts?.assets || 0}`;
       panel.innerHTML = renderLinks(links);
     } catch (err) {
       panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
+  function collapseLinkPanel(el, item) {
+    const panel = el.querySelector(".value-link-panel");
+    const button = el.querySelector(".btn-links");
+    expandedOpportunityLinks.delete(item.id);
+    button.setAttribute("aria-expanded", "false");
+    button.textContent = "查看链路";
+    panel.hidden = true;
+    panel.innerHTML = "";
+  }
+
+  async function toggleLinks(el, item) {
+    if (expandedOpportunityLinks.has(item.id)) {
+      collapseLinkPanel(el, item);
+      return;
+    }
+    expandedOpportunityLinks.add(item.id);
+    await renderLinkPanel(el, item);
+  }
+
+  const AI_ACTIONS = {
+    advance: { label: "AI推进", endpoint: "/api/ai/opportunity-advance" },
+    redTeam: { label: "AI审查", endpoint: "/api/ai/opportunity-red-team" },
+    audit: { label: "AI审计", endpoint: "/api/ai/opportunity-audit" },
+  };
+
+  function renderAiTools() {
+    return `
+      <div class="value-ai-tool-row" aria-label="AI 工具">
+        <span class="value-ai-tool-label">AI</span>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="advance">AI推进</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="redTeam">AI审查</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="audit">AI审计</button>
+      </div>
+    `;
+  }
+
+  function renderAiResult(result) {
+    const sections = (result.sections || [])
+      .map((section) => `
+        <section class="ai-result-section">
+          <h4>${escapeHtml(section.title)}</h4>
+          <ul>${(section.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </section>
+      `)
+      .join("");
+    return `
+      <div class="ai-result-panel">
+        <p class="ai-result-summary">${formatText(result.summary || "")}</p>
+        ${sections}
+        <div class="ai-result-next">
+          <strong>下一步</strong>
+          <p>${formatText(result.next_action || result.recommendation || "")}</p>
+        </div>
+        ${result.recommendation ? `<p class="ai-result-recommendation">${formatText(result.recommendation)}</p>` : ""}
+        <div class="ai-result-actions">
+          <button type="button" class="btn btn-sm btn-ghost btn-copy-ai-result">复制建议</button>
+          <a class="btn btn-sm btn-ghost" href="/experiments">去创建实验</a>
+        </div>
+      </div>
+    `;
+  }
+
+  function aiResultText(result) {
+    const parts = [result.title, result.summary];
+    (result.sections || []).forEach((section) => {
+      parts.push(section.title);
+      (section.items || []).forEach((item) => parts.push(`- ${item}`));
+    });
+    parts.push(`下一步：${result.next_action || result.recommendation || ""}`);
+    return parts.filter(Boolean).join("\n");
+  }
+
+  async function runAiAction(item, actionKey, button) {
+    const config = AI_ACTIONS[actionKey];
+    if (!config) return;
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "AI处理中…";
+    try {
+      const result = await apiRequest(config.endpoint, {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      });
+      showAIViewModal({
+        title: result.title || `${config.label}结果`,
+        bodyHtml: renderAiResult(result),
+      });
+      setTimeout(() => {
+        const copyBtn = document.querySelector(".btn-copy-ai-result");
+        copyBtn?.addEventListener("click", async () => {
+          await navigator.clipboard?.writeText(aiResultText(result));
+          showToast("AI建议已复制", "success");
+        });
+      }, 0);
+    } catch (err) {
+      showToast(err.message || `${config.label}失败，请检查模型配置或稍后重试`, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
     }
   }
 
@@ -286,28 +421,35 @@
     return `
       <article class="entity-card value-card" data-id="${item.id}">
         <div class="value-card-head">
-          <div>
-            <h3 class="entity-title">${escapeHtml(item.name)}</h3>
-            <p class="entity-meta">${escapeHtml(item.status)} · ${escapeHtml(item.source || "未记录来源")}</p>
+          <div class="value-card-title-group">
+            <div class="opportunity-card-title-row">
+              <h3 class="entity-title opportunity-card-title">${escapeHtml(item.name)}</h3>
+              <span class="opportunity-card-source-meta">${escapeHtml(item.source || "未记录来源")}</span>
+            </div>
           </div>
-          <span class="value-score-badge">${total}</span>
+          <div class="opportunity-card-badges">
+            <span class="opportunity-status-badge">${escapeHtml(item.status || "待审计")}</span>
+            <span class="value-score-badge">${total}</span>
+            <div class="opportunity-card-tools">
+              ${renderAiTools()}
+            </div>
+          </div>
         </div>
         <p class="value-card-summary">${formatText(item.description || item.related_context || "暂无描述")}</p>
-        ${renderDiscipline(item.status)}
-        <div class="value-card-meta">
-          <span class="tag">${escapeHtml(advice(total))}</span>
-          ${item.target_user ? `<span class="tag">${escapeHtml(item.target_user)}</span>` : ""}
+        <div class="kernel-tag-row">
+          <span class="kernel-tag kernel-tag--positive">${escapeHtml(advice(total))}</span>
+          ${renderKernelTags(item)}
         </div>
-        ${renderMvpLayerTag(item)}
-        <div class="kernel-tag-row">${renderKernelTags(item)}</div>
         <div class="value-link-strip">
-          <span class="value-link-summary">关联链路：待查看</span>
-          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
+          <span class="value-link-summary">${expandedOpportunityLinks.has(item.id) && linksCache.has(item.id)
+            ? `关联链路：实验 ${linksCache.get(item.id).counts?.experiments || 0} · 反馈 ${linksCache.get(item.id).counts?.feedback || 0} · 资产 ${linksCache.get(item.id).counts?.assets || 0}`
+            : "关联链路：待查看"}</span>
+          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="${expandedOpportunityLinks.has(item.id) ? "true" : "false"}">${expandedOpportunityLinks.has(item.id) ? "收起链路" : "查看链路"}</button>
         </div>
         <div class="value-link-panel" hidden></div>
         <div class="entity-actions">
-          <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-create-exp">创建实验</button>
+          <button type="button" class="btn btn-sm btn-ghost btn-edit">编辑</button>
           <button type="button" class="btn btn-sm btn-ghost btn-delete">删除</button>
         </div>
       </article>
@@ -315,25 +457,49 @@
   }
 
   async function load() {
-    const items = await apiRequest("/api/opportunities");
-    if (!items.length) {
+    currentItems = await apiRequest("/api/opportunities");
+    if (!currentItems.length) {
       listEl.innerHTML = `<div class="empty-state"><strong>暂无机会</strong>点击右上角开始审计第一个机会</div>`;
       return;
     }
-    listEl.innerHTML = items.map(card).join("");
+    listEl.innerHTML = currentItems.map(card).join("");
     listEl.querySelectorAll(".value-card").forEach((el) => {
-      const item = items.find((row) => row.id === Number(el.dataset.id));
-      el.querySelector(".btn-links").addEventListener("click", () => toggleLinks(el, item));
-      el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
-      el.querySelector(".btn-create-exp").addEventListener("click", () => createExperiment(item));
-      el.querySelector(".btn-delete").addEventListener("click", async () => {
-        if (!confirm(`确定删除机会「${item.name}」？`)) return;
-        await apiRequest(`/api/opportunities/${item.id}`, { method: "DELETE" });
-        showToast("机会已删除", "success");
-        await load();
-      });
+      const item = currentItems.find((row) => row.id === Number(el.dataset.id));
+      if (item && expandedOpportunityLinks.has(item.id)) renderLinkPanel(el, item);
     });
   }
+
+  listEl.addEventListener("click", async (event) => {
+    const cardEl = event.target.closest(".value-card");
+    if (!cardEl) return;
+    const item = currentItems.find((row) => row.id === Number(cardEl.dataset.id));
+    if (!item) return;
+    if (event.target.closest(".btn-links")) {
+      await toggleLinks(cardEl, item);
+      return;
+    }
+    const aiButton = event.target.closest(".btn-ai-value");
+    if (aiButton) {
+      await runAiAction(item, aiButton.dataset.aiAction, aiButton);
+      return;
+    }
+    if (event.target.closest(".btn-edit")) {
+      openEditor(item);
+      return;
+    }
+    if (event.target.closest(".btn-create-exp")) {
+      createExperiment(item);
+      return;
+    }
+    if (event.target.closest(".btn-delete")) {
+      if (!confirm(`确定删除机会「${item.name}」？`)) return;
+      await apiRequest(`/api/opportunities/${item.id}`, { method: "DELETE" });
+      expandedOpportunityLinks.delete(item.id);
+      linksCache.delete(item.id);
+      showToast("机会已删除", "success");
+      await load();
+    }
+  });
 
   createBtn?.addEventListener("click", () => openEditor());
   load().catch((err) => showToast(err.message, "error"));

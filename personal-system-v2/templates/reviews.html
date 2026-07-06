@@ -3,68 +3,84 @@
 {% block title %}复盘 · 个人能力操作系统{% endblock %}
 
 {% block content %}
-<header class="page-header">
-  <h1 class="page-title">复盘系统</h1>
-  <p class="page-subtitle">识别偏差，提炼经验，AI 辅助周复盘聚合与沉淀</p>
+<header class="page-header reviews-page-header">
+  <div class="page-header-row">
+    <div>
+      <h1 class="page-title">复盘系统</h1>
+      <p class="page-subtitle">识别偏差，提炼经验，AI 辅助周复盘聚合与沉淀</p>
+    </div>
+    <div class="header-actions">
+      <button type="button" id="toggle-review-form-btn" class="btn">新建复盘</button>
+    </div>
+  </div>
   {% if not ai_enabled %}
   <p class="form-hint">AI 功能未启用：请设置 DEEPSEEK_API_KEY（环境变量或 .env 文件）后重启服务</p>
   {% endif %}
 </header>
 
-<div class="page-split page-split-wide page-split-scroll">
-  <section class="section-card page-split-side">
-  <h2>新建复盘</h2>
-  <form id="review-form" class="stacked-form">
-    <div class="form-row">
-      <label class="form-label" for="review-date">复盘日期</label>
-      <input type="date" id="review-date" class="input" required>
+<div class="reviews-workspace">
+  <section id="review-form-panel" class="section-card review-form-panel" hidden>
+    <div class="section-header-row">
+      <div>
+        <h2>新建复盘</h2>
+        <p class="form-hint section-hint">快速记录推进、卡点、调整和可沉淀内容</p>
+      </div>
     </div>
-    <div class="form-row">
-      <label class="form-label" for="review-type">复盘类型</label>
-      <select id="review-type" class="select">
-        {% for t in review_types %}
-        <option value="{{ t }}">{{ t }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="review-what-done">今天做了什么</label>
-      <textarea id="review-what-done" class="textarea" rows="3" placeholder="今日实际推进的事项"></textarea>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="review-stuck">卡住了什么</label>
-      <textarea id="review-stuck" class="textarea" rows="3" placeholder="阻碍、卡点及原因"></textarea>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="review-next">下一步调整</label>
-      <textarea id="review-next" class="textarea" rows="3" placeholder="接下来如何调整"></textarea>
-    </div>
-    <div class="form-row">
-      <label class="form-label" for="review-depositable">可沉淀内容</label>
-      <textarea id="review-depositable" class="textarea" rows="3" placeholder="可转化为知识资产的内容"></textarea>
-    </div>
-    <div class="form-actions-row">
-      <button type="button" id="ai-complete-btn" class="btn btn-sm btn-ai">AI补全</button>
-      <button type="submit" class="btn">保存复盘</button>
-    </div>
-  </form>
-</section>
+    <form id="review-form" class="stacked-form review-form">
+      <div class="review-form-topline">
+        <div class="form-row">
+          <label class="form-label" for="review-date">复盘日期</label>
+          <input type="date" id="review-date" class="input" required>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="review-type">复盘类型</label>
+          <select id="review-type" class="select">
+            {% for t in review_types %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="review-form-grid">
+        <div class="form-row">
+          <label class="form-label" for="review-what-done">今天做了什么</label>
+          <textarea id="review-what-done" class="textarea review-textarea" rows="2" placeholder="今日实际推进的事项"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="review-stuck">卡住了什么</label>
+          <textarea id="review-stuck" class="textarea review-textarea" rows="2" placeholder="阻碍、卡点及原因"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="review-next">下一步调整</label>
+          <textarea id="review-next" class="textarea review-textarea" rows="2" placeholder="接下来如何调整"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="review-depositable">可沉淀内容</label>
+          <textarea id="review-depositable" class="textarea review-textarea" rows="2" placeholder="可转化为知识资产的内容"></textarea>
+        </div>
+      </div>
+      <div class="form-actions-row review-form-actions">
+        <button type="button" id="ai-complete-btn" class="btn btn-sm btn-ai">AI补全</button>
+        <button type="submit" class="btn">保存复盘</button>
+      </div>
+    </form>
+  </section>
 
-  <section class="section-card page-split-main">
-  <div class="section-header-row">
-    <div>
-      <h2>复盘历史</h2>
-      <p class="form-hint section-hint">勾选「每日」复盘后，可聚合为周复盘</p>
+  <section class="section-card reviews-history-panel">
+    <div class="section-header-row">
+      <div>
+        <h2>复盘历史</h2>
+        <p class="form-hint section-hint">勾选「每日」复盘后，可聚合为周复盘</p>
+      </div>
+      <button type="button" id="ai-weekly-btn" class="btn btn-sm btn-ai" disabled>AI周复盘</button>
     </div>
-    <button type="button" id="ai-weekly-btn" class="btn btn-sm btn-ai" disabled>AI周复盘</button>
-  </div>
-  <div id="reviews-list" class="entity-list">
-    <div class="empty-state">
-      <strong>添加第一条复盘</strong>
-      填写上方表单后即时保存
+    <div id="reviews-list" class="entity-list reviews-list">
+      <div class="empty-state">
+        <strong>暂无复盘记录</strong>
+        点击右上角「新建复盘」开始记录
+      </div>
     </div>
-  </div>
-</section>
+  </section>
 </div>
 {% endblock %}
 

@@ -1,4 +1,4 @@
-document.addEventListener("DOMContentLoaded", () => {
+﻿document.addEventListener("DOMContentLoaded", () => {
   const assetForm = document.getElementById("asset-form");
   const assetFormHost = document.getElementById("asset-form-host");
   const createAssetBtn = document.getElementById("create-asset-btn");
@@ -563,24 +563,24 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function toggleAssetLinks(itemEl, asset) {
-    const button = itemEl.querySelector(".btn-links");
+    const buttons = itemEl.querySelectorAll(".btn-links");
     const panel = itemEl.querySelector(".value-link-panel");
     const sourceTitleEl = itemEl.querySelector(".asset-source-title");
-    const expanded = button.getAttribute("aria-expanded") === "true";
+    const expanded = Array.from(buttons).some((button) => button.getAttribute("aria-expanded") === "true");
     if (expanded) {
-      button.setAttribute("aria-expanded", "false");
-      button.textContent = "查看链路";
+      buttons.forEach((button) => button.setAttribute("aria-expanded", "false"));
+      buttons.forEach((button) => { button.textContent = "查看来源"; });
       panel.hidden = true;
       return;
     }
-    button.setAttribute("aria-expanded", "true");
-    button.textContent = "收起链路";
+    buttons.forEach((button) => button.setAttribute("aria-expanded", "true"));
+    buttons.forEach((button) => { button.textContent = "收起来源"; });
     panel.hidden = false;
     panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
     try {
       const links = await apiRequest(`/api/assets/${asset.id}/links`);
       const sourceTitle = links.source?.title || links.source?.name || links.source?.review_date || "未解析";
-      sourceTitleEl.textContent = `来源标题：${sourceTitle}`;
+      if (sourceTitleEl) sourceTitleEl.textContent = `来源标题：${sourceTitle}`;
       panel.innerHTML = renderAssetLinks(links);
     } catch (err) {
       panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
@@ -617,6 +617,99 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
+  function renderAssetDetailField(label, value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    return `
+      <div class="asset-detail-field">
+        <span class="asset-detail-label">${escapeHtml(label)}</span>
+        <div class="asset-detail-value">${formatText(text)}</div>
+      </div>
+    `;
+  }
+
+  function renderAssetDetailSection(title, fields) {
+    const content = fields.filter(Boolean).join("");
+    if (!content) return "";
+    return `
+      <section class="asset-detail-section">
+        <h4>${escapeHtml(title)}</h4>
+        ${content}
+      </section>
+    `;
+  }
+
+  function renderAssetDetailPanel(asset) {
+    const sourceInfo = [
+      `类型：${sourceTypeLabel(asset.source_type)}`,
+      asset.source_id ? `ID：${asset.source_id}` : "",
+    ].filter(Boolean).join(" · ") || "manual";
+    const sections = [
+      renderAssetDetailSection("资产说明", [
+        renderAssetDetailField("核心内容", asset.core_content),
+      ]),
+      renderAssetDetailSection("证据与来源", [
+        renderAssetDetailField("证据", asset.evidence),
+        renderAssetDetailField("来源", sourceInfo),
+      ]),
+      renderAssetDetailSection("对外表达与可迁移", [
+        renderAssetDetailField("对外表达", asset.external_expression),
+        renderAssetDetailField("可迁移场景", asset.transferable_scene),
+        renderAssetDetailField("复用场景", asset.reusable_scenario),
+      ]),
+      renderAssetDetailSection("产品化下一步", [
+        renderAssetDetailField("下一步", asset.productization_next_step),
+      ]),
+    ].filter(Boolean);
+
+    if (!sections.length) {
+      return `<p class="asset-detail-empty">暂无更多资产详情，可先补充说明、证据或可迁移场景。</p>`;
+    }
+
+    return `
+      <div class="asset-detail-panel">
+        <div class="asset-detail-grid">
+          ${sections.join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAssetAiToolbar() {
+    return `
+      <div class="asset-ai-actions asset-ai-toolbar">
+        <div class="asset-ai-toolbar-head">
+          <span class="module-kernel-label">AI 加速</span>
+          <span class="asset-ai-toolbar-hint">围绕当前资产做优化、转化和归类</span>
+        </div>
+        <div class="asset-ai-toolbar-actions">
+          <button type="button" class="btn btn-sm btn-ai btn-optimize">AI优化</button>
+          <button type="button" class="btn btn-sm btn-ai btn-sop">转SOP</button>
+          <button type="button" class="btn btn-sm btn-ai btn-model">转模型</button>
+          <button type="button" class="btn btn-sm btn-ai btn-method">转方法论</button>
+          <button type="button" class="btn btn-sm btn-ai btn-prompt">转提示词</button>
+          <button type="button" class="btn btn-sm btn-ai btn-classify">AI归类</button>
+          <span class="asset-ai-disabled-note">真伪审查待接入</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderAssetDetailActions() {
+    return `
+      <div class="asset-detail-actions">
+        <div class="asset-detail-actions-left">
+          <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看来源</button>
+          <button type="button" class="btn btn-sm btn-primary btn-reuse" title="记录一次复用">复用</button>
+          <button type="button" class="btn btn-sm btn-ghost btn-edit-asset">编辑</button>
+        </div>
+        <div class="asset-detail-actions-right">
+          <button type="button" class="btn btn-sm btn-ghost btn-delete-asset">删除</button>
+        </div>
+      </div>
+    `;
+  }
+
   function hasContent(value) {
     return String(value || "").trim().length > 0;
   }
@@ -627,38 +720,46 @@ document.addEventListener("DOMContentLoaded", () => {
     if (hasContent(asset.external_expression)) tags.push(["有对外表达", "positive"]);
     if (hasContent(asset.transferable_scene)) tags.push(["可迁移", "muted"]);
     if (hasContent(asset.productization_next_step)) tags.push(["有产品化下一步", "warning"]);
-    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+    return tags.map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
   }
 
-  function renderMvpLayerTag(asset) {
+  function assetMvpSignalLabel(asset) {
     const level = normalizedAssetLevel(asset);
     let label = "资产 MVP 候选";
-    let tone = "asset";
     if (["案例", "产品", "筹码"].includes(level)) {
       label = "资产 MVP";
-      tone = "asset";
     } else if (hasContent(asset.productization_next_step)) {
       label = "交易 MVP 后续";
-      tone = "transaction";
     } else if (hasContent(asset.transferable_scene)) {
       label = "流程 MVP 沉淀";
-      tone = "process";
     } else if (hasContent(asset.external_expression)) {
       label = "表达 MVP 沉淀";
-      tone = "expression";
     }
-    return `<div class="mvp-layer-tag-row asset-mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+    return label;
+  }
+
+  function renderAssetMetaTags(asset) {
+    const capabilityTags = (asset.capability_tags || [])
+      .slice(0, 4)
+      .map((tag) => `<span class="kernel-tag kernel-tag--muted">${escapeHtml(tag)}</span>`)
+      .join("");
+    const hiddenCount = Math.max(0, (asset.capability_tags || []).length - 4);
+    return `
+      <div class="asset-meta-tags">
+        <span class="kernel-tag kernel-tag--muted">来源链路：${escapeHtml(sourceTypeLabel(asset.source_type))}</span>
+        <span class="kernel-tag kernel-tag--muted">${escapeHtml(assetMvpSignalLabel(asset))}</span>
+        ${renderKernelTags(asset)}
+        ${capabilityTags}
+        ${hiddenCount ? `<span class="kernel-tag kernel-tag--muted">+${hiddenCount}</span>` : ""}
+      </div>
+    `;
   }
 
   function renderAssetArchiveItem(asset) {
-    const tagsHtml = (asset.capability_tags || [])
-      .map((tag) => `<span class="tag tag-cap tag-cap-inline">${escapeHtml(tag)}</span>`)
-      .join("");
     const maturityClass = MATURITY_CLASS[asset.maturity] || "maturity-draft";
     const fieldPreviewEntries = getFieldPreviewEntries(asset);
     const previewLine = buildCompactPreviewLine(asset, fieldPreviewEntries);
     const isCaseAsset = normalizedAssetLevel(asset) === "案例";
-    const valueRows = valueDetailRows(asset);
 
     return `
       <article class="asset-archive-item${isCaseAsset ? " asset-archive-item-case" : ""}" data-asset-id="${asset.id}">
@@ -666,73 +767,40 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="asset-archive-item-main">
             <div class="asset-archive-item-topline">
               <h3 class="asset-archive-item-title">${escapeHtml(asset.title)}</h3>
-              <span class="tag asset-maturity ${maturityClass}">${escapeHtml(asset.maturity || "草稿")}</span>
-              <span class="tag">${escapeHtml(normalizedAssetLevel(asset))}</span>
-              ${isCaseAsset ? `<span class="tag tag-case-asset">案例资产</span>` : ""}
-              ${tagsHtml ? `<span class="asset-archive-tags-inline">${tagsHtml}</span>` : ""}
-              <span class="asset-meta-chip">复用 ${asset.reuse_count || 0}</span>
-              <span class="asset-meta-chip">更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
-              <span class="asset-meta-chip">来源 ${escapeHtml(sourceTypeLabel(asset.source_type))}</span>
+              <div class="asset-title-meta">
+                <span>${escapeHtml(normalizedAssetLevel(asset))}</span>
+                <span>${escapeHtml(asset.asset_type || "通用资产")}</span>
+                <span class="asset-maturity ${maturityClass}">${escapeHtml(asset.maturity || "草稿")}</span>
+              </div>
             </div>
-            ${renderMvpLayerTag(asset)}
-            <div class="kernel-tag-row asset-kernel-tag-row">${renderKernelTags(asset)}</div>
             ${previewLine}
-            <p class="asset-archive-preview-line asset-source-title">来源标题：待查看</p>
-            ${renderCaseAssetBlock(asset)}
+            ${renderAssetMetaTags(asset)}
+            <div class="asset-link-strip">
+              <span>来源：${escapeHtml(sourceTypeLabel(asset.source_type))}</span>
+              <span>复用 ${asset.reuse_count || 0}</span>
+              <span>更新 ${escapeHtml(formatDate(assetUpdatedAt(asset)))}</span>
+            </div>
           </div>
           <div class="asset-archive-item-actions">
+            <button type="button" class="btn btn-sm btn-primary btn-reuse" title="记录一次复用">复用</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看来源</button>
             <button type="button" class="btn btn-sm btn-ghost btn-edit-asset">编辑</button>
-            <button type="button" class="btn btn-sm btn-ghost btn-reuse" title="记录一次复用">+复用</button>
-            <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
             <button type="button" class="btn btn-sm btn-ghost btn-toggle-asset" aria-expanded="false">展开</button>
           </div>
         </div>
         <div class="value-link-panel" hidden></div>
         <div class="asset-card-details" hidden>
-          ${renderFieldPreview(asset, fieldPreviewEntries)}
-          ${valueRows ? `<div class="asset-card-meta-grid asset-detail-meta-grid">${valueRows}</div>` : ""}
-          <div class="asset-ai-actions module-ai-entry module-ai-entry--inline">
-            <div class="module-ai-entry-header">
-              <span class="module-kernel-label">AI 加速入口</span>
-              <p>已有能力按推进、审查、审计收敛展示。</p>
-            </div>
-            <div class="module-ai-action-groups">
-              <div class="module-ai-action-group">
-                <span class="ai-action-label">AI 推进</span>
-                <div class="module-ai-actions">
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-optimize">AI优化</button>
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-sop">转SOP</button>
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-model">转模型</button>
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-method">转方法论</button>
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-prompt">转提示词</button>
-                </div>
-              </div>
-              <div class="module-ai-action-group">
-                <span class="ai-action-label">AI 对抗性审查</span>
-                <button type="button" class="ai-action-card ai-action-card--disabled" disabled>
-                  <span class="ai-action-note">资产真伪审查待接入</span>
-                </button>
-              </div>
-              <div class="module-ai-action-group">
-                <span class="ai-action-label">AI 审计</span>
-                <div class="module-ai-actions">
-                  <button type="button" class="btn btn-sm btn-ai ai-action-card ai-action-card--enabled btn-classify">AI归类</button>
-                  <span class="ai-action-card ai-action-card--disabled" aria-disabled="true">
-                    <span class="ai-action-note">资产等级判断待接入</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-            <button type="button" class="btn btn-sm btn-ghost btn-delete-asset">删除</button>
-          </div>
+          ${renderAssetDetailPanel(asset)}
+          ${renderAssetAiToolbar()}
+          ${renderAssetDetailActions()}
         </div>
       </article>`;
   }
 
   function bindAssetArchiveItem(itemEl, asset) {
-    itemEl.querySelector(".btn-edit-asset").addEventListener("click", () => {
+    itemEl.querySelectorAll(".btn-edit-asset").forEach((button) => button.addEventListener("click", () => {
       openAssetEditModal(asset);
-    });
+    }));
 
     const toggleBtn = itemEl.querySelector(".btn-toggle-asset");
     const detailsEl = itemEl.querySelector(".asset-card-details");
@@ -744,7 +812,7 @@ document.addEventListener("DOMContentLoaded", () => {
       detailsEl.hidden = expanded;
     });
 
-    itemEl.querySelector(".btn-delete-asset").addEventListener("click", async () => {
+    itemEl.querySelectorAll(".btn-delete-asset").forEach((button) => button.addEventListener("click", async () => {
       if (!window.confirm(assetDeleteConfirmMessage(asset))) return;
       try {
         await apiRequest(`/api/assets/${asset.id}`, { method: "DELETE" });
@@ -753,13 +821,13 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         showToast(err.message, "error");
       }
-    });
-    itemEl.querySelector(".btn-reuse").addEventListener("click", (e) => {
+    }));
+    itemEl.querySelectorAll(".btn-reuse").forEach((button) => button.addEventListener("click", (e) => {
       handleReuse(asset, e.currentTarget);
-    });
-    itemEl.querySelector(".btn-links").addEventListener("click", () => {
+    }));
+    itemEl.querySelectorAll(".btn-links").forEach((button) => button.addEventListener("click", () => {
       toggleAssetLinks(itemEl, asset).catch((err) => showToast(err.message, "error"));
-    });
+    }));
     itemEl.querySelector(".btn-optimize").addEventListener("click", (e) => {
       handleAIOptimize(asset, e.currentTarget);
     });

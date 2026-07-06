@@ -21,6 +21,7 @@ MODULES = (
     "assets",
     "capabilities",
     "inbox",
+    "value_chain",
 )
 
 

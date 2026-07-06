@@ -6,12 +6,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (!reviewForm || !reviewsList) return;
 
+  const reviewFormPanel = document.getElementById("review-form-panel");
+  const toggleReviewFormBtn = document.getElementById("toggle-review-form-btn");
   const completeBtn = document.getElementById("ai-complete-btn");
   const weeklyBtn = document.getElementById("ai-weekly-btn");
   const selectedDailyIds = new Set();
+  let isReviewFormOpen = false;
 
   if (dateInput) {
     dateInput.value = new Date().toISOString().slice(0, 10);
+  }
+
+  function setReviewFormOpen(open) {
+    isReviewFormOpen = open;
+    if (reviewFormPanel) {
+      reviewFormPanel.hidden = !open;
+    }
+    if (toggleReviewFormBtn) {
+      toggleReviewFormBtn.textContent = open ? "收起表单" : "新建复盘";
+      toggleReviewFormBtn.setAttribute("aria-expanded", String(open));
+    }
+  }
+
+  function resetReviewForm() {
+    reviewForm.reset();
+    if (dateInput) {
+      dateInput.value = new Date().toISOString().slice(0, 10);
+    }
   }
 
   async function handleAIComplete(button) {
@@ -104,8 +125,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderEmpty() {
     reviewsList.innerHTML = `
       <div class="empty-state">
-        <strong>添加第一条复盘</strong>
-        填写上方表单后即时保存
+        <strong>暂无复盘记录</strong>
+        点击右上角「新建复盘」开始记录
       </div>
     `;
   }
@@ -253,6 +274,11 @@ document.addEventListener("DOMContentLoaded", () => {
     weeklyBtn.addEventListener("click", () => handleAIWeekly(weeklyBtn));
   }
 
+  if (toggleReviewFormBtn) {
+    toggleReviewFormBtn.setAttribute("aria-expanded", "false");
+    toggleReviewFormBtn.addEventListener("click", () => setReviewFormOpen(!isReviewFormOpen));
+  }
+
   reviewForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -270,10 +296,8 @@ document.addEventListener("DOMContentLoaded", () => {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      document.getElementById("review-what-done").value = "";
-      document.getElementById("review-stuck").value = "";
-      document.getElementById("review-next").value = "";
-      document.getElementById("review-depositable").value = "";
+      resetReviewForm();
+      setReviewFormOpen(false);
       showToast("复盘已保存", "success");
       await loadReviews();
     } catch (err) {
@@ -281,6 +305,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  setReviewFormOpen(false);
   loadReviews().catch((err) => console.error(err));
 });
 
