@@ -54,7 +54,7 @@ INBOX_COMMITTABLE_TYPES = (
     "experiment",
     "feedback",
 )
-OPPORTUNITY_STATUSES = ("待审计", "值得测试", "已进入MVP", "已转项目", "暂停", "删除")
+OPPORTUNITY_STATUSES = ("待审计", "值得测试", "已进入MVP", "已转项目", "暂停", "删除", "已归档")
 EXPERIMENT_TYPES = ("交易型MVP", "结果型MVP", "反证型MVP", "功能型MVP")
 EXPERIMENT_STATUSES = ("设计中", "进行中", "已验证", "未验证", "已转项目", "已暂停")
 FEEDBACK_SOURCES = (
@@ -3756,6 +3756,10 @@ def get_opportunity_links(opportunity_id):
             item.get("source_type") == "feedback"
             and item.get("source_id") in feedback_ids
         )
+        or (
+            item.get("source_type") == "experiment"
+            and item.get("source_id") in experiment_ids
+        )
     ]
     return {
         "opportunity": _brief_opportunity(opportunity),
@@ -3880,6 +3884,195 @@ def get_asset_links(asset_id):
     }
 
 
+def _value_chain_sort_key(item):
+    if not item:
+        return ("", "", 0)
+    return (
+        item.get("updated_at") or "",
+        item.get("created_at") or "",
+        int(item.get("id") or 0),
+    )
+
+
+def _latest_value_item(items):
+    if not items:
+        return None
+    return max(items, key=_value_chain_sort_key)
+
+
+def _chain_opportunity_item(item):
+    return {
+        "id": item.get("id"),
+        "title": item.get("name"),
+        "status": item.get("status"),
+        "score": item.get("total_score") or 0,
+        "next_action": item.get("next_action") or "",
+        "created_at": item.get("created_at") or "",
+        "updated_at": item.get("updated_at") or "",
+    }
+
+
+def _chain_experiment_item(item):
+    if not item:
+        return None
+    return {
+        "id": item.get("id"),
+        "title": item.get("name"),
+        "status": item.get("status"),
+        "experiment_type": item.get("experiment_type"),
+        "created_at": item.get("created_at") or "",
+        "updated_at": item.get("updated_at") or "",
+    }
+
+
+def _chain_feedback_item(item):
+    if not item:
+        return None
+    return {
+        "id": item.get("id"),
+        "title": item.get("title"),
+        "level": item.get("level"),
+        "source": item.get("source"),
+        "created_at": item.get("created_at") or "",
+        "updated_at": item.get("updated_at") or "",
+    }
+
+
+def _chain_asset_item(item):
+    if not item:
+        return None
+    return {
+        "id": item.get("id"),
+        "title": item.get("title"),
+        "asset_level": item.get("asset_level"),
+        "asset_type": item.get("asset_type"),
+        "created_at": item.get("created_at") or "",
+        "updated_at": item.get("updated_at") or "",
+    }
+
+
+def _strong_feedback(item):
+    level = item.get("level") or ""
+    return level.startswith("L4") or level.startswith("L5")
+
+
+def _case_chain_asset(item):
+    return item.get("asset_level") in ("案例", "产品", "筹码")
+
+
+def _value_chain_stage(opportunity, latest_experiment, feedback, latest_asset):
+    experiment_status = (latest_experiment or {}).get("status")
+    if opportunity.get("status") == "暂停" or experiment_status in (
+        "未验证",
+        "暂停",
+        "已暂停",
+        "停止",
+        "已停止",
+    ):
+        return "待停止观察", "链路已暂停或最新实验未验证，需要判断是否继续投入"
+    if latest_asset or opportunity.get("status") == "已转项目":
+        return "已完成", "已有案例资产或机会已转项目，可以进入复用或归档"
+    has_strong_feedback = any(_strong_feedback(item) for item in feedback)
+    if has_strong_feedback:
+        return "待沉淀", "已有 L4/L5 强反馈，下一步应沉淀为案例资产"
+    if experiment_status == "已验证":
+        return "待沉淀", "最新实验已验证，但还没有案例资产"
+    if experiment_status in ("设计中", "进行中"):
+        return "进行中", "最新实验正在设计或执行"
+    if latest_experiment and not feedback:
+        return "待反馈", "已有实验，但还没有记录反馈"
+    return "待验证", "还没有关联实验，需要启动最小验证"
+
+
+def _value_chain_next_action(stage, opportunity, latest_experiment, latest_feedback):
+    if opportunity.get("next_action"):
+        return opportunity.get("next_action")
+    if stage == "待验证":
+        return "启动 7 天 MVP 或最小实验"
+    if stage == "进行中":
+        return (latest_experiment or {}).get("next_decision") or "推进实验并记录真实反馈"
+    if stage == "待反馈":
+        return "记录本轮实验反馈"
+    if stage == "待沉淀":
+        return (latest_feedback or {}).get("next_action") or "沉淀案例资产"
+    if stage == "待停止观察":
+        return "复盘停止原因，判断暂停、调整或归档"
+    if stage == "已完成":
+        return "确认是否归档该链路"
+    return "确认下一步"
+
+
+def _build_value_chains(opportunities, experiments, feedback, assets):
+    chains = []
+    for opportunity in opportunities:
+        if opportunity.get("status") in ("已归档", "删除"):
+            continue
+        opportunity_id = opportunity.get("id")
+        linked_experiments = [
+            item for item in experiments
+            if item.get("opportunity_id") == opportunity_id
+        ]
+        experiment_ids = {item.get("id") for item in linked_experiments}
+        linked_feedback = [
+            item for item in feedback
+            if (
+                item.get("related_type") == "opportunity"
+                and item.get("related_id") == opportunity_id
+            )
+            or (
+                item.get("related_type") == "experiment"
+                and item.get("related_id") in experiment_ids
+            )
+        ]
+        feedback_ids = {item.get("id") for item in linked_feedback}
+        linked_assets = [
+            item for item in assets
+            if (
+                item.get("source_type") == "opportunity"
+                and item.get("source_id") == opportunity_id
+            )
+            or (
+                item.get("source_type") == "experiment"
+                and item.get("source_id") in experiment_ids
+            )
+            or (
+                item.get("source_type") == "feedback"
+                and item.get("source_id") in feedback_ids
+            )
+        ]
+        latest_experiment = _latest_value_item(linked_experiments)
+        latest_feedback = _latest_value_item(linked_feedback)
+        case_assets = [item for item in linked_assets if _case_chain_asset(item)]
+        latest_asset = _latest_value_item(case_assets)
+        stage, stage_reason = _value_chain_stage(
+            opportunity, latest_experiment, linked_feedback, latest_asset
+        )
+        counts = {
+            "experiments": len(linked_experiments),
+            "feedback": len(linked_feedback),
+            "assets": len(linked_assets),
+        }
+        chains.append({
+            "opportunity": _chain_opportunity_item(opportunity),
+            "latest_experiment": _chain_experiment_item(latest_experiment),
+            "latest_feedback": _chain_feedback_item(latest_feedback),
+            "latest_asset": _chain_asset_item(latest_asset),
+            "stage": stage,
+            "stage_reason": stage_reason,
+            "next_action": _value_chain_next_action(
+                stage, opportunity, latest_experiment, latest_feedback
+            ),
+            "counts": counts,
+            "has_more": any(count > 1 for count in counts.values()),
+            "links_url": f"/api/opportunities/{opportunity_id}/links",
+        })
+    return sorted(
+        chains,
+        key=lambda item: _value_chain_sort_key(item.get("opportunity")),
+        reverse=True,
+    )
+
+
 def get_value_dashboard():
     opportunities = [
         item for item in list_opportunities()
@@ -3911,6 +4104,7 @@ def get_value_dashboard():
         and item.get("related_id")
     }
     return {
+        "chains": _build_value_chains(opportunities, experiments, feedback, assets),
         "high_score_opportunities": opportunities[:5],
         "running_experiments": [
             item for item in experiments if item.get("status") in ("设计中", "进行中")

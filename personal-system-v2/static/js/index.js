@@ -4,7 +4,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const tasksEl = document.getElementById("dashboard-tasks-content");
   const valueEl = document.getElementById("value-dashboard-content");
   const cockpitEl = document.getElementById("dashboard-cockpit-content");
-  const assetCompoundEl = document.getElementById("asset-compound-content");
   const briefingBtn = document.getElementById("ai-briefing-btn");
   const dispatchBtn = document.getElementById("ai-dispatch-btn");
 
@@ -548,36 +547,6 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
   }
 
-  function valueList(title, items, formatter, emptyText) {
-    const body = items && items.length
-      ? items.map(formatter).join("")
-      : `<p class="muted value-dashboard-empty">${escapeHtml(emptyText)}</p>`;
-    return `
-      <section class="value-dashboard-column">
-        <h3>${escapeHtml(title)}</h3>
-        <div class="value-dashboard-list">${body}</div>
-      </section>
-    `;
-  }
-
-  function valueItem(title, meta) {
-    return `
-      <article class="value-dashboard-item">
-        <strong>${escapeHtml(title || "未命名")}</strong>
-        <span>${escapeHtml(meta || "")}</span>
-      </article>
-    `;
-  }
-
-  function valueSignalItem(title, meta, tone = "default") {
-    return `
-      <article class="value-dashboard-item value-signal-item value-signal-${tone}">
-        <strong>${escapeHtml(title || "未命名")}</strong>
-        <span>${escapeHtml(meta || "")}</span>
-      </article>
-    `;
-  }
-
   function cockpitCard(title, value, meta, tone = "") {
     return `
       <article class="dashboard-cockpit-card ${tone ? `dashboard-cockpit-card--${tone}` : ""}">
@@ -655,103 +624,367 @@ document.addEventListener("DOMContentLoaded", () => {
     ].join("");
   }
 
-  function renderAssetCompound(valueData) {
-    if (!assetCompoundEl) return;
-    const caseAssets = valueData?.case_assets || [];
-    const strongFeedback = valueData?.strong_feedback || [];
-    const pendingDeposit = [
-      ...(valueData?.pending_deposit || []),
-      ...(valueData?.completed_experiments_without_assets || []),
-    ];
-    assetCompoundEl.innerHTML = [
-      valueList(
-        "案例资产",
-        caseAssets,
-        (item) => valueItem(item.title, `${item.asset_level || ""} · ${item.asset_type || ""}`),
-        "暂无案例/产品/筹码资产"
-      ),
-      valueList(
-        "可复用信号",
-        strongFeedback,
-        (item) => valueItem(item.title, `${item.source || ""} · ${item.level || ""}`),
-        "暂无 L4/L5 强反馈"
-      ),
-      valueList(
-        "能力提醒",
-        pendingDeposit,
-        (item) => valueItem(item.title || item.name, "优先沉淀为资产，再回流能力系统"),
-        "暂无待沉淀提醒"
-      ),
-    ].join("");
+  function chainStageClass(stage) {
+    const map = {
+      "待验证": "validate",
+      "进行中": "running",
+      "待反馈": "feedback",
+      "待沉淀": "deposit",
+      "待停止观察": "stop",
+      "已完成": "done",
+    };
+    return map[stage] || "default";
   }
 
-  function renderValueSignalRows(data) {
-    const pendingValidation = (data.pending_validation || []).map((item) =>
-      valueSignalItem(item.name, `${item.total_score || 0} 分 · 等待 7 天 MVP`, "validate")
-    );
-    const pendingDeposit = [
-      ...(data.pending_deposit || []).map((item) =>
-        valueSignalItem(item.title, `${item.level || ""} · 待沉淀案例资产`, "deposit")
-      ),
-      ...(data.completed_experiments_without_assets || []).map((item) =>
-        valueSignalItem(item.name, `${item.status || ""} · 待沉淀反馈或案例`, "deposit")
-      ),
-    ];
-    const pendingStop = (data.pending_stop_review || []).map((item) =>
-      valueSignalItem(
-        item.name || item.title || "未命名",
-        `${item.status || "有停止条件"} · 待停止观察`,
-        "stop"
-      )
-    );
-    const groups = [
-      ["待验证", pendingValidation, "暂无待验证机会"],
-      ["待沉淀", pendingDeposit, "暂无待沉淀反馈或实验"],
-      ["待停止观察", pendingStop, "暂无暂停/停止观察项"],
-    ];
+  function chainPrimaryAction(chain) {
+    const stage = chain.stage || "";
+    if (stage === "待验证") return { label: "启动实验", href: "/experiments", suggestion: "设计 7 天 MVP" };
+    if (stage === "进行中") return { label: "更新实验", href: "/experiments", suggestion: "更新实验进展或记录观察" };
+    if (stage === "待反馈") return { label: "记录反馈", href: "/feedback", suggestion: "记录真实反馈" };
+    if (stage === "待沉淀") return { label: "沉淀案例", href: "/assets", suggestion: "沉淀案例资产" };
+    if (stage === "待停止观察") return { label: "复盘判断", href: "/experiments", suggestion: "判断停止、调整或继续" };
+    if (stage === "已完成") return { label: "确认归档", href: "", suggestion: "已具备归档条件，可确认后归档" };
+    return { label: "查看机会", href: "/opportunities", suggestion: "确认下一步" };
+  }
+
+  function chainEditAction(chain) {
+    const stage = chain.stage || "";
+    if (stage === "待验证") return { label: "修改当前链路", href: "/opportunities" };
+    if (stage === "进行中" || stage === "待反馈" || stage === "待停止观察") {
+      return { label: "修改当前链路", href: "/experiments" };
+    }
+    if (stage === "待沉淀") return { label: "修改当前链路", href: "/feedback" };
+    if (stage === "已完成") return { label: "修改当前链路", href: "/assets" };
+    return { label: "修改当前链路", href: "/opportunities" };
+  }
+
+  function chainStep(label, item, fallback, metaParts = []) {
+    const meta = metaParts.filter(Boolean).join(" · ");
     return `
-      <section class="value-dashboard-signals">
-        ${groups.map(([title, items, empty]) => `
-          <div class="value-signal-group">
-            <h3>${escapeHtml(title)}</h3>
-            <div class="value-dashboard-list">
-              ${items.length ? items.slice(0, 4).join("") : `<p class="muted value-dashboard-empty">${escapeHtml(empty)}</p>`}
+      <div class="value-chain-step">
+        <span class="value-chain-step-label">${escapeHtml(label)}</span>
+        <strong>${escapeHtml(item?.title || fallback)}</strong>
+        ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      </div>
+    `;
+  }
+
+  function chainStatusLine(label, value, meta = "", tone = "") {
+    return `
+      <div class="value-chain-status-line ${tone ? `value-chain-status-line--${tone}` : ""}">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value || "未记录")}</strong>
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+      </div>
+    `;
+  }
+
+  function renderCurrentChainState(chain) {
+    const opportunity = chain.opportunity || {};
+    const experiment = chain.latest_experiment;
+    const feedback = chain.latest_feedback;
+    const asset = chain.latest_asset;
+    const stage = chain.stage || "";
+
+    if (stage === "待验证") {
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "机会待验证", "需要启动最小实验", "active")}
+          ${chainStatusLine("机会", opportunity.title || "未命名机会", `${opportunity.score || 0} 分 · ${opportunity.status || ""}`)}
+        </div>
+      `;
+    }
+    if (stage === "进行中") {
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "实验进行中", "继续推进并记录观察", "active")}
+          ${chainStatusLine("实验", experiment?.title || "当前实验", [experiment?.status, experiment?.experiment_type].filter(Boolean).join(" · "))}
+        </div>
+      `;
+    }
+    if (stage === "待反馈") {
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "等待真实反馈", "实验已有进展，需要补充反馈", "active")}
+          ${chainStatusLine("实验", experiment?.title || "当前实验", experiment?.status || "")}
+          <p class="value-chain-soft-note">反馈：尚未记录真实反馈</p>
+        </div>
+      `;
+    }
+    if (stage === "待沉淀") {
+      const sourceTitle = feedback?.title || experiment?.title || opportunity.title;
+      const sourceMeta = feedback?.level || experiment?.status || "";
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "结果待资产化", "把已验证结果沉淀为可复用资产", "active")}
+          ${chainStatusLine(feedback ? "最新反馈" : "最新实验", sourceTitle, sourceMeta)}
+          ${chainStatusLine("当前缺口", "还没有沉淀案例资产", "", "gap")}
+        </div>
+      `;
+    }
+    if (stage === "待停止观察") {
+      const source = experiment || opportunity;
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "需要停止/调整判断", "先复盘，再决定继续投入", "active")}
+          ${chainStatusLine(experiment ? "相关实验" : "相关机会", source?.title || source?.name || opportunity.title, source?.status || "")}
+        </div>
+      `;
+    }
+    if (stage === "已完成") {
+      return `
+        <div class="value-chain-current">
+          ${chainStatusLine("当前状态", "已沉淀资产", "可以复用，也可以从首页归档", "active")}
+          ${chainStatusLine("资产", asset?.title || "已沉淀资产", [asset?.asset_level, asset?.asset_type].filter(Boolean).join(" · "))}
+          <div class="value-chain-reuse-actions">
+            <a href="/assets">查看资产</a>
+            <a href="/assets">复用资产</a>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="value-chain-current">
+        ${chainStatusLine("当前状态", stage || "待确认", chain.stage_reason || "")}
+        ${chainStatusLine("机会", opportunity.title || "未命名机会", opportunity.status || "")}
+      </div>
+    `;
+  }
+
+  function chainSupplementItem(label, title, meta = "", extraHtml = "") {
+    return `
+      <div class="value-chain-supplement-item">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(title || "未记录")}</strong>
+        ${meta ? `<small>${escapeHtml(meta)}</small>` : ""}
+        ${extraHtml}
+      </div>
+    `;
+  }
+
+  function renderChainSupplement(chain) {
+    const items = [];
+    const experiment = chain.latest_experiment;
+    const feedback = chain.latest_feedback;
+    const asset = chain.latest_asset;
+    if (experiment) {
+      items.push(chainSupplementItem(
+        "当前实验",
+        experiment.title,
+        [experiment.status, experiment.experiment_type].filter(Boolean).join(" · ")
+      ));
+    }
+    if (feedback) {
+      items.push(chainSupplementItem(
+        "最新反馈",
+        feedback.title,
+        [feedback.level, feedback.source].filter(Boolean).join(" · ")
+      ));
+    } else if (chain.stage === "待反馈") {
+      items.push(chainSupplementItem("反馈状态", "尚未记录真实反馈", "补充一次真实反馈后再判断是否沉淀"));
+    }
+    if (asset) {
+      items.push(chainSupplementItem(
+        "已沉淀资产",
+        asset.title,
+        [asset.asset_level, asset.asset_type].filter(Boolean).join(" · "),
+        `<a href="/assets">查看资产</a>`
+      ));
+    } else if (chain.stage === "待沉淀") {
+      items.push(chainSupplementItem("资产化缺口", "还没有沉淀案例资产", "优先把强反馈或已验证结果沉淀为案例资产"));
+    }
+    if (!items.length) {
+      const hint = chain.stage === "待验证"
+        ? "暂无更多补充信息，建议先启动实验。"
+        : "当前暂无更多链路补充信息，可通过回查链路查看完整历史。";
+      return `<p class="value-chain-supplement-empty">${escapeHtml(hint)}</p>`;
+    }
+    return `<div class="value-chain-supplement-list">${items.join("")}</div>`;
+  }
+
+  function chainCompactSummary(chain) {
+    const opportunity = chain.opportunity || {};
+    const experiment = chain.latest_experiment;
+    const feedback = chain.latest_feedback;
+    const asset = chain.latest_asset;
+    const stage = chain.stage || "";
+    if (stage === "待验证") return "当前：机会待验证，需要启动最小实验";
+    if (stage === "进行中") {
+      return `当前：实验进行中，${experiment?.title || opportunity.title || "当前实验"}`;
+    }
+    if (stage === "待反馈") {
+      return `当前：等待真实反馈，${experiment?.title || "当前实验"}尚未记录反馈`;
+    }
+    if (stage === "待沉淀") {
+      if (feedback) return `当前：已有 ${String(feedback.level || "强")} 反馈，尚未沉淀案例资产`;
+      return "当前：结果待资产化，尚未沉淀案例资产";
+    }
+    if (stage === "待停止观察") {
+      return `当前：需要停止/调整判断，${experiment?.status || opportunity.status || "状态待确认"}`;
+    }
+    if (stage === "已完成") {
+      return `当前：已沉淀资产：${asset?.title || "可复用资产"}`;
+    }
+    return `当前：${chain.stage_reason || stage || "待确认"}`;
+  }
+
+  function renderChainCard(chain) {
+    const opportunity = chain.opportunity || {};
+    const action = chainPrimaryAction(chain);
+    const editAction = chainEditAction(chain);
+    const actionHtml = action.href
+      ? `<a class="btn btn-sm btn-primary value-chain-primary-action" href="${escapeAttr(action.href)}">${escapeHtml(action.label)}</a>`
+      : `<button type="button" class="btn btn-sm btn-primary value-chain-primary-action btn-chain-complete">${escapeHtml(action.label)}</button>`;
+    return `
+      <article class="value-chain-card" data-opportunity-id="${opportunity.id}" data-links-url="${escapeAttr(chain.links_url || "")}">
+        <div class="value-chain-compact">
+          <div class="value-chain-main">
+            <div class="value-chain-title-row">
+              <h3>${escapeHtml(opportunity.title || "未命名机会")}</h3>
+              <span class="value-chain-stage value-chain-stage--${chainStageClass(chain.stage)}">${escapeHtml(chain.stage || "待确认")}</span>
+            </div>
+            <p class="value-chain-current-line">${escapeHtml(chainCompactSummary(chain))}</p>
+          </div>
+          <div class="value-chain-action-summary">
+            <p><span>下一步</span>${escapeHtml(chain.next_action || action.suggestion)}</p>
+            <div class="value-chain-counts">
+              <span>实验 ${Number(chain.counts?.experiments || 0)}</span>
+              <span>反馈 ${Number(chain.counts?.feedback || 0)}</span>
+              <span>资产 ${Number(chain.counts?.assets || 0)}</span>
             </div>
           </div>
-        `).join("")}
-      </section>
+          <div class="value-chain-primary-actions">
+            ${actionHtml}
+            <button type="button" class="btn btn-sm btn-ghost btn-chain-expand" aria-expanded="false">展开</button>
+          </div>
+        </div>
+        <div class="value-chain-details" hidden>
+          ${renderChainSupplement(chain)}
+          <div class="value-chain-foot">
+            <div class="value-chain-actions">
+              <button type="button" class="btn btn-sm btn-ghost btn-chain-links" aria-expanded="false">回查链路</button>
+              <a class="btn btn-sm btn-ghost btn-chain-edit" href="${escapeAttr(editAction.href)}">${escapeHtml(editAction.label)}</a>
+              <button type="button" class="btn btn-sm btn-ghost btn-chain-archive">归档</button>
+            </div>
+          </div>
+          <div class="value-chain-links-panel" hidden></div>
+        </div>
+      </article>
     `;
+  }
+
+  function renderChainLinksPanel(links, chain) {
+    return `
+      <div class="value-chain-links-summary">
+        <span>关联实验 ${Number(links.counts?.experiments || 0)}</span>
+        <span>关联反馈 ${Number(links.counts?.feedback || 0)}</span>
+        <span>关联资产 ${Number(links.counts?.assets || 0)}</span>
+      </div>
+      <div class="value-chain-links-latest">
+        ${chainStep("最新实验", chain.latest_experiment, "暂无实验", [
+          chain.latest_experiment?.status,
+          chain.latest_experiment?.experiment_type,
+        ])}
+        ${chainStep("最新反馈", chain.latest_feedback, "暂无反馈", [
+          chain.latest_feedback?.level,
+          chain.latest_feedback?.source,
+        ])}
+        ${chainStep("最新资产", chain.latest_asset, "暂无案例资产", [
+          chain.latest_asset?.asset_level,
+          chain.latest_asset?.asset_type,
+        ])}
+      </div>
+      <a class="btn btn-sm btn-ghost value-chain-full-link" href="/opportunities">去机会页查看完整链路</a>
+    `;
+  }
+
+  async function toggleChainLinks(card, chain) {
+    const button = card.querySelector(".btn-chain-links");
+    const panel = card.querySelector(".value-chain-links-panel");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    if (expanded) {
+      button.setAttribute("aria-expanded", "false");
+      button.textContent = "回查链路";
+      panel.hidden = true;
+      return;
+    }
+    button.setAttribute("aria-expanded", "true");
+    button.textContent = "收起回查";
+    panel.hidden = false;
+    panel.innerHTML = `<p class="form-hint">链路加载中…</p>`;
+    try {
+      const links = await apiRequest(chain.links_url);
+      panel.innerHTML = renderChainLinksPanel(links, chain);
+    } catch (err) {
+      panel.innerHTML = `<p class="form-hint">链路加载失败</p>`;
+    }
+  }
+
+  async function archiveChain(chain) {
+    const opportunity = chain.opportunity || {};
+    if (!opportunity.id) return;
+    if (!confirm(`确认归档「${opportunity.title || "未命名机会"}」？归档后仍可在机会页查看。`)) return;
+    await apiRequest(`/api/opportunities/${opportunity.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "已归档" }),
+    });
+    showToast("链路已归档", "success");
+    await loadDashboard();
+  }
+
+  function toggleChainDetails(card) {
+    const button = card.querySelector(".btn-chain-expand");
+    const details = card.querySelector(".value-chain-details");
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    button.setAttribute("aria-expanded", expanded ? "false" : "true");
+    button.textContent = expanded ? "展开" : "收起";
+    details.hidden = expanded;
+  }
+
+  function bindValueChainCards(chains) {
+    valueEl.querySelectorAll(".value-chain-card").forEach((card) => {
+      const opportunityId = Number(card.dataset.opportunityId);
+      const chain = chains.find((item) => item.opportunity?.id === opportunityId);
+      if (!chain) return;
+      card.querySelector(".btn-chain-expand")?.addEventListener("click", () => toggleChainDetails(card));
+      card.querySelector(".btn-chain-links")?.addEventListener("click", () => toggleChainLinks(card, chain));
+      card.querySelector(".btn-chain-archive")?.addEventListener("click", () => archiveChain(chain));
+      card.querySelector(".btn-chain-complete")?.addEventListener("click", () => {
+        showToast("该链路已完成，可使用归档按钮从首页移出。", "success");
+      });
+    });
   }
 
   function renderValueDashboard(data) {
     if (!valueEl) return;
-    valueEl.innerHTML = [
-      renderValueSignalRows(data),
-      valueList(
-        "高分机会",
-        data.high_score_opportunities || [],
-        (item) => valueItem(item.name, `${item.total_score || 0} 分 · ${item.status || ""}`),
-        "暂无高分机会"
-      ),
-      valueList(
-        "进行中的实验",
-        data.running_experiments || [],
-        (item) => valueItem(item.name, `${item.status || ""} · ${item.experiment_type || ""}`),
-        "暂无进行中的实验"
-      ),
-      valueList(
-        "L4/L5 反馈",
-        data.strong_feedback || [],
-        (item) => valueItem(item.title, `${item.source || ""} · ${item.level || ""}`),
-        "暂无强反馈"
-      ),
-      valueList(
-        "案例资产",
-        data.case_assets || [],
-        (item) => valueItem(item.title, `${item.asset_level || ""} · ${item.asset_type || ""}`),
-        "暂无案例/产品/筹码资产"
-      ),
-    ].join("");
+    const chains = data.chains || [];
+    if (!chains.length) {
+      valueEl.innerHTML = `
+        <div class="value-chain-overview">
+          <div class="value-chain-summary">
+            <strong>未归档链路 0 条</strong>
+            <span>暂无未归档价值链路。</span>
+          </div>
+          <div class="empty-state empty-state-compact">
+            <strong>暂无未归档价值链路</strong>
+            你可以从机会页新增机会，或在归档链路中查看历史。
+          </div>
+        </div>
+      `;
+      return;
+    }
+    valueEl.innerHTML = `
+      <div class="value-chain-overview">
+        <div class="value-chain-summary">
+          <strong>未归档链路 ${chains.length} 条</strong>
+          <span>按机会聚合最新实验、反馈和案例资产</span>
+        </div>
+        <div class="value-chain-list">
+          ${chains.map(renderChainCard).join("")}
+        </div>
+      </div>
+    `;
+    bindValueChainCards(chains);
   }
 
   async function loadDashboard() {
@@ -783,7 +1016,6 @@ document.addEventListener("DOMContentLoaded", () => {
     renderCockpitSummary(data, valueData, todayTasks);
     if (valueData) {
       renderValueDashboard(valueData);
-      renderAssetCompound(valueData);
     }
   }
 

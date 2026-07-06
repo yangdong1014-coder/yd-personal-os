@@ -126,25 +126,31 @@
     `;
   }
 
-  function linkList(title, items, labelKey) {
-    if (!items?.length) return `<div class="value-link-row"><strong>${title}</strong><span>暂无关联</span></div>`;
-    return `
-      <div class="value-link-row">
-        <strong>${title}</strong>
-        <ul>${items.map((row) => `<li>${escapeHtml(row[labelKey] || row.title || row.name || `#${row.id}`)}</li>`).join("")}</ul>
-      </div>
-    `;
-  }
-
   function renderLinks(links) {
+    const feedback = (links.feedback || [])[0];
+    const asset = (links.assets || [])[0];
+    const feedbackCount = Number(links.counts?.feedback || 0);
+    const assetCount = Number(links.counts?.assets || 0);
+    if (!feedbackCount && !assetCount) {
+      return `<p class="experiment-link-empty">暂无下游反馈或案例资产，建议先生成反馈验证实验结果。</p>`;
+    }
     return `
-      <div class="value-link-counts">
-        <span>来源机会：${escapeHtml(links.opportunity?.name || "无")}</span>
-        <span>反馈 ${links.counts?.feedback || 0}</span>
-        <span>案例资产 ${links.counts?.assets || 0}</span>
+      <div class="experiment-link-summary">
+        ${feedback ? `
+          <div class="experiment-link-summary-item">
+            <span>最新反馈</span>
+            <strong>${escapeHtml(feedback.title || `#${feedback.id}`)}</strong>
+            <small>${escapeHtml([feedback.level, `反馈 ${feedbackCount}`].filter(Boolean).join(" · "))}</small>
+          </div>
+        ` : ""}
+        ${asset ? `
+          <div class="experiment-link-summary-item">
+            <span>最新案例资产</span>
+            <strong>${escapeHtml(asset.title || `#${asset.id}`)}</strong>
+            <small>${escapeHtml([asset.asset_level, `资产 ${assetCount}`].filter(Boolean).join(" · "))}</small>
+          </div>
+        ` : ""}
       </div>
-      ${linkList("反馈", links.feedback || [], "title")}
-      ${linkList("案例资产", links.assets || [], "title")}
     `;
   }
 
@@ -157,31 +163,46 @@
     if (hasContent(item.hypothesis)) tags.push(["有假设", "positive"]);
     if (hasContent(item.minimum_action)) tags.push(["有最小行动", "positive"]);
     if (hasContent(item.failure_criteria)) tags.push(["有失败标准", "warning"]);
+    if (hasContent(item.success_criteria)) tags.push(["有成功标准", "muted"]);
     if (hasContent(item.next_decision)) tags.push(["有下一决策", "muted"]);
-    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+    return tags.map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
   }
 
-  function renderMvpLayerTag(item) {
+  function mvpLayerLabel(item) {
     const type = item.experiment_type || "";
     let label = "表达 MVP";
-    let tone = "expression";
     if (type === "交易型MVP") {
       label = "交易 MVP";
-      tone = "transaction";
     } else if (type === "反证型MVP") {
       label = "想法 MVP";
-      tone = "idea";
     } else if (type === "功能型MVP") {
       label = "流程 MVP";
-      tone = "process";
     } else if (type === "结果型MVP" && (hasContent(item.real_feedback) || hasContent(item.data_result))) {
       label = "流程 MVP";
-      tone = "process";
     } else if (hasContent(item.minimum_action) && hasContent(item.failure_criteria)) {
       label = "流程 MVP";
-      tone = "process";
     }
-    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+    return label;
+  }
+
+  function renderExperimentMetaTags(item) {
+    return `
+      <div class="experiment-meta-tags">
+        ${item.real_feedback ? `<span class="kernel-tag kernel-tag--positive">已有反馈</span>` : ""}
+        ${item.data_result ? `<span class="kernel-tag kernel-tag--positive">有结果数据</span>` : ""}
+        ${renderKernelTags(item)}
+      </div>
+    `;
+  }
+
+  function renderExperimentTitleMeta(item) {
+    return `
+      <div class="experiment-title-meta">
+        <span>${escapeHtml(item.status || "设计中")}</span>
+        <span>${escapeHtml(item.experiment_type || "结果型MVP")}</span>
+        <span>来源机会：${escapeHtml(item.opportunity_name || "无")}</span>
+      </div>
+    `;
   }
 
   async function toggleLinks(el, item) {
@@ -208,25 +229,103 @@
     }
   }
 
+  const AI_ACTIONS = {
+    advance: { label: "AI推进", endpoint: "/api/ai/experiment-advance" },
+    redTeam: { label: "AI审查", endpoint: "/api/ai/experiment-red-team" },
+    audit: { label: "AI审计", endpoint: "/api/ai/experiment-audit" },
+  };
+
+  function renderAiTools() {
+    return `
+      <div class="value-ai-tool-row" aria-label="AI 工具">
+        <span class="value-ai-tool-label">AI</span>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="advance">AI推进</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="redTeam">AI审查</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="audit">AI审计</button>
+      </div>
+    `;
+  }
+
+  function renderAiResult(result) {
+    const sections = (result.sections || [])
+      .map((section) => `
+        <section class="ai-result-section">
+          <h4>${escapeHtml(section.title)}</h4>
+          <ul>${(section.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </section>
+      `)
+      .join("");
+    return `
+      <div class="ai-result-panel">
+        <p class="ai-result-summary">${formatText(result.summary || "")}</p>
+        ${sections}
+        <div class="ai-result-next">
+          <strong>下一步</strong>
+          <p>${formatText(result.next_action || result.recommendation || "")}</p>
+        </div>
+        ${result.recommendation ? `<p class="ai-result-recommendation">${formatText(result.recommendation)}</p>` : ""}
+        <div class="ai-result-actions">
+          <button type="button" class="btn btn-sm btn-ghost btn-copy-ai-result">复制建议</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function aiResultText(result) {
+    const parts = [result.title, result.summary];
+    (result.sections || []).forEach((section) => {
+      parts.push(section.title);
+      (section.items || []).forEach((item) => parts.push(`- ${item}`));
+    });
+    parts.push(`下一步：${result.next_action || result.recommendation || ""}`);
+    return parts.filter(Boolean).join("\n");
+  }
+
+  async function runAiAction(item, actionKey, button) {
+    const config = AI_ACTIONS[actionKey];
+    if (!config) return;
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "AI处理中…";
+    try {
+      const result = await apiRequest(config.endpoint, {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      });
+      showAIViewModal({
+        title: result.title || `${config.label}结果`,
+        bodyHtml: renderAiResult(result),
+      });
+      setTimeout(() => {
+        const copyBtn = document.querySelector(".btn-copy-ai-result");
+        copyBtn?.addEventListener("click", async () => {
+          await navigator.clipboard?.writeText(aiResultText(result));
+          showToast("AI建议已复制", "success");
+        });
+      }, 0);
+    } catch (err) {
+      showToast(err.message || `${config.label}失败，请检查模型配置或稍后重试`, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
   function card(item) {
     return `
       <article class="entity-card value-card" data-id="${item.id}">
         <div class="value-card-head">
-          <div>
+          <div class="experiment-title-wrap">
             <h3 class="entity-title">${escapeHtml(item.name)}</h3>
-            <p class="entity-meta">${escapeHtml(item.status)} · ${escapeHtml(item.experiment_type)}${item.opportunity_name ? ` · ${escapeHtml(item.opportunity_name)}` : ""}</p>
+            ${renderExperimentTitleMeta(item)}
+          </div>
+          <div class="experiment-card-tools">
+            ${renderAiTools()}
           </div>
         </div>
         <p class="value-card-summary">${formatText(item.hypothesis || item.minimum_action || "暂无实验假设")}</p>
         ${renderExperimentDiscipline(item)}
-        <div class="value-card-meta">
-          <span class="tag">来源机会：${escapeHtml(item.opportunity_name || "无")}</span>
-          ${item.success_criteria ? `<span class="tag">成功标准</span>` : ""}
-          ${item.real_feedback ? `<span class="tag">已有反馈</span>` : ""}
-          ${item.data_result ? `<span class="tag">有结果数据</span>` : ""}
-        </div>
-        ${renderMvpLayerTag(item)}
-        <div class="kernel-tag-row">${renderKernelTags(item)}</div>
+        ${renderExperimentMetaTags(item)}
         <div class="value-link-strip">
           <span class="value-link-summary">关联链路：待查看</span>
           <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
@@ -255,6 +354,9 @@
     listEl.querySelectorAll(".value-card").forEach((el) => {
       const item = items.find((row) => row.id === Number(el.dataset.id));
       el.querySelector(".btn-links").addEventListener("click", () => toggleLinks(el, item));
+      el.querySelectorAll(".btn-ai-value").forEach((button) => {
+        button.addEventListener("click", () => runAiAction(item, button.dataset.aiAction, button));
+      });
       el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
       el.querySelector(".btn-feedback").addEventListener("click", () => createFeedback(item));
       el.querySelector(".btn-delete").addEventListener("click", async () => {

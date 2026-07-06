@@ -136,24 +136,32 @@
     }
     if (hasContent(item.next_action)) tags.push(["有后续动作", "positive"]);
     if (hasContent(item.evidence) && !strongFeedback) tags.push(["待证据升级", "warning"]);
-    return tags.slice(0, 3).map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
+    return tags.map(([label, tone]) => `<span class="kernel-tag kernel-tag--${tone}">${label}</span>`).join("");
   }
 
-  function renderMvpLayerTag(item) {
+  function mvpSignalLabel(item) {
     const level = item.level || "";
     let label = "想法 MVP 信号";
-    let tone = "idea";
     if (level.startsWith("L4") || level.startsWith("L5")) {
       label = "交易 MVP 信号";
-      tone = "transaction";
     } else if (level.startsWith("L3")) {
       label = "流程 MVP 信号";
-      tone = "process";
     } else if (level.startsWith("L2")) {
       label = "表达 MVP 信号";
-      tone = "expression";
     }
-    return `<div class="mvp-layer-tag-row"><span class="mvp-layer-tag mvp-layer-tag--${tone}">${label}</span></div>`;
+    return label;
+  }
+
+  function renderFeedbackMetaTags(item, strongFeedback) {
+    return `
+      <div class="feedback-meta-tags">
+        <span class="kernel-tag kernel-tag--muted">关联对象：${escapeHtml(relationLabel(item))}</span>
+        <span class="kernel-tag kernel-tag--muted">${escapeHtml(mvpSignalLabel(item))}</span>
+        ${item.evidence ? `<span class="kernel-tag kernel-tag--positive">有证据</span>` : ""}
+        ${strongFeedback ? `<span class="kernel-tag kernel-tag--positive">强反馈</span>` : ""}
+        ${renderKernelTags(item, strongFeedback)}
+      </div>
+    `;
   }
 
   async function toggleLinks(el, item) {
@@ -180,24 +188,103 @@
     }
   }
 
+  const AI_ACTIONS = {
+    advance: { label: "AI推进", endpoint: "/api/ai/feedback-advance" },
+    redTeam: { label: "AI审查", endpoint: "/api/ai/feedback-red-team" },
+    audit: { label: "AI审计", endpoint: "/api/ai/feedback-audit" },
+  };
+
+  function renderAiTools() {
+    return `
+      <div class="value-ai-tool-row" aria-label="AI 工具">
+        <span class="value-ai-tool-label">AI</span>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="advance">AI推进</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="redTeam">AI审查</button>
+        <button type="button" class="btn btn-sm btn-ai btn-ai-value" data-ai-action="audit">AI审计</button>
+      </div>
+    `;
+  }
+
+  function renderAiResult(result) {
+    const sections = (result.sections || [])
+      .map((section) => `
+        <section class="ai-result-section">
+          <h4>${escapeHtml(section.title)}</h4>
+          <ul>${(section.items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </section>
+      `)
+      .join("");
+    return `
+      <div class="ai-result-panel">
+        <p class="ai-result-summary">${formatText(result.summary || "")}</p>
+        ${sections}
+        <div class="ai-result-next">
+          <strong>下一步</strong>
+          <p>${formatText(result.next_action || result.recommendation || "")}</p>
+        </div>
+        ${result.recommendation ? `<p class="ai-result-recommendation">${formatText(result.recommendation)}</p>` : ""}
+        <div class="ai-result-actions">
+          <button type="button" class="btn btn-sm btn-ghost btn-copy-ai-result">复制建议</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function aiResultText(result) {
+    const parts = [result.title, result.summary];
+    (result.sections || []).forEach((section) => {
+      parts.push(section.title);
+      (section.items || []).forEach((item) => parts.push(`- ${item}`));
+    });
+    parts.push(`下一步：${result.next_action || result.recommendation || ""}`);
+    return parts.filter(Boolean).join("\n");
+  }
+
+  async function runAiAction(item, actionKey, button) {
+    const config = AI_ACTIONS[actionKey];
+    if (!config) return;
+    const prevText = button.textContent;
+    button.disabled = true;
+    button.textContent = "AI处理中…";
+    try {
+      const result = await apiRequest(config.endpoint, {
+        method: "POST",
+        body: JSON.stringify({ id: item.id }),
+      });
+      showAIViewModal({
+        title: result.title || `${config.label}结果`,
+        bodyHtml: renderAiResult(result),
+      });
+      setTimeout(() => {
+        const copyBtn = document.querySelector(".btn-copy-ai-result");
+        copyBtn?.addEventListener("click", async () => {
+          await navigator.clipboard?.writeText(aiResultText(result));
+          showToast("AI建议已复制", "success");
+        });
+      }, 0);
+    } catch (err) {
+      showToast(err.message || `${config.label}失败，请检查模型配置或稍后重试`, "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = prevText;
+    }
+  }
+
   function card(item) {
     const strongFeedback = isStrongFeedback(item);
     return `
       <article class="entity-card value-card" data-id="${item.id}">
-        <div class="value-card-head">
-          <div>
-            <h3 class="entity-title">${escapeHtml(item.title)}</h3>
-            <p class="entity-meta">${escapeHtml(item.source)} · ${escapeHtml(item.level)}</p>
+        <div class="feedback-card-header">
+          <h3 class="entity-title feedback-card-title">${escapeHtml(item.title)}</h3>
+          <div class="feedback-card-head-tools">
+            <span class="feedback-card-meta">${escapeHtml(item.source)} · ${escapeHtml(item.level)}</span>
+            <div class="feedback-card-tools">
+              ${renderAiTools()}
+            </div>
           </div>
         </div>
         <p class="value-card-summary">${formatText(item.content || item.evidence || "暂无反馈内容")}</p>
-        <div class="value-card-meta">
-          <span class="tag">关联对象：${escapeHtml(relationLabel(item))}</span>
-          ${item.evidence ? `<span class="tag">有证据</span>` : ""}
-          ${strongFeedback ? `<span class="tag">强反馈：适合沉淀为案例资产</span>` : ""}
-        </div>
-        ${renderMvpLayerTag(item)}
-        <div class="kernel-tag-row">${renderKernelTags(item, strongFeedback)}</div>
+        ${renderFeedbackMetaTags(item, strongFeedback)}
         <div class="value-link-strip">
           <span class="value-link-summary">已生成案例资产：待查看</span>
           <button type="button" class="btn btn-sm btn-ghost btn-links" aria-expanded="false">查看链路</button>
@@ -226,6 +313,9 @@
       });
       el.querySelector(".btn-create-asset").addEventListener("click", () => {
         createCaseAsset(item).catch((err) => showToast(err.message, "error"));
+      });
+      el.querySelectorAll(".btn-ai-value").forEach((button) => {
+        button.addEventListener("click", () => runAiAction(item, button.dataset.aiAction, button));
       });
       el.querySelector(".btn-edit").addEventListener("click", () => openEditor(item));
       el.querySelector(".btn-delete").addEventListener("click", async () => {

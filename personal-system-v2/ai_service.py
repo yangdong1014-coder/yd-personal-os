@@ -80,6 +80,131 @@ def _filter_capability_tags(tags):
     return [t for t in tags if t in database.CAPABILITY_MODULES]
 
 
+VALUE_CHAIN_OBJECTS = {
+    "opportunity": {
+        "label": "机会",
+        "getter": database.get_opportunity,
+        "links": database.get_opportunity_links,
+    },
+    "experiment": {
+        "label": "实验",
+        "getter": database.get_experiment,
+        "links": database.get_experiment_links,
+    },
+    "feedback": {
+        "label": "反馈",
+        "getter": database.get_feedback_item,
+        "links": database.get_feedback_links,
+    },
+}
+
+VALUE_CHAIN_AI_ACTIONS = {
+    "advance": {
+        "label": "AI 推进",
+        "goal": "帮助用户把当前对象推进到价值链路的下一步，输出低成本、可执行的行动建议。",
+    },
+    "red_team": {
+        "label": "AI 对抗性审查",
+        "goal": "反证、挑错、压缩成本，指出假设、风险和证据不足，防止自嗨投入。",
+    },
+    "audit": {
+        "label": "AI 审计",
+        "goal": "按清单判断当前对象是否满足进入下一阶段的条件，并输出缺失项和结论。",
+    },
+}
+
+
+def _safe_links(loader, entity_id):
+    try:
+        return loader(entity_id)
+    except ValueError:
+        return {}
+
+
+def _normalize_value_chain_ai_result(data, object_label, action_label):
+    if not isinstance(data, dict):
+        data = {}
+    sections = data.get("sections") or []
+    if not isinstance(sections, list):
+        sections = []
+    normalized_sections = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        title = str(section.get("title") or "").strip()
+        items = section.get("items") or []
+        if not isinstance(items, list):
+            items = [items]
+        items = [str(item).strip() for item in items if str(item).strip()]
+        if title and items:
+            normalized_sections.append({"title": title, "items": items})
+
+    title = str(data.get("title") or f"{object_label}{action_label}结果").strip()
+    summary = str(data.get("summary") or "").strip()
+    recommendation = str(data.get("recommendation") or "").strip()
+    next_action = str(data.get("next_action") or recommendation or "").strip()
+    raw = str(data.get("raw") or "").strip()
+    if not summary and normalized_sections:
+        summary = "；".join(normalized_sections[0]["items"][:2])
+    if not recommendation:
+        recommendation = next_action or "请先补充关键证据后再继续推进。"
+    if not next_action:
+        next_action = recommendation
+
+    return {
+        "title": title,
+        "summary": summary,
+        "sections": normalized_sections,
+        "recommendation": recommendation,
+        "next_action": next_action,
+        "raw": raw,
+    }
+
+
+def value_chain_ai_advice(object_type, action, entity_id):
+    object_config = VALUE_CHAIN_OBJECTS.get(object_type)
+    action_config = VALUE_CHAIN_AI_ACTIONS.get(action)
+    if not object_config or not action_config:
+        raise AIServiceError("未知的价值链 AI 能力")
+
+    entity = object_config["getter"](entity_id)
+    if not entity:
+        raise AIServiceError(f"{object_config['label']}不存在")
+
+    links = _safe_links(object_config["links"], entity_id)
+    context = {
+        "object_type": object_type,
+        "object_label": object_config["label"],
+        "action": action,
+        "action_label": action_config["label"],
+        "entity": entity,
+        "links": links,
+    }
+    context_json = json.dumps(context, ensure_ascii=False, default=str, indent=2)
+    system_prompt = load_prompt(
+        "value_chain",
+        "analyze",
+        object_type_label=object_config["label"],
+        action_label=action_config["label"],
+        role_goal=action_config["goal"],
+    )
+    user_prompt = load_prompt(
+        "value_chain",
+        "analyze",
+        kind="user",
+        object_type_label=object_config["label"],
+        action_label=action_config["label"],
+        context_json=context_json,
+    )
+
+    data = _chat_json(system_prompt, user_prompt)
+    return _normalize_value_chain_ai_result(
+        data,
+        object_config["label"],
+        action_config["label"],
+    )
+
+
 def refine_review_to_asset(review_id):
     review = database.get_review(review_id)
     if not review:

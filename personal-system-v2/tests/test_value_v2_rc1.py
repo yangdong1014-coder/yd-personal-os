@@ -1,6 +1,8 @@
 import json
 import sqlite3
+from pathlib import Path
 
+import ai_service
 import database
 
 
@@ -439,12 +441,310 @@ def test_health_and_homepage_for_value_rc1(client):
     home = client.get("/")
     assert home.status_code == 200
     html = home.get_data(as_text=True)
-    assert "PSY-2.0 价值实验" in html
+    assert "价值链路总览" in html
+    assert "按机会聚合当前未归档链路" in html
+    assert "<h2>资产复利</h2>" not in html
+    assert "asset-compound" not in html
     assert "审计机会" in html
 
 
+def test_value_chain_homepage_semantic_actions_are_present():
+    index_js = Path("static/js/index.js").read_text(encoding="utf-8")
+
+    for text in (
+        "启动实验",
+        "更新实验",
+        "记录反馈",
+        "沉淀案例",
+        "复盘判断",
+        "确认归档",
+        "回查链路",
+        "修改当前链路",
+        "已沉淀资产",
+        "查看资产",
+        "复用资产",
+        "当前缺口",
+        "还没有沉淀案例资产",
+        "当前状态",
+        "机会待验证",
+        "实验进行中",
+        "等待真实反馈",
+        "结果待资产化",
+        "需要停止/调整判断",
+        "value-chain-compact",
+        "value-chain-details",
+        "value-chain-supplement-list",
+        "value-chain-supplement-empty",
+        "暂无更多补充信息，建议先启动实验。",
+        "btn-chain-expand",
+        "展开",
+        "去机会页查看完整链路",
+    ):
+        assert text in index_js
+    assert "value-chain-flow" not in index_js
+    assert '<div class="value-chain-details" hidden>' in index_js
+    assert "renderChainSupplement(chain)" in index_js
+    assert index_js.index("btn-chain-expand") < index_js.index("btn-chain-links")
+
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+    assert ".value-chain-supplement-list" in main_css
+    assert ".value-chain-detail-grid" not in main_css
+    assert "grid-template-columns: 1fr;" in main_css
+
+
+def test_opportunity_center_cards_are_compact_and_links_are_stateful():
+    opportunities_js = Path("static/js/opportunities.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    for text in (
+        "expandedOpportunityLinks",
+        "linksCache",
+        "listEl.addEventListener",
+        "收起链路",
+        "查看链路",
+        "opportunity-card-title-row",
+        "opportunity-card-source-meta",
+        "opportunity-card-tools",
+        "opportunity-card-badges",
+        "opportunity-status-badge",
+        "opportunity-link-latest-grid",
+        "暂无下游链路，建议先创建实验验证该机会。",
+        "去实验页",
+        "去反馈页",
+        "去资产页",
+    ):
+        assert text in opportunities_js
+    assert "renderMvpLayerTag(item)" not in opportunities_js
+    assert "renderDiscipline(item.status)" not in opportunities_js
+    assert '<p class="entity-meta">${escapeHtml(item.source || "未记录来源")}</p>' not in opportunities_js
+    assert 'class="btn btn-sm btn-ghost btn-links"' in opportunities_js
+    assert "btn-links-action" not in opportunities_js
+    assert 'closest(".btn-links")' in opportunities_js
+    assert "expandedOpportunityLinks.delete(item.id)" in opportunities_js
+    assert opportunities_js.count("${renderAiTools()}") == 1
+    assert "value-link-panel[hidden]" in main_css
+    assert ".opportunity-card-title-row" in main_css
+    assert ".opportunity-card-source-meta" in main_css
+    assert ".opportunity-card-tools" in main_css
+    assert ".value-link-summary" in main_css
+    assert ".value-link-strip .btn-links" in main_css
+
+
+def test_experiment_cards_use_single_meta_tag_row():
+    experiments_js = Path("static/js/experiments.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    assert "experiment-meta-tags" in experiments_js
+    assert "renderExperimentMetaTags(item)" in experiments_js
+    assert "experiment-title-meta" in experiments_js
+    assert "renderExperimentTitleMeta(item)" in experiments_js
+    assert "experiment-card-tools" in experiments_js
+    assert experiments_js.count("${renderAiTools()}") == 1
+    assert "来源机会：" in experiments_js
+    assert "有假设" in experiments_js
+    assert "有最小行动" in experiments_js
+    assert "有失败标准" in experiments_js
+    assert "有成功标准" in experiments_js
+    assert "暂无下游反馈或案例资产，建议先生成反馈验证实验结果。" in experiments_js
+    assert "experiment-link-summary" in experiments_js
+    assert "renderMvpLayerTag(item)" not in experiments_js
+    assert '<div class="value-card-meta">' not in experiments_js
+    assert '<div class="kernel-tag-row">${renderKernelTags(item)}</div>' not in experiments_js
+    assert "linkList(" not in experiments_js
+    assert ".experiment-meta-tags" in main_css
+    assert ".experiment-title-meta" in main_css
+    assert ".experiment-card-tools" in main_css
+    assert ".experiment-link-summary" in main_css
+    assert "flex-wrap: wrap;" in main_css
+
+
+def test_feedback_cards_use_single_meta_tag_row():
+    feedback_js = Path("static/js/feedback.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    assert "feedback-card-header" in feedback_js
+    assert "feedback-card-meta" in feedback_js
+    assert "feedback-card-tools" in feedback_js
+    assert "feedback-card-head-tools" in feedback_js
+    assert feedback_js.count("${renderAiTools()}") == 1
+    assert '<p class="entity-meta">${escapeHtml(item.source)} · ${escapeHtml(item.level)}</p>' not in feedback_js
+    assert "feedback-meta-tags" in feedback_js
+    assert "renderFeedbackMetaTags(item, strongFeedback)" in feedback_js
+    assert "关联对象：" in feedback_js
+    assert "有证据" in feedback_js
+    assert "强反馈" in feedback_js
+    assert "有上游链路" in feedback_js
+    assert "MVP 信号" in feedback_js
+    assert "renderMvpLayerTag(item)" not in feedback_js
+    assert '<div class="value-card-meta">' not in feedback_js
+    assert '<div class="kernel-tag-row">${renderKernelTags(item, strongFeedback)}</div>' not in feedback_js
+    assert ".feedback-card-header" in main_css
+    assert ".feedback-card-meta" in main_css
+    assert ".feedback-card-tools" in main_css
+    assert ".feedback-card-head-tools" in main_css
+    assert ".feedback-meta-tags" in main_css
+    assert "flex-wrap: wrap;" in main_css
+
+
+def test_asset_cards_follow_value_card_information_layers():
+    assets_js = Path("static/js/assets.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    assert "asset-title-meta" in assets_js
+    assert "asset-meta-tags" in assets_js
+    assert "renderAssetMetaTags(asset)" in assets_js
+    assert "asset-link-strip" in assets_js
+    assert "查看来源" in assets_js
+    assert "收起来源" in assets_js
+    assert "来源标题：待查看" not in assets_js
+    assert "renderMvpLayerTag(asset)" not in assets_js
+    assert "assetMvpSignalLabel(asset)" in assets_js
+    assert "renderAssetDetailPanel(asset)" in assets_js
+    assert "asset-detail-grid" in assets_js
+    assert "asset-ai-toolbar" in assets_js
+    assert "renderAssetDetailActions()" in assets_js
+    assert 'renderAssetDetailField("摘要", asset.summary)' not in assets_js
+    assert "module-ai-entry--inline" not in assets_js
+    assert "module-ai-action-groups" not in assets_js
+    assert ".asset-title-meta" in main_css
+    assert ".asset-meta-tags" in main_css
+    assert ".asset-link-strip" in main_css
+    assert ".asset-detail-grid" in main_css
+    assert ".asset-ai-toolbar" in main_css
+    assert ".asset-detail-actions" in main_css
+    assert ".asset-card-expanded .asset-archive-preview-line" in main_css
+    assert "color: var(--text-primary);" in main_css
+    assert "color: var(--text-secondary);" in main_css
+
+
+def test_reviews_page_uses_collapsible_create_form():
+    reviews_html = Path("templates/reviews.html").read_text(encoding="utf-8")
+    reviews_js = Path("static/js/reviews.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    assert 'id="toggle-review-form-btn"' in reviews_html
+    assert 'id="review-form-panel" class="section-card review-form-panel" hidden' in reviews_html
+    assert "reviews-workspace" in reviews_html
+    assert "page-split page-split-wide page-split-scroll" not in reviews_html
+    assert "review-form-topline" in reviews_html
+    assert "review-form-grid" in reviews_html
+    assert "isReviewFormOpen" in reviews_js
+    assert "setReviewFormOpen(false)" in reviews_js
+    assert "resetReviewForm()" in reviews_js
+    assert ".reviews-workspace" in main_css
+    assert ".review-form-grid" in main_css
+    assert ".review-form-panel[hidden]" in main_css
+
+
+def test_ai_entries_keep_real_actions_and_enable_value_chain_tools():
+    index_js = Path("static/js/index.js").read_text(encoding="utf-8")
+    assets_js = Path("static/js/assets.js").read_text(encoding="utf-8")
+    opportunities_js = Path("static/js/opportunities.js").read_text(encoding="utf-8")
+    experiments_js = Path("static/js/experiments.js").read_text(encoding="utf-8")
+    feedback_js = Path("static/js/feedback.js").read_text(encoding="utf-8")
+    reviews_js = Path("static/js/reviews.js").read_text(encoding="utf-8")
+    inbox_js = Path("static/js/inbox.js").read_text(encoding="utf-8")
+    main_css = Path("static/css/main.css").read_text(encoding="utf-8")
+
+    for api in (
+        "/api/ai/dashboard-briefing",
+        "/api/ai/dispatch-actions",
+    ):
+        assert api in index_js
+    for api in (
+        "/api/ai/optimize-asset",
+        "/api/ai/classify-asset",
+        "/api/ai/template-asset",
+    ):
+        assert api in assets_js
+    for api in (
+        "/api/ai/complete-review",
+        "/api/ai/aggregate-weekly-reviews",
+        "/api/ai/refine-review",
+    ):
+        assert api in reviews_js
+    assert "/api/inbox/analyze" in inbox_js
+    assert "asset-ai-disabled-note" in assets_js
+    assert "asset-ai-disabled\" disabled" not in assets_js
+    for js, prefix in (
+        (opportunities_js, "opportunity"),
+        (experiments_js, "experiment"),
+        (feedback_js, "feedback"),
+    ):
+        assert f"/api/ai/{prefix}-advance" in js
+        assert f"/api/ai/{prefix}-red-team" in js
+        assert f"/api/ai/{prefix}-audit" in js
+        assert "btn-ai-value" in js
+        assert "AI处理中" in js
+        assert "btn-copy-ai-result" in js
+    assert ".module-ai-entry:has(#opportunity-ai-title) .module-ai-actions" in main_css
+    assert ".module-ai-entry:has(#experiment-ai-title) .module-ai-actions" in main_css
+    assert ".module-ai-entry:has(#feedback-ai-title) .module-ai-actions" in main_css
+    assert ".module-ai-entry:has(#asset-ai-title) .module-ai-actions" in main_css
+    assert "display: none;" in main_css
+    assert ".asset-ai-disabled-note" in main_css
+    assert ".value-ai-tool-row" in main_css
+    assert ".ai-result-panel" in main_css
+
+
+def test_value_chain_ai_routes_call_helper_and_return_sections(client, monkeypatch):
+    calls = []
+
+    def fake_chat_json(system_prompt, user_prompt):
+      calls.append((system_prompt, user_prompt))
+      assert "机会 -> 实验 -> 反馈 -> 案例资产" in system_prompt
+      assert "上下文 JSON" in user_prompt
+      return {
+          "title": "AI 审计结果",
+          "summary": "当前对象可以继续推进，但证据不足。",
+          "sections": [{"title": "缺失项", "items": ["补充真实对象", "补充验证动作"]}],
+          "recommendation": "先做最小验证。",
+          "next_action": "今天设计 7 天 MVP。",
+      }
+
+    monkeypatch.setattr(ai_service, "_chat_json", fake_chat_json)
+
+    opportunity = client.post("/api/opportunities", json={"name": "AI 机会"}).get_json()["data"]
+    experiment = client.post("/api/experiments", json={"name": "AI 实验"}).get_json()["data"]
+    feedback = client.post("/api/feedback", json={"title": "AI 反馈"}).get_json()["data"]
+    routes = (
+        ("/api/ai/opportunity-advance", opportunity["id"]),
+        ("/api/ai/opportunity-red-team", opportunity["id"]),
+        ("/api/ai/opportunity-audit", opportunity["id"]),
+        ("/api/ai/experiment-advance", experiment["id"]),
+        ("/api/ai/experiment-red-team", experiment["id"]),
+        ("/api/ai/experiment-audit", experiment["id"]),
+        ("/api/ai/feedback-advance", feedback["id"]),
+        ("/api/ai/feedback-red-team", feedback["id"]),
+        ("/api/ai/feedback-audit", feedback["id"]),
+    )
+
+    for route, entity_id in routes:
+        response = client.post(route, json={"id": entity_id})
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is True
+        data = payload["data"]
+        assert data["sections"][0]["title"] == "缺失项"
+        assert data["recommendation"] == "先做最小验证。"
+        assert data["next_action"] == "今天设计 7 天 MVP。"
+
+    assert len(calls) == len(routes)
+
+
+def test_value_chain_ai_routes_reject_missing_records(client, monkeypatch):
+    monkeypatch.setattr(ai_service, "_chat_json", lambda *_args: {})
+    for route in (
+        "/api/ai/opportunity-advance",
+        "/api/ai/experiment-red-team",
+        "/api/ai/feedback-audit",
+    ):
+        response = client.post(route, json={"id": 999999})
+        assert response.get_json()["ok"] is False
+
+
 def test_value_discipline_pages_render(client):
-    for path in ("/", "/opportunities", "/experiments", "/feedback", "/assets", "/goals", "/inbox"):
+    for path in ("/", "/opportunities", "/experiments", "/feedback", "/assets", "/reviews", "/goals", "/inbox"):
         response = client.get(path)
         assert response.status_code == 200
 
@@ -495,6 +795,201 @@ def test_value_dashboard_rc3_signals(client):
     assert any(item["id"] == paused["id"] for item in data["pending_stop_review"])
 
 
+def _chain_for(data, opportunity_id):
+    return next(
+        item for item in data["chains"]
+        if item["opportunity"]["id"] == opportunity_id
+    )
+
+
+def test_value_dashboard_chains_keep_legacy_fields(client):
+    data = client.get("/api/value-dashboard").get_json()["data"]
+
+    assert "chains" in data
+    for key in (
+        "high_score_opportunities",
+        "running_experiments",
+        "strong_feedback",
+        "case_assets",
+        "pending_validation",
+        "pending_deposit",
+        "completed_experiments_without_assets",
+        "pending_stop_review",
+    ):
+        assert key in data
+
+
+def test_value_dashboard_chains_group_latest_items_by_opportunity(client):
+    first = client.post(
+        "/api/opportunities",
+        json={"name": "第一条链路", "status": "值得测试"},
+    ).get_json()["data"]
+    second = client.post(
+        "/api/opportunities",
+        json={"name": "第二条链路", "status": "值得测试"},
+    ).get_json()["data"]
+    client.post(
+        "/api/experiments",
+        json={"opportunity_id": first["id"], "name": "第一旧实验"},
+    ).get_json()["data"]
+    latest_exp = client.post(
+        "/api/experiments",
+        json={"opportunity_id": first["id"], "name": "第一新实验", "status": "进行中"},
+    ).get_json()["data"]
+    second_exp = client.post(
+        "/api/experiments",
+        json={"opportunity_id": second["id"], "name": "第二实验", "status": "设计中"},
+    ).get_json()["data"]
+    client.post(
+        "/api/feedback",
+        json={
+            "related_type": "experiment",
+            "related_id": latest_exp["id"],
+            "title": "第一反馈",
+            "level": "L4 产生可量化结果",
+        },
+    ).get_json()["data"]
+    second_feedback = client.post(
+        "/api/feedback",
+        json={
+            "related_type": "experiment",
+            "related_id": second_exp["id"],
+            "title": "第二反馈",
+            "level": "L2 同事/使用者觉得有价值",
+        },
+    ).get_json()["data"]
+    asset = client.post(f"/api/feedback/{second_feedback['id']}/asset").get_json()["data"]
+
+    data = client.get("/api/value-dashboard").get_json()["data"]
+    first_chain = _chain_for(data, first["id"])
+    second_chain = _chain_for(data, second["id"])
+
+    assert first_chain["latest_experiment"]["id"] == latest_exp["id"]
+    assert first_chain["latest_feedback"]["title"] == "第一反馈"
+    assert first_chain["latest_asset"] is None
+    assert first_chain["counts"] == {"experiments": 2, "feedback": 1, "assets": 0}
+    assert first_chain["stage"] == "待沉淀"
+
+    assert second_chain["latest_experiment"]["id"] == second_exp["id"]
+    assert second_chain["latest_feedback"]["id"] == second_feedback["id"]
+    assert second_chain["latest_asset"]["id"] == asset["id"]
+    assert second_chain["stage"] == "已完成"
+
+
+def test_archived_opportunity_is_hidden_from_chains_but_listed(client):
+    archived = client.post(
+        "/api/opportunities",
+        json={"name": "归档链路", "status": "值得测试"},
+    ).get_json()["data"]
+    active = client.post(
+        "/api/opportunities",
+        json={"name": "活跃链路", "status": "值得测试"},
+    ).get_json()["data"]
+
+    response = client.patch(
+        f"/api/opportunities/{archived['id']}",
+        json={"status": "已归档"},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["data"]["status"] == "已归档"
+
+    dashboard = client.get("/api/value-dashboard").get_json()["data"]
+    chain_ids = {item["opportunity"]["id"] for item in dashboard["chains"]}
+    assert archived["id"] not in chain_ids
+    assert active["id"] in chain_ids
+
+    opportunities = client.get("/api/opportunities").get_json()["data"]
+    assert any(
+        item["id"] == archived["id"] and item["status"] == "已归档"
+        for item in opportunities
+    )
+
+
+def test_value_dashboard_chain_stage_variants(client):
+    no_experiment = client.post(
+        "/api/opportunities",
+        json={"name": "无实验机会", "status": "值得测试"},
+    ).get_json()["data"]
+    running_opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "进行中机会", "status": "值得测试"},
+    ).get_json()["data"]
+    running_experiment = client.post(
+        "/api/experiments",
+        json={
+            "opportunity_id": running_opportunity["id"],
+            "name": "进行中实验",
+            "status": "进行中",
+        },
+    ).get_json()["data"]
+    deposit_opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "待沉淀机会", "status": "值得测试"},
+    ).get_json()["data"]
+    deposit_experiment = client.post(
+        "/api/experiments",
+        json={
+            "opportunity_id": deposit_opportunity["id"],
+            "name": "待沉淀实验",
+            "status": "进行中",
+        },
+    ).get_json()["data"]
+    client.post(
+        "/api/feedback",
+        json={
+            "related_type": "experiment",
+            "related_id": deposit_experiment["id"],
+            "title": "强反馈",
+            "level": "L5 带来收入、降本、加薪、资源、外部机会",
+        },
+    ).get_json()["data"]
+    complete_opportunity = client.post(
+        "/api/opportunities",
+        json={"name": "完成机会", "status": "值得测试"},
+    ).get_json()["data"]
+    complete_experiment = client.post(
+        "/api/experiments",
+        json={
+            "opportunity_id": complete_opportunity["id"],
+            "name": "完成实验",
+            "status": "进行中",
+        },
+    ).get_json()["data"]
+    complete_feedback = client.post(
+        "/api/feedback",
+        json={
+            "related_type": "experiment",
+            "related_id": complete_experiment["id"],
+            "title": "完成反馈",
+            "level": "L4 产生可量化结果",
+            "content": "可以沉淀",
+        },
+    ).get_json()["data"]
+    client.post(f"/api/feedback/{complete_feedback['id']}/asset")
+
+    data = client.get("/api/value-dashboard").get_json()["data"]
+
+    assert _chain_for(data, no_experiment["id"])["stage"] == "待验证"
+    assert _chain_for(data, running_opportunity["id"])["latest_experiment"]["id"] == running_experiment["id"]
+    assert _chain_for(data, running_opportunity["id"])["stage"] == "进行中"
+    assert _chain_for(data, deposit_opportunity["id"])["stage"] == "待沉淀"
+    assert _chain_for(data, complete_opportunity["id"])["stage"] == "已完成"
+
+
+def test_value_dashboard_chain_change_adds_no_database_fields(client):
+    conn = database.get_connection()
+    columns = {
+        table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for table in ("opportunities", "experiments", "feedback_items", "assets")
+    }
+    conn.close()
+
+    assert not ({"archived", "is_archived", "deleted", "stopped"} & columns["opportunities"])
+    assert not ({"archived", "is_archived", "deleted", "stopped"} & columns["experiments"])
+    assert not ({"archived", "is_archived", "deleted", "stopped"} & columns["feedback_items"])
+    assert not ({"archived", "is_archived", "deleted", "stopped"} & columns["assets"])
+
+
 def test_project_value_discipline_fields_do_not_break_project_api(client):
     goal = client.post("/api/goals", json={"name": "纪律目标", "type": "年度"}).get_json()["data"]
     project = client.post(
@@ -518,7 +1013,7 @@ def test_project_value_discipline_fields_do_not_break_project_api(client):
 
 
 def test_value_discipline_statuses_do_not_break_value_apis(client):
-    for status in ("值得测试", "暂停", "删除", "已转项目"):
+    for status in ("值得测试", "暂停", "删除", "已转项目", "已归档"):
         response = client.post(
             "/api/opportunities",
             json={"name": f"{status}机会", "status": status},

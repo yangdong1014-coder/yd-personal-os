@@ -1,0 +1,6 @@
+请基于以下对象与上下游上下文，完成 {object_type_label} 的 {action_label}。
+
+上下文 JSON：
+{context_json}
+
+请严格返回约定 JSON 字段。

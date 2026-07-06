@@ -31,8 +31,8 @@
   <section class="section-card dashboard-span-full value-dashboard-section dashboard-narrative-section" id="value-dashboard">
     <div class="section-header-row">
       <div>
-        <h2>价值验证链路</h2>
-        <p class="form-hint section-hint">PSY-2.0 价值实验：机会 → 实验 → 反馈 → 案例资产</p>
+        <h2>价值链路总览</h2>
+        <p class="form-hint section-hint">按机会聚合当前未归档链路，只展示每条链路的最新状态</p>
       </div>
       <div class="value-action-row">
         <a href="{{ url_for('opportunities') }}" class="btn btn-sm">审计机会</a>
@@ -77,19 +77,6 @@
         </div>
         <div id="dashboard-projects-content"></div>
       </section>
-    </div>
-  </section>
-
-  <section class="section-card dashboard-span-full dashboard-narrative-section" id="asset-compound">
-    <div class="section-header-row">
-      <div>
-        <h2>资产复利</h2>
-        <p class="form-hint section-hint">把强反馈和案例资产转成下一轮可复用筹码</p>
-      </div>
-      <a href="{{ url_for('assets') }}" class="btn btn-sm btn-ghost">查看资产</a>
-    </div>
-    <div id="asset-compound-content" class="dashboard-asset-grid">
-      <div class="empty-state">正在读取资产复利数据</div>
     </div>
   </section>
 
