@@ -17,11 +17,26 @@ def _normalize_analysis(data):
     normalized = {}
     for field in ANALYSIS_FIELDS:
         value = data.get(field)
-        if not isinstance(value, str) or not value.strip():
+        if isinstance(value, str):
+            text = value.strip()
+        elif isinstance(value, list):
+            items = [
+                item.strip()
+                for item in value
+                if isinstance(item, str) and item.strip()
+            ]
+            if len(items) != len(value):
+                raise DeliberationServiceError(
+                    f"AI 返回格式异常：字段 {field} 必须是文本或文本数组"
+                )
+            text = "\n".join(f"- {item}" for item in items)
+        else:
+            text = ""
+        if not text:
             raise DeliberationServiceError(
                 f"AI 返回格式异常：缺少有效字段 {field}"
             )
-        normalized[field] = value.strip()
+        normalized[field] = text
     return normalized
 
 

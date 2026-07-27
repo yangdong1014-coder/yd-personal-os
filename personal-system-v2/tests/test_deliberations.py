@@ -174,6 +174,27 @@ def test_ai_invalid_structure_keeps_draft(client, monkeypatch):
     assert reloaded["status"] == "draft"
 
 
+def test_ai_text_arrays_are_normalized(client, monkeypatch):
+    result = {
+        **AI_ANALYSIS,
+        "hidden_assumptions": [
+            "实时辅助必须要求主动操作。",
+            "事后反馈一定能及时改变行为。",
+        ],
+        "missing_information": ["真实工作流观察", "不同提醒形式的干扰数据"],
+    }
+    install_ai_success(monkeypatch, result)
+    created = create_deliberation(client)
+    response = client.post(f"/api/deliberations/{created['id']}/analyze")
+    assert response.status_code == 200
+    analysis = response.get_json()["data"]["ai_analysis"]
+    assert analysis["hidden_assumptions"] == (
+        "- 实时辅助必须要求主动操作。\n"
+        "- 事后反馈一定能及时改变行为。"
+    )
+    assert analysis["missing_information"].startswith("- 真实工作流观察")
+
+
 def test_final_decision_requires_analysis_and_saves(client, monkeypatch):
     created = create_deliberation(client)
     blocked = client.patch(
