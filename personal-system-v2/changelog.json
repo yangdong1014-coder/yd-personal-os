@@ -1,6 +1,32 @@
 {
-  "current": "v2.1.1",
+  "current": "v2.1.3",
   "entries": [
+    {
+      "version": "v2.1.3",
+      "date": "2026-07-27",
+      "title": "PSY v2.1.3：Deliberation UX Polish",
+      "type": "release",
+      "items": [
+        "Deliberation 页面统一至 PSY 视觉规范",
+        "优化推演输入流程与信息层级",
+        "优化 AI 对抗、最终决策与现实反馈的阅读体验",
+        "增加正式版本更新记录",
+        "修复 Deliberation 页面布局、对齐、字体与间距不一致的问题"
+      ]
+    },
+    {
+      "version": "v2.1.2",
+      "date": "2026-07-27",
+      "title": "PSY v2.1.2：Deliberation MVP",
+      "type": "release",
+      "items": [
+        "新增 Deliberation 推演模块",
+        "支持问题 → 初始判断 → AI 对抗 → 最终决策 → 现实反馈 → 原则沉淀",
+        "支持 Project / Opportunity 关联",
+        "新增结构化 AI 对抗分析",
+        "新增推演状态管理"
+      ]
+    },
     {
       "version": "v2.1.1",
       "date": "2026-07-06",

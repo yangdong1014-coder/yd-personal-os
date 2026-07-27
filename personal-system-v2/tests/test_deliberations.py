@@ -1,5 +1,6 @@
 import ai_service
 import deliberation_service
+from pathlib import Path
 
 
 INITIAL_PAYLOAD = {
@@ -55,7 +56,12 @@ def install_ai_success(monkeypatch, result=None):
 
 def test_deliberation_pages_and_navigation(client):
     assert client.get("/deliberations").status_code == 200
-    assert client.get("/deliberations/new").status_code == 200
+    new_page = client.get("/deliberations/new").get_data(as_text=True)
+    assert "你现在真正需要判断什么？" in new_page
+    assert "你现在倾向怎么判断？" in new_page
+    assert "这个判断成立，需要哪些事情是真的？" in new_page
+    assert 'id="delib-title"' not in new_page
+    assert 'id="delib-reasoning" class="textarea" rows="3" required' not in new_page
     assert client.get("/deliberations/99").status_code == 200
     page = client.get("/").get_data(as_text=True)
     assert "推演" in page
@@ -79,8 +85,38 @@ def test_create_requires_independent_judgment(client):
         json={"title": "不完整", "problem": "问题"},
     )
     assert response.status_code == 400
-    assert "初始判断" in response.get_json()["error"]
+    assert "当前判断" in response.get_json()["error"]
     assert client.get("/api/deliberations").get_json()["data"] == []
+
+
+def test_create_auto_generates_title_and_allows_optional_thinking_fields(client):
+    problem = "公司 AI 应用应该继续扩工具，还是集中击穿销售分析闭环？"
+    response = client.post(
+        "/api/deliberations",
+        json={
+            "problem": problem,
+            "initial_judgment": "先集中击穿销售分析闭环。",
+        },
+    )
+    assert response.status_code == 200
+    created = response.get_json()["data"]
+    assert created["title"] == problem
+    assert created["reasoning"] == ""
+    assert created["assumptions"] == ""
+    assert created["status"] == "draft"
+
+
+def test_deliberation_uses_natural_chinese_status_and_stage_labels():
+    script = Path("static/js/deliberations.js").read_text(encoding="utf-8")
+    for label in ("思考中", "已对抗", "已决策", "已复盘"):
+        assert label in script
+    for label in (
+        "现在，你怎么判断？",
+        "所以你决定做什么？",
+        "后来发生了什么？",
+        "留下一条原则",
+    ):
+        assert label in script
 
 
 def test_create_edit_and_reload_draft(client):

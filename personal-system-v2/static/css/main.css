@@ -9861,28 +9861,7 @@ html.theme-light-cool textarea {
   }
 }
 
-/* Deliberation — a linear decision record, intentionally isolated from chat UI. */
-.delib-eyebrow {
-  margin: 0 0 0.45rem;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.delib-back-link {
-  display: inline-flex;
-  margin-bottom: 1rem;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  text-decoration: none;
-}
-
-.delib-back-link:hover {
-  color: var(--text);
-}
+/* Deliberation — a linear decision record aligned with shared PSY surfaces. */
 
 .delib-loop {
   display: flex;
@@ -9910,8 +9889,7 @@ html.theme-light-cool textarea {
 }
 
 .delib-list-panel {
-  max-width: 980px;
-  margin-inline: auto;
+  width: 100%;
 }
 
 .delib-list-count {
@@ -9951,7 +9929,6 @@ html.theme-light-cool textarea {
 
 .delib-card-topline,
 .delib-card-foot,
-.delib-detail-topline,
 .delib-detail-actions {
   display: flex;
   align-items: center;
@@ -10045,45 +10022,64 @@ html.theme-light-cool textarea {
   min-height: 230px;
 }
 
-.delib-new-header,
+.delib-new-form {
+  max-width: 920px;
+}
+
 .delib-new-form,
-.delib-detail-header,
 .delib-progress,
 .delib-timeline {
-  max-width: 920px;
-  margin-inline: auto;
+  margin-inline: 0;
+}
+
+[data-deliberation-page] > .page-header + * {
+  margin-top: var(--page-header-margin-bottom);
 }
 
 .delib-new-form {
   display: grid;
-  gap: 1rem;
+  gap: var(--layout-gap);
 }
 
-.delib-form-section {
+.delib-thinking-section {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 1.1rem;
+  gap: 1.15rem;
+  margin-bottom: 0;
 }
 
-.delib-form-section--question {
+.delib-thinking-section--primary {
   border-color: var(--accent-border);
+}
+
+.delib-thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .delib-section-number {
   color: var(--accent);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 0.75rem;
 }
 
-.delib-form-section-body,
-.delib-stage-form {
-  display: grid;
-  gap: 1rem;
-  min-width: 0;
+.delib-question-label,
+.delib-thinking-label {
+  color: var(--text-primary);
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
-.delib-form-section-body > .section-kicker {
-  margin-bottom: 0.2rem;
+.delib-question-label {
+  font-size: 1.16rem;
+}
+
+.delib-thinking-label--secondary {
+  font-size: 0.92rem;
+  font-weight: 500;
 }
 
 .delib-optional {
@@ -10094,17 +10090,63 @@ html.theme-light-cool textarea {
 }
 
 .delib-question-input {
-  min-height: 124px;
+  min-height: 142px;
   font-size: 1.02rem;
   line-height: 1.75;
 }
 
-.delib-submit-zone {
+.delib-field-intro {
+  margin: 0.05rem 0 0.2rem;
+}
+
+.delib-secondary-field {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.delib-more-info {
+  max-width: 920px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-flat);
+}
+
+.delib-more-info summary {
+  padding: 0.85rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.delib-more-info[open] summary {
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.delib-more-info > .form-row,
+.delib-more-info-fields {
+  padding: 1rem;
+}
+
+.delib-more-info-fields {
   display: grid;
-  justify-items: center;
-  gap: 0.65rem;
-  padding: 1rem 0 2rem;
-  text-align: center;
+  gap: 0.9rem;
+}
+
+.delib-submit-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 920px;
+  padding: 0.35rem 0 2rem;
+  text-align: left;
+}
+
+.delib-submit-zone > .form-hint {
+  max-width: 560px;
+  margin: 0;
 }
 
 .delib-primary-action {
@@ -10126,16 +10168,12 @@ html.theme-light-cool textarea {
 
 .delib-detail-header .page-title {
   max-width: 760px;
-  margin-top: 1.1rem;
-}
-
-.delib-detail-header .delib-back-link {
-  margin: 0;
 }
 
 .delib-progress {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
+  width: 100%;
   margin-bottom: 1.4rem;
   padding: 0;
   list-style: none;
@@ -10172,11 +10210,13 @@ html.theme-light-cool textarea {
 
 .delib-timeline {
   display: grid;
+  width: 100%;
 }
 
 .delib-timeline-stage {
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr);
+  scroll-margin-top: 7rem;
 }
 
 .delib-timeline-marker {
@@ -10240,7 +10280,7 @@ html.theme-light-cool textarea {
 
 .delib-question-card,
 .delib-judgment-grid,
-.delib-analysis-card,
+.delib-analysis-report,
 .delib-stage-form,
 .delib-ai-pending,
 .delib-locked-stage,
@@ -10252,7 +10292,7 @@ html.theme-light-cool textarea {
 }
 
 .delib-question-card {
-  padding: 1.05rem;
+  padding: 1.25rem 1.35rem;
 }
 
 .delib-context-label,
@@ -10302,8 +10342,24 @@ html.theme-light-cool textarea {
 
 .delib-read-block {
   min-width: 0;
-  padding: 0.95rem 1rem;
+  padding: 1rem 1.1rem;
   background: var(--surface-panel);
+}
+
+.delib-read-block--primary {
+  grid-column: 1 / -1;
+  padding: 1.15rem 1.25rem;
+}
+
+.delib-read-block--primary p {
+  color: var(--text-primary);
+  font-size: 0.98rem;
+}
+
+.delib-read-block--action {
+  grid-column: 1 / -1;
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
 }
 
 .delib-read-block p {
@@ -10314,7 +10370,10 @@ html.theme-light-cool textarea {
 }
 
 .delib-stage-form {
-  padding: 1rem;
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1.25rem 1.35rem;
 }
 
 .delib-form-actions {
@@ -10349,20 +10408,36 @@ html.theme-light-cool textarea {
   line-height: 1.6;
 }
 
-.delib-analysis-grid {
+.delib-analysis-report {
+  padding: 1.2rem 1.35rem;
+  margin-bottom: 0;
+}
+
+.delib-analysis-report-head {
+  padding-bottom: 0.85rem;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.delib-analysis-sections {
   display: grid;
-  gap: 0.65rem;
 }
 
-.delib-analysis-card {
+.delib-analysis-section {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.delib-analysis-section:last-child {
+  border-bottom: none;
+}
+
+.delib-analysis-section--validation {
+  margin-top: 0.2rem;
   padding: 1rem;
-}
-
-.delib-analysis-card--validation {
-  border-color: var(--accent-border);
-  background:
-    linear-gradient(120deg, var(--accent-soft), transparent 60%),
-    var(--surface-panel);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
 }
 
 .delib-analysis-head {
@@ -10434,29 +10509,20 @@ html.theme-light-cool textarea {
   line-height: 1.7;
 }
 
-@media (min-width: 760px) {
-  .delib-analysis-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .delib-analysis-card--validation {
-    grid-column: 1 / -1;
-  }
-}
-
 @media (max-width: 700px) {
   .delib-loop {
     justify-content: flex-start;
   }
 
-  .delib-form-section {
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
+  .delib-submit-zone {
+    align-items: stretch;
+    flex-direction: column;
+    padding-bottom: 1rem;
+    text-align: left;
   }
 
-  .delib-section-number {
-    padding-bottom: 0.35rem;
-    border-bottom: 1px solid var(--border-subtle);
+  .delib-submit-zone .delib-primary-action {
+    width: 100%;
   }
 
   .delib-progress-step strong {
@@ -10486,8 +10552,39 @@ html.theme-light-cool textarea {
     width: 100%;
     min-width: 0;
   }
+  .delib-analysis-content {
+    margin-left: 0;
+  }
+}
 
-  .delib-detail-topline {
-    align-items: flex-start;
+@media (max-width: 520px) {
+  .delib-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem 0;
+  }
+
+  .delib-timeline-stage {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .delib-timeline-marker span {
+    width: 24px;
+    height: 24px;
+  }
+
+  .delib-timeline-marker::after {
+    top: 26px;
+    left: 11px;
+  }
+
+  .delib-timeline-body {
+    padding-bottom: 1.45rem;
+  }
+
+  .delib-thinking-section,
+  .delib-question-card,
+  .delib-stage-form,
+  .delib-analysis-report {
+    padding: 1rem;
   }
 }
