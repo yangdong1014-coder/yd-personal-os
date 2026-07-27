@@ -222,6 +222,10 @@ GitHub Actions（`.github/workflows/test.yml`）在 push / PR 到 `main` 时自�
 
 版本线：v1.0（数据导出）→ … → v1.11（智能归档 Inbox）→ **v1.11.1**（智能归档体验收口）
 
+## Project Standards
+
+开发、Hotfix 或发布前，请先阅读 [PSY 项目开发规范](../docs/standards/README.md)。
+
 ## 项目文档
 
 完整导航见 [docs/README.md](../docs/README.md)。

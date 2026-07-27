@@ -7,6 +7,7 @@
 | 文档 | 用途 |
 |------|------|
 | [系统搭建说明书_1.1.md](系统搭建说明书_1.1.md) | **系统宪法**：最高约束文件，定义原则、架构与模块规范 |
+| [standards/README.md](standards/README.md) | **项目开发规范**：开发、UI、数据库、AI、发布与完成定义 |
 | [architecture.md](architecture.md) | 技术架构：Flask、SQLite、前端、提示词、版本与 CI |
 | [data-model.md](data-model.md) | 核心数据表、外键与级联关系 |
 | [release-process.md](release-process.md) | 版本发布流程：changelog、标签、推送、Actions |
@@ -15,9 +16,9 @@
 
 ## 阅读顺序建议
 
-1. 新接手项目：宪法 → architecture → development-guide
-2. 改数据或 API：data-model → development-guide
-3. 发版：release-process
+1. 新接手项目：宪法 → standards → architecture → development-guide
+2. 改数据或 API：standards → data-model → development-guide
+3. 发版：standards/RELEASE → release-process
 4. 对接 Obsidian：obsidian-sync-plan
 
 ## 与代码的关系
