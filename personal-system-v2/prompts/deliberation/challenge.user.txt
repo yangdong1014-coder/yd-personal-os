@@ -1,0 +1,16 @@
+需要判断的问题：
+{problem}
+
+补充背景：
+{context}
+
+用户的初始判断：
+{initial_judgment}
+
+用户的理由：
+{reasoning}
+
+用户明确写出的关键假设：
+{assumptions}
+
+请对这份判断进行严格但有建设性的对抗性分析。

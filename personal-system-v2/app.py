@@ -9,6 +9,7 @@ import asset_schemas
 import changelog
 import config
 import database
+import deliberation_service
 import inbox_service
 import obsidian_export
 import positioning_service
@@ -31,6 +32,7 @@ NAV_ITEMS = [
     {"endpoint": "index", "label": "首页", "path": "/"},
     {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
     {"endpoint": "goals", "label": "目标", "path": "/goals"},
+    {"endpoint": "deliberations", "label": "推演", "path": "/deliberations"},
     {"endpoint": "opportunities", "label": "机会", "path": "/opportunities"},
     {"endpoint": "experiments", "label": "实验", "path": "/experiments"},
     {"endpoint": "feedback_page", "label": "反馈", "path": "/feedback"},
@@ -55,6 +57,7 @@ NAV_GROUPS = [
         "items": [
             {"endpoint": "positioning", "label": "定位", "path": "/positioning"},
             {"endpoint": "goals", "label": "目标", "path": "/goals"},
+            {"endpoint": "deliberations", "label": "推演", "path": "/deliberations"},
         ],
     },
     {
@@ -173,6 +176,34 @@ def opportunities():
         active_page="opportunities",
         nav_items=NAV_ITEMS,
         opportunity_statuses=database.OPPORTUNITY_STATUSES,
+    )
+
+
+@app.route("/deliberations")
+def deliberations():
+    return render_template(
+        "deliberations.html",
+        active_page="deliberations",
+        nav_items=NAV_ITEMS,
+    )
+
+
+@app.route("/deliberations/new")
+def new_deliberation():
+    return render_template(
+        "deliberation_new.html",
+        active_page="deliberations",
+        nav_items=NAV_ITEMS,
+    )
+
+
+@app.route("/deliberations/<int:deliberation_id>")
+def deliberation_detail(deliberation_id):
+    return render_template(
+        "deliberation_detail.html",
+        active_page="deliberations",
+        nav_items=NAV_ITEMS,
+        deliberation_id=deliberation_id,
     )
 
 
@@ -336,6 +367,98 @@ def api_update_goal(goal_id):
 def api_delete_goal(goal_id):
     try:
         result = database.delete_goal(goal_id)
+        return jsonify({"ok": True, "data": result})
+    except ValueError as exc:
+        return _error(str(exc), 404)
+    except database.DeleteError as exc:
+        return _error(str(exc), 409)
+
+
+@app.route("/api/deliberations", methods=["GET"])
+def api_list_deliberations():
+    return jsonify({"ok": True, "data": database.list_deliberations()})
+
+
+@app.route("/api/deliberations", methods=["POST"])
+def api_create_deliberation():
+    payload = request.get_json(silent=True) or {}
+    try:
+        deliberation = database.create_deliberation(payload)
+        return jsonify({"ok": True, "data": deliberation})
+    except (ValueError, TypeError) as exc:
+        return _error(str(exc) if str(exc) else "参数无效")
+
+
+@app.route("/api/deliberations/<int:deliberation_id>", methods=["GET"])
+def api_get_deliberation(deliberation_id):
+    deliberation = database.get_deliberation(deliberation_id)
+    if not deliberation:
+        return _error("推演不存在", 404)
+    return jsonify({"ok": True, "data": deliberation})
+
+
+@app.route("/api/deliberations/<int:deliberation_id>", methods=["PATCH"])
+def api_update_deliberation(deliberation_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        deliberation = database.update_deliberation(deliberation_id, payload)
+        return jsonify({"ok": True, "data": deliberation})
+    except ValueError as exc:
+        status = 404 if str(exc) == "推演不存在" else 400
+        return _error(str(exc), status)
+
+
+@app.route(
+    "/api/deliberations/<int:deliberation_id>/analyze",
+    methods=["POST"],
+)
+def api_analyze_deliberation(deliberation_id):
+    try:
+        deliberation = deliberation_service.analyze(deliberation_id)
+        return jsonify({"ok": True, "data": deliberation})
+    except deliberation_service.DeliberationServiceError as exc:
+        status = 404 if str(exc) == "推演不存在" else 400
+        return _error(str(exc), status)
+
+
+@app.route(
+    "/api/deliberations/<int:deliberation_id>/decision",
+    methods=["PATCH"],
+)
+def api_save_deliberation_decision(deliberation_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        deliberation = database.save_deliberation_decision(
+            deliberation_id,
+            payload,
+        )
+        return jsonify({"ok": True, "data": deliberation})
+    except ValueError as exc:
+        status = 404 if str(exc) == "推演不存在" else 400
+        return _error(str(exc), status)
+
+
+@app.route(
+    "/api/deliberations/<int:deliberation_id>/review",
+    methods=["PATCH"],
+)
+def api_save_deliberation_review(deliberation_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        deliberation = database.save_deliberation_review(
+            deliberation_id,
+            payload,
+        )
+        return jsonify({"ok": True, "data": deliberation})
+    except ValueError as exc:
+        status = 404 if str(exc) == "推演不存在" else 400
+        return _error(str(exc), status)
+
+
+@app.route("/api/deliberations/<int:deliberation_id>", methods=["DELETE"])
+def api_delete_deliberation(deliberation_id):
+    try:
+        result = database.delete_deliberation(deliberation_id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)

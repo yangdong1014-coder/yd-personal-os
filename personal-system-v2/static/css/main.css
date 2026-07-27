@@ -9860,3 +9860,634 @@ html.theme-light-cool textarea {
     font-size: 1.45rem;
   }
 }
+
+/* Deliberation — a linear decision record, intentionally isolated from chat UI. */
+.delib-eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.delib-back-link {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.delib-back-link:hover {
+  color: var(--text);
+}
+
+.delib-loop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 0 0 1.25rem;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--surface-flat);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.delib-loop span {
+  color: var(--text-secondary);
+}
+
+.delib-loop i {
+  color: var(--separator-muted);
+  font-style: normal;
+}
+
+.delib-list-panel {
+  max-width: 980px;
+  margin-inline: auto;
+}
+
+.delib-list-count {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.delib-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.delib-list-card {
+  position: relative;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.delib-list-card:hover {
+  border-color: var(--card-border-hover);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.delib-card-main {
+  display: block;
+  padding: 1rem 3.1rem 1rem 1.05rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.delib-card-topline,
+.delib-card-foot,
+.delib-detail-topline,
+.delib-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.delib-card-main h3 {
+  margin: 0.75rem 0 0.35rem;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.delib-card-main > p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.delib-card-time,
+.delib-card-foot {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+}
+
+.delib-card-foot {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.delib-card-delete {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-subtle);
+  background: transparent;
+  cursor: pointer;
+}
+
+.delib-card-delete:hover {
+  border-color: var(--control-border);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.delib-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.24rem 0.48rem;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
+.delib-status--draft {
+  color: var(--text-muted);
+  background: var(--chip-bg);
+}
+
+.delib-status--analyzed {
+  border-color: var(--accent-border);
+  color: var(--nav-active-text);
+  background: var(--accent-soft);
+}
+
+.delib-status--decided {
+  border-color: rgba(96, 165, 250, 0.28);
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.delib-status--reviewed {
+  border-color: rgba(74, 222, 128, 0.25);
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.09);
+}
+
+.delib-empty-state {
+  gap: 0.8rem;
+  min-height: 230px;
+}
+
+.delib-new-header,
+.delib-new-form,
+.delib-detail-header,
+.delib-progress,
+.delib-timeline {
+  max-width: 920px;
+  margin-inline: auto;
+}
+
+.delib-new-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.delib-form-section {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 1.1rem;
+}
+
+.delib-form-section--question {
+  border-color: var(--accent-border);
+}
+
+.delib-section-number {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.delib-form-section-body,
+.delib-stage-form {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.delib-form-section-body > .section-kicker {
+  margin-bottom: 0.2rem;
+}
+
+.delib-optional {
+  margin-left: 0.3rem;
+  color: var(--text-subtle);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
+.delib-question-input {
+  min-height: 124px;
+  font-size: 1.02rem;
+  line-height: 1.75;
+}
+
+.delib-submit-zone {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+  padding: 1rem 0 2rem;
+  text-align: center;
+}
+
+.delib-primary-action {
+  min-width: 210px;
+}
+
+.delib-ai-disabled-note {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 0.75rem;
+}
+
+.delib-detail-loading {
+  display: grid;
+  place-content: center;
+  min-height: 45vh;
+  text-align: center;
+}
+
+.delib-detail-header .page-title {
+  max-width: 760px;
+  margin-top: 1.1rem;
+}
+
+.delib-detail-header .delib-back-link {
+  margin: 0;
+}
+
+.delib-progress {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin-bottom: 1.4rem;
+  padding: 0;
+  list-style: none;
+}
+
+.delib-progress-step {
+  position: relative;
+  display: grid;
+  gap: 0.32rem;
+  padding-top: 0.8rem;
+  border-top: 2px solid var(--border-subtle);
+  color: var(--text-subtle);
+}
+
+.delib-progress-step span {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.delib-progress-step strong {
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.delib-progress-step.is-complete {
+  border-color: var(--accent-border);
+  color: var(--text-muted);
+}
+
+.delib-progress-step.is-current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.delib-timeline {
+  display: grid;
+}
+
+.delib-timeline-stage {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+}
+
+.delib-timeline-marker {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.delib-timeline-marker::after {
+  position: absolute;
+  top: 30px;
+  bottom: 0;
+  left: 13px;
+  width: 1px;
+  background: var(--border-subtle);
+  content: "";
+}
+
+.delib-timeline-stage:last-child .delib-timeline-marker::after {
+  display: none;
+}
+
+.delib-timeline-marker span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-subtle);
+  background: var(--surface-base);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.delib-timeline-stage.is-current .delib-timeline-marker span {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.delib-timeline-stage.is-complete .delib-timeline-marker span {
+  border-color: var(--accent-border);
+  color: var(--nav-active-text);
+}
+
+.delib-timeline-body {
+  min-width: 0;
+  padding: 0 0 2rem 0.8rem;
+}
+
+.delib-stage-heading {
+  margin-bottom: 0.85rem;
+}
+
+.delib-stage-heading h2 {
+  margin: 0.3rem 0 0;
+  color: var(--text-primary);
+  font-size: 1.15rem;
+}
+
+.delib-question-card,
+.delib-judgment-grid,
+.delib-analysis-card,
+.delib-stage-form,
+.delib-ai-pending,
+.delib-locked-stage,
+.delib-review-grid,
+.delib-principle {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.delib-question-card {
+  padding: 1.05rem;
+}
+
+.delib-context-label,
+.delib-read-block > span,
+.delib-principle > span {
+  color: var(--text-label);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.delib-question-text {
+  margin: 0.45rem 0 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.delib-context-text {
+  margin: 0.75rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.83rem;
+  line-height: 1.65;
+}
+
+.delib-relation-chip {
+  display: inline-flex;
+  margin-top: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 5px;
+  color: var(--text-subtle);
+  background: var(--chip-bg);
+  font-size: 0.68rem;
+}
+
+.delib-judgment-grid,
+.delib-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 0.7rem;
+  overflow: hidden;
+  background: var(--border-subtle);
+}
+
+.delib-read-block {
+  min-width: 0;
+  padding: 0.95rem 1rem;
+  background: var(--surface-panel);
+}
+
+.delib-read-block p {
+  margin: 0.45rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.delib-stage-form {
+  padding: 1rem;
+}
+
+.delib-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
+.delib-ai-pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.1rem;
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(120deg, var(--accent-soft), transparent 55%),
+    var(--surface-panel);
+}
+
+.delib-ai-pending h3 {
+  margin: 0.35rem 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.delib-ai-pending p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.delib-analysis-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.delib-analysis-card {
+  padding: 1rem;
+}
+
+.delib-analysis-card--validation {
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(120deg, var(--accent-soft), transparent 60%),
+    var(--surface-panel);
+}
+
+.delib-analysis-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.delib-analysis-head > span {
+  padding-top: 0.15rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+
+.delib-analysis-head h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.delib-analysis-head p {
+  margin: 0.18rem 0 0;
+  color: var(--text-subtle);
+  font-size: 0.7rem;
+}
+
+.delib-analysis-content {
+  margin: 0.8rem 0 0 1.75rem;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.7;
+}
+
+.delib-locked-stage {
+  padding: 1.2rem;
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.delib-next-action-field,
+.delib-principle-field {
+  padding: 0.85rem;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.delib-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.delib-principle {
+  margin-top: 0.7rem;
+  padding: 1.1rem;
+  border-color: var(--accent-border);
+  background:
+    linear-gradient(120deg, var(--accent-soft), transparent 70%),
+    var(--surface-panel);
+}
+
+.delib-principle blockquote {
+  margin: 0.6rem 0 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+@media (min-width: 760px) {
+  .delib-analysis-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .delib-analysis-card--validation {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .delib-loop {
+    justify-content: flex-start;
+  }
+
+  .delib-form-section {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .delib-section-number {
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .delib-progress-step strong {
+    font-size: 0.62rem;
+  }
+
+  .delib-timeline-stage {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .delib-timeline-body {
+    padding-left: 0.45rem;
+  }
+
+  .delib-judgment-grid,
+  .delib-review-grid,
+  .delib-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .delib-ai-pending {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .delib-primary-action {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .delib-detail-topline {
+    align-items: flex-start;
+  }
+}

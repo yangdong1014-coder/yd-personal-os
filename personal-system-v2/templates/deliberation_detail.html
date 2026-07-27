@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}推演详情 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<div
+  id="deliberation-detail-root"
+  data-deliberation-page="detail"
+  data-deliberation-id="{{ deliberation_id }}"
+>
+  <div class="delib-detail-loading">
+    <span class="section-kicker">Deliberation</span>
+    <h1 class="page-title">正在读取推演…</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.DELIBERATION_AI_ENABLED = {{ ai_enabled | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/deliberations.js') }}"></script>
+{% endblock %}

@@ -74,6 +74,11 @@ def _chat_json(system_prompt, user_prompt):
         raise AIServiceError("AI 返回格式异常，请重试") from exc
 
 
+def request_structured_completion(system_prompt, user_prompt):
+    """统一的结构化 AI 调用入口，供独立业务 service 使用。"""
+    return _chat_json(system_prompt, user_prompt)
+
+
 def _filter_capability_tags(tags):
     if not isinstance(tags, list):
         return []

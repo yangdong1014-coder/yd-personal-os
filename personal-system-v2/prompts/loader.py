@@ -22,6 +22,7 @@ MODULES = (
     "capabilities",
     "inbox",
     "value_chain",
+    "deliberation",
 )
 
 

@@ -9,6 +9,7 @@
 | 模块 | 路径 | 说明 |
 |------|------|------|
 | 首页 | `/` | 指挥部总览、AI 今日简报、AI 行动分发 |
+| 推演 | `/deliberations` | 独立判断、AI 对抗、最终决策、现实反馈与原则沉淀 |
 | 目标 | `/goals` | 目标管理、项目拆解、AI 拆解项目 |
 | 任务 | `/tasks` | 任务管理、今日推进、AI 拆任务/今日推荐 |
 | 复盘 | `/reviews` | 日复盘/周复盘、AI 补全、周聚合、AI 提炼资产 |
@@ -242,6 +243,7 @@ app.py              Flask 入口与 API 路由
 database.py         SQLite 数据层
 obsidian_export.py  Obsidian Markdown zip 导出
 ai_service.py       DeepSeek AI 调用
+deliberation_service.py 推演业务校验、AI 对抗与结构化结果落库
 config.py           环境变量与模型配置
 settings_store.py   AI 模型持久化
 changelog.py        版本日志读取
