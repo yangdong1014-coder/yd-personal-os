@@ -75,6 +75,39 @@ FEEDBACK_LEVELS = (
     "L5 带来收入、降本、加薪、资源、外部机会",
 )
 FEEDBACK_RELATED_TYPES = ("opportunity", "experiment", "project", "asset", "review")
+DELIBERATION_STATUSES = ("draft", "analyzed", "decided", "reviewed")
+DELIBERATION_RELATED_TYPES = ("project", "opportunity")
+DELIBERATION_ANALYSIS_FIELDS = (
+    "essence",
+    "counter_argument",
+    "hidden_assumptions",
+    "missing_information",
+    "validation",
+)
+DELIBERATION_INITIAL_FIELDS = (
+    "title",
+    "problem",
+    "context",
+    "initial_judgment",
+    "reasoning",
+    "assumptions",
+    "related_type",
+    "related_id",
+)
+DELIBERATION_DECISION_FIELDS = (
+    "final_judgment",
+    "decision",
+    "decision_reasoning",
+    "next_action",
+)
+DELIBERATION_REVIEW_FIELDS = (
+    "actual_result",
+    "judgment_accuracy",
+    "judgment_error",
+    "key_variable",
+    "lesson",
+    "principle",
+)
 ASSET_LEVELS = ("资料", "模板", "方法", "案例", "产品", "筹码")
 VALUE_SCORE_FIELDS = (
     "importance_score",
@@ -614,6 +647,38 @@ def _migrate_value_tables(conn):
     )
 
 
+def _migrate_deliberations_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS deliberations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            problem TEXT NOT NULL,
+            context TEXT NOT NULL DEFAULT '',
+            initial_judgment TEXT NOT NULL,
+            reasoning TEXT NOT NULL,
+            assumptions TEXT NOT NULL,
+            related_type TEXT NOT NULL DEFAULT '',
+            related_id INTEGER,
+            ai_analysis TEXT NOT NULL DEFAULT '{}',
+            final_judgment TEXT NOT NULL DEFAULT '',
+            decision TEXT NOT NULL DEFAULT '',
+            decision_reasoning TEXT NOT NULL DEFAULT '',
+            next_action TEXT NOT NULL DEFAULT '',
+            actual_result TEXT NOT NULL DEFAULT '',
+            judgment_accuracy TEXT NOT NULL DEFAULT '',
+            judgment_error TEXT NOT NULL DEFAULT '',
+            key_variable TEXT NOT NULL DEFAULT '',
+            lesson TEXT NOT NULL DEFAULT '',
+            principle TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 def init_db():
     conn = get_connection()
     conn.executescript(
@@ -695,6 +760,7 @@ def init_db():
     _migrate_inbox_tables(conn)
     _migrate_assets_table(conn)
     _migrate_value_tables(conn)
+    _migrate_deliberations_table(conn)
     _migrate_positioning_tables(conn)
     _migrate_goals_status(conn)
     _ensure_default_capability_practice_steps(conn)
@@ -909,6 +975,307 @@ def _normalize_mainline_goals(conn):
         return
     keep_id = rows[0][0]
     _demote_other_mainline_goals(conn, keep_id)
+
+
+def _deliberation_row(row):
+    data = _row_to_dict(row)
+    if not data:
+        return None
+    raw_analysis = data.get("ai_analysis")
+    if isinstance(raw_analysis, dict):
+        analysis = raw_analysis
+    else:
+        try:
+            analysis = json.loads(raw_analysis or "{}")
+        except (TypeError, json.JSONDecodeError):
+            analysis = {}
+    data["ai_analysis"] = analysis if isinstance(analysis, dict) else {}
+    data["reviewed"] = data.get("status") == "reviewed"
+    return data
+
+
+def _normalize_deliberation_relation(conn, related_type, related_id):
+    related_type = _clean_text(related_type)
+    if not related_type:
+        return "", None
+    if related_type not in DELIBERATION_RELATED_TYPES:
+        raise ValueError("无效的关联类型")
+    try:
+        related_id = int(related_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("请选择有效的关联对象") from exc
+    if related_id <= 0:
+        raise ValueError("请选择有效的关联对象")
+
+    table = "projects" if related_type == "project" else "opportunities"
+    if not conn.execute(
+        f"SELECT id FROM {table} WHERE id = ?",
+        (related_id,),
+    ).fetchone():
+        label = "项目" if related_type == "project" else "机会"
+        raise ValueError(f"关联的{label}不存在")
+    return related_type, related_id
+
+
+def _clean_deliberation_fields(payload, fields):
+    return {field: _clean_text(payload.get(field)) for field in fields}
+
+
+def _require_deliberation_fields(values, fields, message):
+    if any(not values.get(field) for field in fields):
+        raise ValueError(message)
+
+
+def create_deliberation(payload):
+    payload = payload or {}
+    values = _clean_deliberation_fields(payload, DELIBERATION_INITIAL_FIELDS)
+    _require_deliberation_fields(
+        values,
+        ("title", "problem", "initial_judgment", "reasoning", "assumptions"),
+        "请完整填写标题、问题、初始判断、理由和关键假设",
+    )
+
+    conn = get_connection()
+    try:
+        related_type, related_id = _normalize_deliberation_relation(
+            conn,
+            values["related_type"],
+            payload.get("related_id"),
+        )
+        now = _now()
+        cursor = conn.execute(
+            """
+            INSERT INTO deliberations (
+                title, problem, context, initial_judgment, reasoning, assumptions,
+                related_type, related_id, ai_analysis, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', 'draft', ?, ?)
+            """,
+            (
+                values["title"],
+                values["problem"],
+                values["context"],
+                values["initial_judgment"],
+                values["reasoning"],
+                values["assumptions"],
+                related_type,
+                related_id,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM deliberations WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        return _deliberation_row(row)
+    finally:
+        conn.close()
+
+
+def list_deliberations():
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT * FROM deliberations
+        ORDER BY updated_at DESC, created_at DESC, id DESC
+        """
+    ).fetchall()
+    conn.close()
+    return [_deliberation_row(row) for row in rows]
+
+
+def get_deliberation(deliberation_id):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM deliberations WHERE id = ?",
+        (deliberation_id,),
+    ).fetchone()
+    conn.close()
+    return _deliberation_row(row)
+
+
+def update_deliberation(deliberation_id, payload):
+    payload = payload or {}
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM deliberations WHERE id = ?",
+            (deliberation_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("推演不存在")
+        current = _deliberation_row(row)
+        if current["status"] != "draft":
+            raise ValueError("AI 对抗开始后不能修改初始判断")
+
+        merged = {
+            field: payload.get(field, current.get(field))
+            for field in DELIBERATION_INITIAL_FIELDS
+        }
+        values = _clean_deliberation_fields(merged, DELIBERATION_INITIAL_FIELDS)
+        _require_deliberation_fields(
+            values,
+            ("title", "problem", "initial_judgment", "reasoning", "assumptions"),
+            "请完整填写标题、问题、初始判断、理由和关键假设",
+        )
+        related_type, related_id = _normalize_deliberation_relation(
+            conn,
+            values["related_type"],
+            merged.get("related_id"),
+        )
+        conn.execute(
+            """
+            UPDATE deliberations SET
+                title = ?, problem = ?, context = ?, initial_judgment = ?,
+                reasoning = ?, assumptions = ?, related_type = ?, related_id = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                values["title"],
+                values["problem"],
+                values["context"],
+                values["initial_judgment"],
+                values["reasoning"],
+                values["assumptions"],
+                related_type,
+                related_id,
+                _now(),
+                deliberation_id,
+            ),
+        )
+        conn.commit()
+        return get_deliberation(deliberation_id)
+    finally:
+        conn.close()
+
+
+def save_deliberation_analysis(deliberation_id, analysis):
+    if not isinstance(analysis, dict):
+        raise ValueError("AI 分析结果格式无效")
+    normalized = {}
+    for field in DELIBERATION_ANALYSIS_FIELDS:
+        value = analysis.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"AI 分析缺少有效字段 {field}")
+        normalized[field] = value.strip()
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT status FROM deliberations WHERE id = ?",
+            (deliberation_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("推演不存在")
+        if row["status"] != "draft":
+            raise ValueError("只有待分析的推演可以保存 AI 分析")
+        conn.execute(
+            """
+            UPDATE deliberations
+            SET ai_analysis = ?, status = 'analyzed', updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                json.dumps(normalized, ensure_ascii=False),
+                _now(),
+                deliberation_id,
+            ),
+        )
+        conn.commit()
+        return get_deliberation(deliberation_id)
+    finally:
+        conn.close()
+
+
+def save_deliberation_decision(deliberation_id, payload):
+    payload = payload or {}
+    values = _clean_deliberation_fields(payload, DELIBERATION_DECISION_FIELDS)
+    _require_deliberation_fields(
+        values,
+        DELIBERATION_DECISION_FIELDS,
+        "请完整填写最终判断、决定、理由和下一步最小行动",
+    )
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT status FROM deliberations WHERE id = ?",
+            (deliberation_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("推演不存在")
+        if row["status"] not in ("analyzed", "decided"):
+            raise ValueError("请先完成 AI 对抗，再保存最终判断")
+        conn.execute(
+            """
+            UPDATE deliberations SET
+                final_judgment = ?, decision = ?, decision_reasoning = ?,
+                next_action = ?, status = 'decided', updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                values["final_judgment"],
+                values["decision"],
+                values["decision_reasoning"],
+                values["next_action"],
+                _now(),
+                deliberation_id,
+            ),
+        )
+        conn.commit()
+        return get_deliberation(deliberation_id)
+    finally:
+        conn.close()
+
+
+def save_deliberation_review(deliberation_id, payload):
+    payload = payload or {}
+    values = _clean_deliberation_fields(payload, DELIBERATION_REVIEW_FIELDS)
+    _require_deliberation_fields(
+        values,
+        DELIBERATION_REVIEW_FIELDS,
+        "请完整填写现实结果、判断得失、关键变量、教训和原则",
+    )
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT status FROM deliberations WHERE id = ?",
+            (deliberation_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("推演不存在")
+        if row["status"] not in ("decided", "reviewed"):
+            raise ValueError("请先完成最终判断，再记录现实反馈")
+        conn.execute(
+            """
+            UPDATE deliberations SET
+                actual_result = ?, judgment_accuracy = ?, judgment_error = ?,
+                key_variable = ?, lesson = ?, principle = ?,
+                status = 'reviewed', updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                values["actual_result"],
+                values["judgment_accuracy"],
+                values["judgment_error"],
+                values["key_variable"],
+                values["lesson"],
+                values["principle"],
+                _now(),
+                deliberation_id,
+            ),
+        )
+        conn.commit()
+        return get_deliberation(deliberation_id)
+    finally:
+        conn.close()
+
+
+def delete_deliberation(deliberation_id):
+    return _delete_entity("deliberations", deliberation_id, "推演")
 
 
 def create_goal(name, goal_type):
@@ -2527,6 +2894,10 @@ IMPORT_TABLES = (
     "opportunities",
     "experiments",
     "feedback_items",
+    "deliberations",
+)
+REQUIRED_IMPORT_TABLES = tuple(
+    table for table in IMPORT_TABLES if table != "deliberations"
 )
 LEGACY_IMPORT_TABLES = (
     "goals",
@@ -2636,6 +3007,16 @@ _TABLE_FIELDS = {
         "content",
         "evidence",
         "next_action",
+        "created_at",
+        "updated_at",
+    ),
+    "deliberations": (
+        "id",
+        *DELIBERATION_INITIAL_FIELDS,
+        "ai_analysis",
+        *DELIBERATION_DECISION_FIELDS,
+        *DELIBERATION_REVIEW_FIELDS,
+        "status",
         "created_at",
         "updated_at",
     ),
@@ -2924,6 +3305,20 @@ def _normalize_import_record(table, raw):
             record["level"] = "L0 只是想法"
         if record["related_type"] and record["related_type"] not in FEEDBACK_RELATED_TYPES:
             raise ValueError("无效的反馈关联类型")
+    if table == "deliberations":
+        if record["status"] not in DELIBERATION_STATUSES:
+            raise ValueError("无效的推演状态")
+        if record["related_type"] not in ("", *DELIBERATION_RELATED_TYPES):
+            raise ValueError("无效的推演关联类型")
+        raw_analysis = record.get("ai_analysis")
+        if isinstance(raw_analysis, str):
+            try:
+                raw_analysis = json.loads(raw_analysis or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError("AI 分析结果格式无效") from exc
+        if not isinstance(raw_analysis, dict):
+            raise ValueError("AI 分析结果格式无效")
+        record["ai_analysis"] = json.dumps(raw_analysis, ensure_ascii=False)
 
     return record
 
@@ -2968,6 +3363,22 @@ def _validate_import_foreign_keys(table, record, conn, pending):
                 "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
             ).fetchone():
                 raise ValueError(f"机会 id={opportunity_id} 不存在")
+    elif table == "deliberations":
+        related_type = record.get("related_type")
+        related_id = record.get("related_id")
+        if not related_type:
+            if related_id is not None:
+                raise ValueError("未设置关联类型时 related_id 必须为空")
+            return
+        target_table = (
+            "projects" if related_type == "project" else "opportunities"
+        )
+        if related_id not in pending[target_table] and not conn.execute(
+            f"SELECT id FROM {target_table} WHERE id = ?",
+            (related_id,),
+        ).fetchone():
+            label = "项目" if related_type == "project" else "机会"
+            raise ValueError(f"{label} id={related_id} 不存在")
 
 
 def _resolve_import_action(conn, table, raw, pending=None):
@@ -3070,7 +3481,9 @@ def _validate_import_payload(payload):
             f"不支持的备份版本：{version!r}，当前兼容 {', '.join(SUPPORTED_IMPORT_VERSIONS)}"
         )
 
-    required_tables = IMPORT_TABLES if version == "2.0" else LEGACY_IMPORT_TABLES
+    required_tables = (
+        REQUIRED_IMPORT_TABLES if version == "2.0" else LEGACY_IMPORT_TABLES
+    )
     for table in required_tables:
         if table not in payload:
             raise DataImportError(f"缺少数据表：{table}")
@@ -3205,6 +3618,7 @@ def export_all_data():
             "opportunities": list_opportunities(),
             "experiments": list_experiments(),
             "feedback_items": list_feedback_items(),
+            "deliberations": list_deliberations(),
         }
     except sqlite3.Error as exc:
         raise ExportError(

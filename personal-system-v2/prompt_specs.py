@@ -8,6 +8,7 @@ MODULE_LABELS = {
     "assets": "资产",
     "capabilities": "能力",
     "inbox": "智能归档",
+    "deliberation": "推演",
 }
 
 SCENE_SPECS = {
@@ -182,6 +183,24 @@ SCENE_SPECS = {
             "asset_field_schema",
         ],
         "user_vars": ["raw_text"],
+    },
+    ("deliberation", "challenge"): {
+        "label": "对抗性判断分析",
+        "purpose": "在用户先完成独立判断后，识别问题本质、最强反方、隐含假设、缺失信息与最低成本验证方式。",
+        "json_schema": (
+            "essence: 非空字符串；counter_argument: 非空字符串；"
+            "hidden_assumptions: 非空字符串；missing_information: 非空字符串；"
+            "validation: 非空字符串"
+        ),
+        "user_mode": "template",
+        "system_vars": [],
+        "user_vars": [
+            "problem",
+            "context",
+            "initial_judgment",
+            "reasoning",
+            "assumptions",
+        ],
     },
 }
 

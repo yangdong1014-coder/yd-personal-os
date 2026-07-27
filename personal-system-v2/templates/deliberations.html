@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}推演 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<div data-deliberation-page="list">
+  <header class="page-header">
+    <div class="page-header-row">
+      <div>
+        <p class="delib-eyebrow">Deliberation</p>
+        <h1 class="page-title">推演</h1>
+        <p class="page-subtitle">AI 不替代判断，而是训练判断。</p>
+      </div>
+      <div class="header-actions">
+        <a href="{{ url_for('new_deliberation') }}" class="btn btn-sm">开始一次推演</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="delib-loop" aria-label="推演闭环">
+    <span>真实问题</span>
+    <i aria-hidden="true">→</i>
+    <span>我的判断</span>
+    <i aria-hidden="true">→</i>
+    <span>AI 对抗</span>
+    <i aria-hidden="true">→</i>
+    <span>重新决策</span>
+    <i aria-hidden="true">→</i>
+    <span>现实反馈</span>
+  </section>
+
+  <section class="section-card delib-list-panel" aria-labelledby="delib-list-title">
+    <div class="section-header-row">
+      <div>
+        <span class="section-kicker">判断记录</span>
+        <h2 id="delib-list-title">我的推演</h2>
+      </div>
+      <span id="delib-list-count" class="delib-list-count">加载中</span>
+    </div>
+    <div id="deliberations-list" class="delib-list">
+      <div class="empty-state">
+        <strong>正在读取推演</strong>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/deliberations.js') }}"></script>
+{% endblock %}

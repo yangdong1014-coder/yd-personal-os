@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}新建推演 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<div data-deliberation-page="new">
+  <header class="page-header delib-new-header">
+    <div class="page-header-row">
+      <div>
+        <a href="{{ url_for('deliberations') }}" class="delib-back-link">← 返回推演</a>
+        <p class="delib-eyebrow">01 / 独立判断</p>
+        <h1 class="page-title">今天最值得判断的问题是什么？</h1>
+        <p class="page-subtitle">先写下你的判断。AI 会在下一步挑战它，而不是替你回答。</p>
+      </div>
+    </div>
+  </header>
+
+  <form id="deliberation-new-form" class="delib-new-form">
+    <section class="section-card delib-form-section delib-form-section--question">
+      <div class="delib-section-number">01</div>
+      <div class="delib-form-section-body">
+        <span class="section-kicker">问题</span>
+        <div class="form-row">
+          <label class="form-label" for="delib-title">推演标题</label>
+          <input id="delib-title" class="input full-width" maxlength="120" required
+                 placeholder="用一句话给这次推演命名">
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="delib-problem">我现在真正需要判断的问题是</label>
+          <textarea id="delib-problem" class="textarea delib-question-input" rows="4" required
+                    placeholder="把问题写成一个需要取舍、可以验证的判断，而不是宽泛主题。"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="delib-context">背景 <span class="delib-optional">可选</span></label>
+          <textarea id="delib-context" class="textarea" rows="3"
+                    placeholder="已有事实、现实限制、时间窗口或利益相关方"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="delib-related">关联对象 <span class="delib-optional">可选</span></label>
+          <select id="delib-related" class="select full-width">
+            <option value="">不关联</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-card delib-form-section">
+      <div class="delib-section-number">02</div>
+      <div class="delib-form-section-body">
+        <span class="section-kicker">我的判断</span>
+        <div class="form-row">
+          <label class="form-label" for="delib-initial-judgment">我的当前判断是</label>
+          <textarea id="delib-initial-judgment" class="textarea" rows="4" required
+                    placeholder="在看到 AI 分析前，明确写下你现在倾向的结论。"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="delib-reasoning">为什么这么判断</label>
+          <textarea id="delib-reasoning" class="textarea" rows="4" required
+                    placeholder="写出证据、因果链与取舍，而不只是感受。"></textarea>
+        </div>
+        <div class="form-row">
+          <label class="form-label" for="delib-assumptions">我的关键假设是</label>
+          <textarea id="delib-assumptions" class="textarea" rows="4" required
+                    placeholder="哪些条件一旦不成立，会改变你的判断？"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <div class="delib-submit-zone">
+      <p id="delib-new-message" class="form-hint">
+        提交后初始判断将被锁定，确保 AI 挑战的是你真实的第一判断。
+      </p>
+      <button type="submit" id="delib-create-btn" class="btn delib-primary-action">
+        {% if ai_enabled %}保存并开始 AI 对抗{% else %}保存推演{% endif %}
+      </button>
+      {% if not ai_enabled %}
+      <p class="delib-ai-disabled-note">AI 未配置；推演会先保存为草稿，配置后可在详情页继续。</p>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.DELIBERATION_AI_ENABLED = {{ ai_enabled | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/deliberations.js') }}"></script>
+{% endblock %}
