@@ -3,17 +3,17 @@
   if (!pageRoot) return;
 
   const STATUS_META = {
-    draft: { label: "待 AI 对抗", tone: "draft", step: 2 },
-    analyzed: { label: "待重新决策", tone: "analyzed", step: 3 },
-    decided: { label: "待现实反馈", tone: "decided", step: 4 },
-    reviewed: { label: "已完成复盘", tone: "reviewed", step: 5 },
+    draft: { label: "思考中", tone: "draft", step: 2 },
+    analyzed: { label: "已对抗", tone: "analyzed", step: 3 },
+    decided: { label: "已决策", tone: "decided", step: 4 },
+    reviewed: { label: "已复盘", tone: "reviewed", step: 5 },
   };
   const ANALYSIS_SECTIONS = [
-    ["essence", "本质判断", "真正需要判断的矛盾、变量与约束"],
+    ["essence", "本质", "真正需要判断的矛盾、变量与约束"],
     ["counter_argument", "最强反方", "对当前判断最有力的攻击"],
     ["hidden_assumptions", "隐含假设", "尚未被意识到的前提"],
     ["missing_information", "缺失信息", "提高判断质量最需要补齐的事实"],
-    ["validation", "最低成本验证", "尽快让现实给出反馈"],
+    ["validation", "最小验证", "尽快让现实给出反馈"],
   ];
   let relations = { projects: [], opportunities: [] };
 
@@ -185,8 +185,9 @@
 
   function readInitialForm(prefix = "delib") {
     const relation = parseRelation(document.getElementById(`${prefix}-related`).value);
+    const titleInput = document.getElementById(`${prefix}-title`);
     return {
-      title: document.getElementById(`${prefix}-title`).value.trim(),
+      title: titleInput ? titleInput.value.trim() : "",
       problem: document.getElementById(`${prefix}-problem`).value.trim(),
       context: document.getElementById(`${prefix}-context`).value.trim(),
       initial_judgment: document.getElementById(`${prefix}-initial-judgment`).value.trim(),
@@ -234,7 +235,7 @@
 
   function progressHtml(item) {
     const currentStep = statusMeta(item.status).step;
-    const steps = ["问题", "我的判断", "AI 对抗", "最终决策", "现实反馈"];
+    const steps = ["我的起点", "AI 审计", "决策与行动", "现实复盘"];
     return `
       <ol class="delib-progress" aria-label="推演进度">
         ${steps.map((label, index) => {
@@ -251,9 +252,9 @@
     `;
   }
 
-  function readOnlyBlock(label, value) {
+  function readOnlyBlock(label, value, className = "") {
     return `
-      <div class="delib-read-block">
+      <div class="delib-read-block${className ? ` ${className}` : ""}">
         <span>${label}</span>
         <p>${formatText(value || "—")}</p>
       </div>
@@ -262,37 +263,43 @@
 
   function draftEditorHtml(item) {
     return `
-      <form id="delib-draft-form" class="delib-stage-form">
+      <form id="delib-draft-form" class="delib-stage-form delib-draft-editor">
         <div class="form-row">
-          <label class="form-label" for="detail-title">推演标题</label>
-          <input id="detail-title" class="input full-width" maxlength="120" required value="${escapeAttr(item.title)}">
+          <label class="delib-thinking-label" for="detail-problem">你现在真正需要判断什么？</label>
+          <textarea id="detail-problem" class="textarea delib-question-input" rows="4" required>${escapeHtml(item.problem)}</textarea>
         </div>
-        <div class="form-row">
-          <label class="form-label" for="detail-problem">需要判断的问题</label>
-          <textarea id="detail-problem" class="textarea" rows="4" required>${escapeHtml(item.problem)}</textarea>
-        </div>
-        <div class="form-row">
+        <div class="form-row delib-secondary-field">
           <label class="form-label" for="detail-context">背景 <span class="delib-optional">可选</span></label>
-          <textarea id="detail-context" class="textarea" rows="3">${escapeHtml(item.context || "")}</textarea>
+          <textarea id="detail-context" class="textarea" rows="2">${escapeHtml(item.context || "")}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="detail-related">关联对象 <span class="delib-optional">可选</span></label>
-          <select id="detail-related" class="select full-width">${relationOptions(relationValue(item))}</select>
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="detail-initial-judgment">我的当前判断</label>
+          <label class="delib-thinking-label" for="detail-initial-judgment">你现在倾向怎么判断？</label>
           <textarea id="detail-initial-judgment" class="textarea" rows="4" required>${escapeHtml(item.initial_judgment)}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="detail-reasoning">为什么这么判断</label>
-          <textarea id="detail-reasoning" class="textarea" rows="4" required>${escapeHtml(item.reasoning)}</textarea>
+          <label class="delib-thinking-label delib-thinking-label--secondary" for="detail-reasoning">为什么？ <span class="delib-optional">可选</span></label>
+          <textarea id="detail-reasoning" class="textarea" rows="3">${escapeHtml(item.reasoning)}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="detail-assumptions">关键假设</label>
-          <textarea id="detail-assumptions" class="textarea" rows="4" required>${escapeHtml(item.assumptions)}</textarea>
+          <label class="delib-thinking-label" for="detail-assumptions">这个判断成立，需要哪些事情是真的？ <span class="delib-optional">可选</span></label>
+          <p class="form-hint delib-field-intro">找出 1–3 个一旦不成立，你的判断就可能改变的假设。</p>
+          <textarea id="detail-assumptions" class="textarea" rows="3">${escapeHtml(item.assumptions)}</textarea>
         </div>
+        <details class="delib-more-info">
+          <summary>更多信息</summary>
+          <div class="delib-more-info-fields">
+            <div class="form-row">
+              <label class="form-label" for="detail-title">推演标题</label>
+              <input id="detail-title" class="input full-width" maxlength="120" value="${escapeAttr(item.title)}">
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="detail-related">关联项目或机会 <span class="delib-optional">可选</span></label>
+              <select id="detail-related" class="select full-width">${relationOptions(relationValue(item))}</select>
+            </div>
+          </div>
+        </details>
         <div class="delib-form-actions">
-          <button type="submit" class="btn btn-ghost" id="delib-save-draft">保存修改</button>
+          <button type="submit" class="btn" id="delib-save-draft">保存修改</button>
         </div>
       </form>
     `;
@@ -308,9 +315,9 @@
         <span class="delib-relation-chip">${escapeHtml(relationLabel(item))}</span>
       </div>
       <div class="delib-judgment-grid">
-        ${readOnlyBlock("我的初始判断", item.initial_judgment)}
-        ${readOnlyBlock("判断理由", item.reasoning)}
-        ${readOnlyBlock("关键假设", item.assumptions)}
+        ${readOnlyBlock("当时，我这样判断", item.initial_judgment, "delib-read-block--primary")}
+        ${readOnlyBlock("为什么", item.reasoning)}
+        ${readOnlyBlock("成立所需的关键假设", item.assumptions)}
       </div>
     `;
   }
@@ -333,9 +340,16 @@
       `;
     }
     return `
-      <div class="delib-analysis-grid">
+      <section class="section-card delib-analysis-report">
+        <div class="section-header-row delib-analysis-report-head">
+          <div>
+            <h2>思考审计</h2>
+            <p class="form-hint section-hint">用反方、假设与事实缺口检查我的判断</p>
+          </div>
+        </div>
+        <div class="delib-analysis-sections">
         ${ANALYSIS_SECTIONS.map(([key, title, note], index) => `
-          <article class="delib-analysis-card${key === "validation" ? " delib-analysis-card--validation" : ""}">
+          <section class="delib-analysis-section${key === "validation" ? " delib-analysis-section--validation" : ""}">
             <div class="delib-analysis-head">
               <span>${String(index + 1).padStart(2, "0")}</span>
               <div>
@@ -344,9 +358,10 @@
               </div>
             </div>
             <div class="delib-analysis-content">${formatText(analysis[key])}</div>
-          </article>
+          </section>
         `).join("")}
-      </div>
+        </div>
+      </section>
     `;
   }
 
@@ -357,31 +372,31 @@
     if (item.status === "reviewed") {
       return `
         <div class="delib-judgment-grid">
-          ${readOnlyBlock("最终判断", item.final_judgment)}
-          ${readOnlyBlock("我的决定", item.decision)}
-          ${readOnlyBlock("决策理由", item.decision_reasoning)}
-          ${readOnlyBlock("下一步最小行动", item.next_action)}
+          ${readOnlyBlock("现在，我这样判断", item.final_judgment, "delib-read-block--primary")}
+          ${readOnlyBlock("所以我决定", item.decision)}
+          ${readOnlyBlock("为什么", item.decision_reasoning)}
+          ${readOnlyBlock("下一步最小动作", item.next_action, "delib-read-block--action")}
         </div>
       `;
     }
     return `
       <form id="delib-decision-form" class="delib-stage-form">
         <div class="form-row">
-          <label class="form-label" for="final-judgment">经过推演后，我最终如何判断</label>
+          <label class="delib-thinking-label" for="final-judgment">现在，你怎么判断？</label>
           <textarea id="final-judgment" class="textarea" rows="4" required>${escapeHtml(item.final_judgment || "")}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="decision">我决定做什么</label>
+          <label class="delib-thinking-label" for="decision">所以你决定做什么？</label>
           <textarea id="decision" class="textarea" rows="3" required>${escapeHtml(item.decision || "")}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="decision-reasoning">为什么</label>
+          <label class="delib-thinking-label delib-thinking-label--secondary" for="decision-reasoning">为什么？</label>
           <textarea id="decision-reasoning" class="textarea" rows="3" required>${escapeHtml(item.decision_reasoning || "")}</textarea>
         </div>
         <div class="form-row delib-next-action-field">
-          <label class="form-label" for="next-action">下一步最小验证动作</label>
+          <label class="delib-thinking-label" for="next-action">下一步最小动作</label>
           <textarea id="next-action" class="textarea" rows="3" required>${escapeHtml(item.next_action || "")}</textarea>
-          <p class="form-hint">只写一个能以最低成本获得现实反馈的动作。</p>
+          <p class="form-hint">用最低成本验证这次判断。</p>
         </div>
         <div class="delib-form-actions">
           <button type="submit" class="btn" id="delib-save-decision">保存最终判断</button>
@@ -397,14 +412,14 @@
     if (item.status === "reviewed") {
       return `
         <div class="delib-review-grid">
-          ${readOnlyBlock("现实结果", item.actual_result)}
-          ${readOnlyBlock("哪些判断正确", item.judgment_accuracy)}
-          ${readOnlyBlock("哪些判断错误", item.judgment_error)}
-          ${readOnlyBlock("真正的关键变量", item.key_variable)}
-          ${readOnlyBlock("如果重来一次", item.lesson)}
+          ${readOnlyBlock("后来发生了什么", item.actual_result, "delib-read-block--primary")}
+          ${readOnlyBlock("哪里判断对了", item.judgment_accuracy)}
+          ${readOnlyBlock("哪里判断错了", item.judgment_error)}
+          ${readOnlyBlock("真正关键的变量", item.key_variable)}
+          ${readOnlyBlock("如果重新来一次", item.lesson)}
         </div>
         <div class="delib-principle">
-          <span>沉淀原则</span>
+          <span>留下一条原则</span>
           <blockquote>${formatText(item.principle)}</blockquote>
         </div>
       `;
@@ -412,29 +427,29 @@
     return `
       <form id="delib-review-form" class="delib-stage-form">
         <div class="form-row">
-          <label class="form-label" for="actual-result">现实结果是什么</label>
+          <label class="delib-thinking-label" for="actual-result">后来发生了什么？</label>
           <textarea id="actual-result" class="textarea" rows="4" required>${escapeHtml(item.actual_result || "")}</textarea>
         </div>
         <div class="delib-two-column">
           <div class="form-row">
-            <label class="form-label" for="judgment-accuracy">原判断哪些部分正确</label>
+            <label class="delib-thinking-label delib-thinking-label--secondary" for="judgment-accuracy">回头看，哪里判断对了？</label>
             <textarea id="judgment-accuracy" class="textarea" rows="4" required>${escapeHtml(item.judgment_accuracy || "")}</textarea>
           </div>
           <div class="form-row">
-            <label class="form-label" for="judgment-error">哪些部分错误</label>
+            <label class="delib-thinking-label delib-thinking-label--secondary" for="judgment-error">哪里判断错了？</label>
             <textarea id="judgment-error" class="textarea" rows="4" required>${escapeHtml(item.judgment_error || "")}</textarea>
           </div>
         </div>
         <div class="form-row">
-          <label class="form-label" for="key-variable">真正影响结果最大的变量</label>
+          <label class="delib-thinking-label" for="key-variable">真正关键的变量是什么？</label>
           <textarea id="key-variable" class="textarea" rows="3" required>${escapeHtml(item.key_variable || "")}</textarea>
         </div>
         <div class="form-row">
-          <label class="form-label" for="lesson">如果重新来一次，我会怎么判断</label>
+          <label class="delib-thinking-label" for="lesson">如果重新来一次？</label>
           <textarea id="lesson" class="textarea" rows="3" required>${escapeHtml(item.lesson || "")}</textarea>
         </div>
         <div class="form-row delib-principle-field">
-          <label class="form-label" for="principle">这次可以沉淀成什么原则</label>
+          <label class="delib-thinking-label" for="principle">留下一条原则</label>
           <textarea id="principle" class="textarea" rows="3" required>${escapeHtml(item.principle || "")}</textarea>
         </div>
         <div class="delib-form-actions">
@@ -463,24 +478,26 @@
     const meta = statusMeta(item.status);
     pageRoot.innerHTML = `
       <header class="page-header delib-detail-header">
-        <div class="delib-detail-topline">
-          <a href="/deliberations" class="delib-back-link">← 返回推演</a>
-          <div class="delib-detail-actions">
+        <div class="page-header-row">
+          <div>
+            <h1 class="page-title">${escapeHtml(item.title)}</h1>
+            <p class="page-subtitle">创建于 ${formatDate(item.created_at)} · 最近更新 ${formatDate(item.updated_at)}</p>
+          </div>
+          <div class="header-actions delib-detail-actions">
             <span class="delib-status delib-status--${meta.tone}">${meta.label}</span>
+            <a href="/deliberations" class="btn btn-sm btn-ghost">返回推演</a>
             <button type="button" id="delib-delete-btn" class="btn btn-sm btn-ghost">删除</button>
           </div>
         </div>
-        <h1 class="page-title">${escapeHtml(item.title)}</h1>
-        <p class="page-subtitle">创建于 ${formatDate(item.created_at)} · 最近更新 ${formatDate(item.updated_at)}</p>
       </header>
 
       ${progressHtml(item)}
 
       <div class="delib-timeline">
-        ${timelineStage("01", "问题与初始判断", "先把自己的判断放在桌面上", initialStageHtml(item), "is-initial")}
-        ${timelineStage("02", "AI 对抗", "不是答案，是压力测试", analysisStageHtml(item), item.ai_analysis?.essence ? "is-complete" : "is-current")}
-        ${timelineStage("03", "我的最终判断", "看过反方之后，仍由我做决定", decisionStageHtml(item), item.status === "analyzed" ? "is-current" : "")}
-        ${timelineStage("04", "现实反馈", "让结果校准判断", reviewStageHtml(item), item.status === "decided" ? "is-current" : item.status === "reviewed" ? "is-complete" : "")}
+        ${timelineStage("01", "问题 → 当时的判断", "我当时是怎么想的", initialStageHtml(item), "is-initial")}
+        ${timelineStage("02", "AI 对抗", "一份思考审计", analysisStageHtml(item), item.ai_analysis?.essence ? "is-complete" : "is-current")}
+        ${timelineStage("03", "最终决策 → 行动", "现在，我怎么判断", decisionStageHtml(item), item.status === "analyzed" ? "is-current" : "")}
+        ${timelineStage("04", "结果 → 原则", "现实后来给了什么反馈", reviewStageHtml(item), item.status === "decided" ? "is-current" : item.status === "reviewed" ? "is-complete" : "")}
       </div>
     `;
     wireDetailEvents(item);

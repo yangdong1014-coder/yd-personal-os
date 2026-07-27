@@ -436,7 +436,7 @@ def test_export_import_v2_and_legacy_v1_compatibility(client):
 
 def test_health_and_homepage_for_value_rc1(client):
     health = client.get("/api/health").get_json()["data"]
-    assert health["version"] == "v2.1.1"
+    assert health["version"] == "v2.1.3"
 
     home = client.get("/")
     assert home.status_code == 200

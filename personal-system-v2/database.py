@@ -1026,14 +1026,31 @@ def _require_deliberation_fields(values, fields, message):
         raise ValueError(message)
 
 
+def _deliberation_title_from_problem(problem, max_length=48):
+    text = " ".join(_clean_text(problem).split())
+    if not text:
+        return ""
+    sentence_end = len(text)
+    for marker in ("。", "！", "？", "!", "?"):
+        index = text.find(marker)
+        if index >= 0:
+            sentence_end = min(sentence_end, index + 1)
+    title = text[:sentence_end]
+    if len(title) <= max_length:
+        return title
+    return f"{title[: max_length - 1].rstrip()}…"
+
+
 def create_deliberation(payload):
     payload = payload or {}
     values = _clean_deliberation_fields(payload, DELIBERATION_INITIAL_FIELDS)
     _require_deliberation_fields(
         values,
-        ("title", "problem", "initial_judgment", "reasoning", "assumptions"),
-        "请完整填写标题、问题、初始判断、理由和关键假设",
+        ("problem", "initial_judgment"),
+        "请先写下需要判断的问题和你的当前判断",
     )
+    if not values["title"]:
+        values["title"] = _deliberation_title_from_problem(values["problem"])
 
     conn = get_connection()
     try:
@@ -1116,9 +1133,11 @@ def update_deliberation(deliberation_id, payload):
         values = _clean_deliberation_fields(merged, DELIBERATION_INITIAL_FIELDS)
         _require_deliberation_fields(
             values,
-            ("title", "problem", "initial_judgment", "reasoning", "assumptions"),
-            "请完整填写标题、问题、初始判断、理由和关键假设",
+            ("problem", "initial_judgment"),
+            "请先写下需要判断的问题和你的当前判断",
         )
+        if not values["title"]:
+            values["title"] = _deliberation_title_from_problem(values["problem"])
         related_type, related_id = _normalize_deliberation_relation(
             conn,
             values["related_type"],
