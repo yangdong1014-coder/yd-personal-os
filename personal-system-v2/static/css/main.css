@@ -10022,10 +10022,6 @@ html.theme-light-cool textarea {
   min-height: 230px;
 }
 
-.delib-new-form {
-  max-width: 920px;
-}
-
 .delib-new-form,
 .delib-progress,
 .delib-timeline {
@@ -10038,11 +10034,13 @@ html.theme-light-cool textarea {
 
 .delib-new-form {
   display: grid;
+  width: 100%;
   gap: var(--layout-gap);
 }
 
 .delib-thinking-section {
   display: grid;
+  width: 100%;
   gap: 1.15rem;
   margin-bottom: 0;
 }
@@ -10105,7 +10103,7 @@ html.theme-light-cool textarea {
 }
 
 .delib-more-info {
-  max-width: 920px;
+  width: 100%;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   background: var(--surface-flat);
@@ -10138,8 +10136,8 @@ html.theme-light-cool textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   gap: 1rem;
-  max-width: 920px;
   padding: 0.35rem 0 2rem;
   text-align: left;
 }
