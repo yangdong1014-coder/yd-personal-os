@@ -1,6 +1,15 @@
 {
-  "current": "v2.1.3",
+  "current": "v2.1.4",
   "entries": [
+    {
+      "version": "v2.1.4",
+      "date": "2026-07-27",
+      "title": "PSY v2.1.4：Deliberation Layout Hotfix",
+      "type": "fix",
+      "items": [
+        "修复新建推演页面主体宽度受 920px 限制，导致 Form、Card、更多信息及 CTA 与 PSY 标准内容区右边界不一致的问题。"
+      ]
+    },
     {
       "version": "v2.1.3",
       "date": "2026-07-27",
