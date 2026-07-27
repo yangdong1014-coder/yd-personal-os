@@ -1,7 +1,7 @@
 # CLAUDE.md · yd-personal-os 执行约束
 
 > 本文件是执行 AI（Grok Build / Codex / Claude Code）在本仓库工作的最高行为约束。
-> 完整设计依据见 `docs/系统搭建说明书_1.1.md`（系统宪法）与 `docs/战略定位模块_开发说明书_1.0.md`。
+> 完整设计依据见 `docs/系统搭建说明书_1.1.md`（系统宪法）；模块规格仅在任务涉及对应模块时适用。
 > 本文件与上述文档冲突时，以系统宪法为准。
 > 角色定位：你是「手」，不是「大脑」。判断、取舍、架构决策由杨栋与 Claude（对话端）完成。你的职责是按已定规格精确执行，不自作主张。
 
@@ -116,19 +116,7 @@
 
 ---
 
-## 6 · 当前任务：战略定位模块
-
-完整规格见 `docs/战略定位模块_开发说明书_1.0.md`，严格按其执行。要点：
-
-- 新增三张表：positioning_anchor / positioning_calibration / positioning_goal_action，**不动既有六模块表结构**。
-- 半自动改目标：校准产生的目标变更先进 pending 中间态，杨栋确认才真写 goals 表（复用 v1.11 inbox「建议→确认」范式）。
-- 淘汰目标用归档（改状态），不硬删。
-- 实现顺序：建表 → API → 前端三区 → 最后接 AI 辅助（可延后）。
-- 完成后更新 changelog、补 data-model.md 与 architecture.md。**但 git tag / push 由杨栋手动。**
-
----
-
-## 7 · 建议的本地验证 hook（可选，强烈推荐）
+## 6 · 建议的本地验证 hook（可选，强烈推荐）
 
 为强制执行修改路径铁律，建议在 `.grok/hooks/pre_tool.sh` 中拦截 push 类操作：
 

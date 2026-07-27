@@ -1,5 +1,7 @@
 # 版本发布流程
 
+> 本文提供发布操作说明。正式发布门禁、tag 不可变规则与最终一致性要求见 [发布规范](standards/RELEASE.md)。
+
 ## 版本真源
 
 - **唯一正式版号**：`personal-system-v2/changelog.json` → `current`
@@ -23,16 +25,18 @@ git pull --ff-only  # 与 origin/main 同步
 1. **开发与测试**：功能完成 → pytest 全绿
 2. **更新 changelog**：在 `entries` 顶部新增版本条目，更新 `current`
 3. **提交**：语义化 commit（如 `feat:` / `chore:` / `fix:`）
-4. **打标签**（可选但推荐）：
+4. **打 annotated tag**（正式发布必需）：
    ```bash
-   git tag -a v1.x.x -m "v1.x.x short description"
+    git tag -a vX.Y.Z -m "vX.Y.Z short description"
    ```
 5. **推送**：
    ```bash
-   git push origin main
-   git push origin --tags
+    git push origin main
+    git push origin vX.Y.Z
    ```
 6. **验证 CI**：GitHub Actions `Test` workflow 绿灯
+7. **创建 GitHub Release**：绑定已经存在的 tag，不重新创建或移动 tag
+8. **生产收口**：按部署规范更新、重启、健康检查、smoke test，并核对 commit 一致性
 
 ## 标签策略
 
@@ -41,7 +45,7 @@ git pull --ff-only  # 与 origin/main 同步
 | 功能版 | v1.10 | 新能力发布点 |
 | 补丁版 | v1.9.1 / v1.10.1 | 收口、修复、工程化；流程与功能版相同 |
 
-标签打在**已验证**的 commit 上，不打在未测通的状态。
+标签只打在已验证的 commit 上；不可变与版本一致性规则见 [发布规范](standards/RELEASE.md)。
 
 ## 回滚与热修
 
