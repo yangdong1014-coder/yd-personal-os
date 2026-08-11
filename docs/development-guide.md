@@ -29,9 +29,24 @@ python app.py
 | DEEPSEEK_MODEL | 锁定模型后 AI 管理页不可改 |
 | DEEPSEEK_TIMEOUT | 请求超时秒数 |
 | YD_OS_DB_PATH | 覆盖 SQLite 路径（测试常用） |
-| PERSONAL_OS_REMOTE | 设为 `1` 启用远程 token 鉴权 |
-| PERSONAL_OS_ACCESS_TOKEN | 远程访问令牌（REMOTE=1 必填） |
+| SECRET_KEY | session 签名密钥；生产、远程或非 loopback 运行必填，至少 32 字节强随机值 |
+| PERSONAL_OS_ENV | 本机开发必须显式设 `development`；缺失/未知值与 `production` 均进入加固模式 |
+| PERSONAL_OS_REMOTE | 远程部署安全信号；也用于许可显式非 localhost 绑定，不承担鉴权 |
 | PERSONAL_OS_BIND_HOST | 显式绑定地址，默认 127.0.0.1 |
+| PERSONAL_OS_BG | 仅控制正常本地开发的后台/debug 行为，不能覆盖生产安全判断 |
+
+只有显式 `PERSONAL_OS_ENV=development` 且 loopback、非远程时才允许临时密钥和本地 debug。其他环境值、缺失环境值、`PERSONAL_OS_REMOTE=1` 或非 loopback 绑定都会进入同一安全校验。反向代理后端即使绑定 loopback，也必须显式设置远程或生产信号。
+
+## 管理员初始化
+
+首次使用前先配置持久 `SECRET_KEY` 并初始化唯一 bootstrap 管理员：
+
+```bash
+cd personal-system-v2
+python -m flask --app app bootstrap-admin
+```
+
+命令在终端隐藏输入并二次确认密码，不接受前端或管理 API 创建管理员。初始化后通过 `/login` 登录；所有来源（包括 `127.0.0.1`）都必须认证。
 
 ## 运行测试
 
@@ -43,6 +58,7 @@ pytest -v tests/test_obsidian_export.py   # 单文件
 
 - 使用临时数据库，**不要**指向生产 `data/yd_os.db`
 - 无需 `DEEPSEEK_API_KEY`
+- fixture 通过真实 `/login` + CSRF 建立管理员 session，不关闭认证或 CSRF
 
 ### AI mock 测试（智能归档等）
 

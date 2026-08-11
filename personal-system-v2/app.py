@@ -1,11 +1,32 @@
 import json
 import os
+from functools import wraps
+from urllib.parse import urlsplit
 
-from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory
+import click
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required as flask_login_required,
+    login_user,
+    logout_user,
+)
+from flask_wtf.csrf import CSRFError, CSRFProtect
 
-import access_control
 import ai_service
 import asset_schemas
+import auth_service
 import changelog
 import config
 import database
@@ -18,6 +39,12 @@ import settings_store
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
 
 app = Flask(__name__)
+config.configure_flask_app(app)
+
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+login_manager.session_protection = "strong"
+csrf = CSRFProtect()
 
 
 @app.context_processor
@@ -100,42 +127,351 @@ NAV_GROUPS = [
 ]
 
 
-def _error(message, status=400):
-    return jsonify({"ok": False, "error": message}), status
+def _error(message, status=400, code=None):
+    payload = {"ok": False, "error": message}
+    if code:
+        payload["code"] = code
+    return jsonify(payload), status
+
+
+def _request_wants_json():
+    if request.path.startswith("/api/"):
+        return True
+    return request.accept_mimetypes.best_match(
+        ["application/json", "text/html"]
+    ) == "application/json"
+
+
+def _unauthorized_response():
+    if _request_wants_json():
+        return _error("需要登录", 401, "authentication_required")
+    next_path = request.full_path if request.query_string else request.path
+    return redirect(url_for("login", next=next_path))
+
+
+@login_manager.unauthorized_handler
+def handle_unauthorized():
+    return _unauthorized_response()
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        user = auth_service.get_user(int(user_id))
+    except (TypeError, ValueError):
+        return None
+    if user is None or not user.is_active:
+        return None
+    if session.get("auth_version") != user.auth_version:
+        return None
+    return user
+
+
+login_required = flask_login_required
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return _unauthorized_response()
+        if not current_user.is_admin:
+            if _request_wants_json():
+                return _error("需要管理员权限", 403, "admin_required")
+            return (
+                render_template(
+                    "access_denied.html",
+                    error_title="无权访问",
+                    error_message="该页面仅供系统管理员使用。",
+                ),
+                403,
+            )
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+PUBLIC_ENDPOINTS = frozenset({"login", "api_health", "service_worker", "static"})
+IDENTITY_ONLY_ENDPOINTS = frozenset(
+    {"change_password", "logout", "api_current_user"}
+)
+
+
+def _is_admin_endpoint(endpoint):
+    return endpoint == "admin_users_page" or str(endpoint or "").startswith(
+        "api_admin_"
+    )
+
+
+def _business_access_pending_response():
+    message = "业务数据完成用户隔离前，普通用户暂不能访问业务功能。"
+    if _request_wants_json():
+        return _error(message, 403, "business_access_pending")
+    return (
+        render_template(
+            "access_denied.html",
+            error_title="业务功能暂未开放",
+            error_message=message,
+        ),
+        403,
+    )
 
 
 @app.before_request
-def enforce_remote_access():
-    if access_control.is_public_path():
+def enforce_authenticated_user():
+    if request.endpoint in PUBLIC_ENDPOINTS:
         return None
-    if not access_control.auth_required():
-        return None
-    token = access_control.extract_token()
-    if access_control.validate_token(token):
-        g.access_granted = True
-        return None
-    if request.path.startswith("/api/") or request.accept_mimetypes.best_match(
-        ["application/json", "text/html"]
-    ) == "application/json":
-        return _error("需要有效的访问令牌", 403)
-    return render_template("access_denied.html"), 403
+    if current_user.is_authenticated:
+        if (
+            current_user.must_change_password
+            and request.endpoint not in IDENTITY_ONLY_ENDPOINTS
+        ):
+            if _request_wants_json():
+                return _error(
+                    "首次使用前必须修改密码",
+                    403,
+                    "password_change_required",
+                )
+            return redirect(url_for("change_password"))
+        if current_user.is_admin or request.endpoint in IDENTITY_ONLY_ENDPOINTS:
+            return None
+        if _is_admin_endpoint(request.endpoint):
+            return None
+        return _business_access_pending_response()
+    if session.get("_user_id") is not None:
+        session.clear()
+    return _unauthorized_response()
+
+
+csrf.init_app(app)
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(_error_detail):
+    message = "请求验证已失效，请刷新页面后重试"
+    if _request_wants_json():
+        return _error(message, 400, "csrf_failed")
+    return (
+        render_template(
+            "access_denied.html",
+            error_title="请求已失效",
+            error_message=message,
+        ),
+        400,
+    )
 
 
 @app.after_request
-def persist_access_token_cookie(response):
-    if not getattr(g, "access_granted", False):
-        return response
-    query_token = access_control.token_from_query()
-    if not query_token:
-        return response
-    response.set_cookie(
-        access_control.COOKIE_NAME,
-        query_token,
-        httponly=True,
-        samesite="Lax",
-        max_age=30 * 24 * 3600,
-    )
+def apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    if request.endpoint not in {"static", "service_worker", "api_health"}:
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers.add("Vary", "Cookie")
     return response
+
+
+def _safe_next_path(candidate):
+    candidate = str(candidate or "").strip()
+    parsed = urlsplit(candidate)
+    if (
+        not candidate.startswith("/")
+        or candidate.startswith("//")
+        or parsed.scheme
+        or parsed.netloc
+        or parsed.path == "/login"
+    ):
+        return "/"
+    return candidate
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        if current_user.must_change_password:
+            return redirect(url_for("change_password"))
+        return redirect(url_for("index"))
+
+    error = None
+    next_path = request.values.get("next", "")
+    identifier = ""
+    if request.method == "POST":
+        identifier = request.form.get("identifier", "").strip()
+        try:
+            user = auth_service.authenticate(
+                identifier,
+                request.form.get("password", ""),
+            )
+        except auth_service.AuthenticationError as exc:
+            error = str(exc)
+        else:
+            session.clear()
+            login_user(user, remember=False, fresh=True)
+            session["auth_version"] = user.auth_version
+            destination = (
+                url_for("change_password")
+                if user.must_change_password
+                else _safe_next_path(next_path)
+            )
+            return redirect(destination)
+
+    return render_template(
+        "login.html",
+        error=error,
+        identifier=identifier,
+        next_path=next_path,
+    )
+
+
+@app.post("/logout")
+@login_required
+def logout():
+    auth_service.revoke_all_sessions(current_user.id)
+    logout_user()
+    session.clear()
+    response = redirect(url_for("login"))
+    response.headers["Clear-Site-Data"] = '"cache", "storage"'
+    return response
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    error = None
+    if request.method == "POST":
+        new_password = request.form.get("new_password", "")
+        if new_password != request.form.get("confirm_password", ""):
+            error = "两次输入的新密码不一致"
+        else:
+            try:
+                user = auth_service.change_password(
+                    current_user.id,
+                    request.form.get("current_password", ""),
+                    new_password,
+                )
+            except auth_service.AuthError as exc:
+                error = str(exc)
+            else:
+                logout_user()
+                session.clear()
+                login_user(user, remember=False, fresh=True)
+                session["auth_version"] = user.auth_version
+                return redirect(url_for("index"))
+    return render_template(
+        "change_password.html",
+        active_page="change_password",
+        error=error,
+    )
+
+
+@app.get("/api/auth/me")
+@login_required
+def api_current_user():
+    return jsonify({"ok": True, "data": current_user.to_public_dict()})
+
+
+@app.get("/admin/users")
+@admin_required
+def admin_users_page():
+    return render_template(
+        "admin_users.html",
+        active_page="admin_users",
+        users=auth_service.list_users(),
+    )
+
+
+@app.get("/api/admin/users")
+@admin_required
+def api_admin_list_users():
+    return jsonify({"ok": True, "data": auth_service.list_users()})
+
+
+@app.post("/api/admin/users")
+@admin_required
+def api_admin_create_user():
+    payload = request.get_json(silent=True) or {}
+    requested_role = payload.get("role", "user")
+    if requested_role != "user":
+        return _error("管理 API 只能创建普通用户", 400, "invalid_role")
+    try:
+        user, temporary_password = auth_service.create_standard_user(
+            payload.get("username", ""),
+            payload.get("email", ""),
+        )
+    except auth_service.ConflictError as exc:
+        return _error(str(exc), 409)
+    except auth_service.AuthError as exc:
+        return _error(str(exc))
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "data": {
+                    "user": user,
+                    "temporary_password": temporary_password,
+                },
+            }
+        ),
+        201,
+    )
+
+
+@app.patch("/api/admin/users/<int:user_id>/status")
+@admin_required
+def api_admin_set_user_status(user_id):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload.get("is_active"), bool):
+        return _error("is_active 必须为布尔值")
+    try:
+        user = auth_service.set_standard_user_active(
+            user_id,
+            payload["is_active"],
+        )
+    except auth_service.AuthorizationError as exc:
+        return _error(str(exc), 403)
+    except auth_service.AuthError as exc:
+        return _error(str(exc), 404)
+    return jsonify({"ok": True, "data": user})
+
+
+@app.post("/api/admin/users/<int:user_id>/reset-password")
+@admin_required
+def api_admin_reset_user_password(user_id):
+    try:
+        user, temporary_password = auth_service.reset_standard_user_password(user_id)
+    except auth_service.AuthorizationError as exc:
+        return _error(str(exc), 403)
+    except auth_service.AuthError as exc:
+        return _error(str(exc), 404)
+    return jsonify(
+        {
+            "ok": True,
+            "data": {
+                "user": user,
+                "temporary_password": temporary_password,
+            },
+        }
+    )
+
+
+@app.cli.command("bootstrap-admin")
+def bootstrap_admin_command():
+    """Create the one initial administrator using hidden password input."""
+    database.init_db()
+    username = click.prompt("管理员用户名").strip()
+    email = click.prompt("管理员邮箱").strip()
+    password = click.prompt(
+        "管理员密码",
+        hide_input=True,
+        confirmation_prompt="再次输入管理员密码",
+    )
+    try:
+        user = auth_service.bootstrap_admin(username, email, password)
+    except auth_service.AuthError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"管理员已初始化：{user['username']} ({user['email']})")
 
 
 @app.route("/api/health", methods=["GET"])
@@ -1510,14 +1846,11 @@ def api_delete_capability_entry(entry_id):
         return _error(str(exc), 409)
 
 
-if __name__ == "__main__":
-    config.validate_server_config()
+def run_server():
+    run_options = config.get_server_run_options(app)
     database.init_db()
-    background = os.environ.get("PERSONAL_OS_BG") == "1"
-    host = config.get_bind_host()
-    app.run(
-        debug=not background,
-        host=host,
-        port=5000,
-        use_reloader=not background,
-    )
+    app.run(**run_options)
+
+
+if __name__ == "__main__":
+    run_server()

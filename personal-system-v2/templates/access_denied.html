@@ -3,17 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>需要访问令牌 · 个人能力操作系统</title>
+  <title>{{ error_title or '无权访问' }} · 个人能力操作系统</title>
+  <script>
+    (function () {
+      var saved = localStorage.getItem("personal-os-ui-theme");
+      var allowed = ["theme-dark-warm", "theme-dark-cool", "theme-light-warm", "theme-light-cool"];
+      document.documentElement.classList.add(allowed.indexOf(saved) >= 0 ? saved : "theme-dark-warm");
+    })();
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
-<body>
-  <main class="main-content" style="max-width: 32rem; margin: 4rem auto; padding: 1rem;">
-    <div class="section-card">
-      <h1 class="page-title" style="font-size: 1.25rem;">需要访问令牌</h1>
-      <p class="page-subtitle">家庭服务器远程模式已启用。请在 URL 附带 <code>?token=你的令牌</code> 后访问。</p>
-      <p class="form-hint">示例：<code>http://你的Tailscale地址:5000/?token=xxxx</code></p>
-      <p class="form-hint">验证成功后令牌会保存在浏览器中，后续 API 请求将自动携带。</p>
-    </div>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="section-card auth-card" role="alert">
+      <p class="auth-eyebrow">PSY · ACCESS CONTROL</p>
+      <h1 class="auth-title">{{ error_title or '无权访问' }}</h1>
+      <p class="auth-subtitle">{{ error_message or '当前账户没有执行此操作的权限。' }}</p>
+      {% if current_user.is_authenticated and current_user.is_admin %}
+        <a class="btn auth-submit" href="{{ url_for('index') }}">返回系统</a>
+      {% elif current_user.is_authenticated %}
+        <a class="btn auth-submit" href="{{ url_for('change_password') }}">返回账户设置</a>
+      {% else %}
+        <a class="btn auth-submit" href="{{ url_for('login') }}">返回登录</a>
+      {% endif %}
+    </section>
   </main>
 </body>
 </html>

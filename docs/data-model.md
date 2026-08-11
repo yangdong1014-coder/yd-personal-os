@@ -7,6 +7,8 @@ SQLite 表结构及关系说明（`database.py` / `init_db`）。
 ```
 positioning_anchor — 定位锚（低频，单行有效）
 
+users — 身份账户（Phase 1 独立表，尚不关联业务表）
+
 positioning_calibration (1) ──< positioning_goal_action (N)
 
 goals (1) ──< projects (N) ──< tasks (N)
@@ -20,6 +22,26 @@ inbox_entries (1) ──< inbox_suggestions (N)
 ```
 
 战略定位层位于目标系统之上：校准产生目标变更建议（`positioning_goal_action`），人工确认后才写入 `goals`（与 inbox 建议→确认范式一致）。
+
+## Phase 1 身份边界
+
+### users
+
+| 字段 | 说明 |
+|------|------|
+| id | 主键 |
+| username | 规范化用户名，大小写不敏感唯一，不允许包含 `@` |
+| email | 规范化邮箱，大小写不敏感唯一 |
+| password_hash | Werkzeug 安全密码哈希；不保存明文或可逆密码 |
+| role | `admin` / `user`；管理 API 只能创建 `user` |
+| is_active | 启用状态；禁用后现有 session 下一请求失效 |
+| must_change_password | 临时密码账户首次登录必须改密 |
+| auth_version | 退出、密码重置、改密或状态变化时递增，使旧 session 失效；Phase 1.1 的退出语义为退出该账户全部现有会话 |
+| failed_login_count / locked_until | 连续失败计数与临时锁定 |
+| last_login_at | 最近成功登录时间 |
+| created_at / updated_at | UTC 时间戳 |
+
+Phase 1 不删除用户，只禁用；不向任何业务表添加 `user_id`，也不把用户凭据纳入现有 JSON 导入导出。身份存在不代表已完成业务数据隔离；Phase 1.1 的后端中央门禁暂时禁止普通用户进入全部业务页面与 API。
 
 ## 表说明
 

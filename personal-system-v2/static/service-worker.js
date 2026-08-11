@@ -1,7 +1,6 @@
-const CACHE_NAME = "psy-2-pwa-v2.1.4";
+const CACHE_NAME = "psy-2-pwa-auth-shell-v2";
 
 const APP_SHELL_URLS = [
-  "/",
   "/static/css/main.css",
   "/static/js/main.js",
   "/static/manifest.json",
@@ -43,17 +42,15 @@ self.addEventListener("activate", (event) => {
 
 function shouldBypass(request, url) {
   if (request.method !== "GET") return true;
+  if (request.mode === "navigate" || request.destination === "document") return true;
   if (url.pathname.startsWith("/api/")) return true;
-  if (url.searchParams.has("token")) return true;
-  if (request.headers.has("Authorization")) return true;
-  if (request.headers.has("X-Personal-OS-Token")) return true;
   return false;
 }
 
 function canUpdateCache(request, response, url) {
   if (!response || !response.ok || response.type !== "basic") return false;
-  if (CACHEABLE_PATHS.has(url.pathname)) return true;
-  return (
+  return url.pathname.startsWith("/static/") && (
+    CACHEABLE_PATHS.has(url.pathname) ||
     request.destination === "style" ||
     request.destination === "script" ||
     request.destination === "image"
@@ -73,7 +70,6 @@ async function networkFirst(request) {
   } catch (error) {
     const cached = await cache.match(request);
     if (cached) return cached;
-    if (request.mode === "navigate") return cache.match("/");
     throw error;
   }
 }

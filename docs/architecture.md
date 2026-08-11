@@ -9,7 +9,8 @@ Flask (app.py) — 路由、模板、API
         ↓
 database.py — SQLite CRUD、导入导出、资产迁移
 asset_schemas.py — 资产类型与动态字段 schema
-access_control.py — 家庭服务器远程 token 鉴权
+auth_repository.py — users 与登录状态数据访问
+auth_service.py — 密码哈希、登录、锁定、账户状态与 auth_version
 ai_service.py — DeepSeek（可选）
 inbox_service.py — 智能归档解析与确认入库
 positioning_service.py — 战略定位锚/校准/目标变更建议
@@ -23,20 +24,23 @@ changelog.py — 版本日志
 ## 后端（Flask）
 
 - 入口：`personal-system-v2/app.py`
-- 页面路由：首页、定位、目标、任务、复盘、资产、能力、智能归档、AI 管理、版本日志
+- 页面路由：登录、修改密码、用户管理及既有业务页面
 - JSON API：CRUD、导入/导出、AI 代理、changelog
-- 全局注入：`current_version`（来自 changelog）、`ai_enabled`
+- Flask-Login session：每个请求从 `users` 重载账户，并验证 `is_active` 与 `auth_version`
+- Flask-WTF CSRF：覆盖登录、退出、改密、管理 API 与全部既有写请求
+- 全局注入：`current_version`（来自 changelog）、`ai_enabled`、`current_user`
 
 ## 数据库（SQLite）
 
 - 路径：`data/yd_os.db`（可通过 `YD_OS_DB_PATH` 覆盖）
 - 连接启用 `PRAGMA foreign_keys = ON`
 - 初始化：`database.init_db()`
+- `users` 独立承载身份；Phase 1 不给业务表增加 `user_id`
 
 ## 前端
 
 - 原生 HTML 模板 + `static/css/main.css`
-- 按页加载 `static/js/*.js`，共用 `api.js`、`toast.js`、`main.js`
+- 按页加载 `static/js/*.js`，共用 `api.js`、`toast.js`、`main.js`；写请求统一携带 CSRF header
 - 侧边栏：导航、JSON 备份导出、导入恢复、Obsidian zip 导出
 
 ## 提示词（Prompt Loader）
@@ -169,30 +173,30 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 - 历史：`GET /api/inbox` 列表 + `/inbox/history` 详情
 - 拒绝：`POST /api/inbox/suggestions/<id>/reject`
 
-## v1.13 新增：家庭服务器远程访问 MVP
+## v2.2 Phase 1（本地开发）：账户与认证骨架
 
-**定位**：家里电脑常开 + 手机通过 Tailscale 安全访问，为后续移动端快速记录打基础。
+**定位**：只建立“当前用户是谁”的身份层；业务表尚无 `user_id`，因此本阶段普通用户不能对外开放真实业务使用。
 
 ```
-手机 (Tailscale) → tailnet → 家里电脑 PSY-1
-                              ├── 127.0.0.1:5000 (默认)
-                              ├── Tailscale Serve (推荐)
-                              └── access_control token 鉴权
+浏览器 → Flask session + CSRF → 每请求加载 users
+                               ├── is_active=false：立即失效
+                               ├── auth_version 不匹配：旧 session 失效
+                               └── role=user：中央门禁仅放行认证/改密表面
 ```
 
 | 组件 | 职责 |
 |------|------|
-| `config.py` | `PERSONAL_OS_REMOTE` / `PERSONAL_OS_ACCESS_TOKEN` / `PERSONAL_OS_BIND_HOST` |
-| `access_control.py` | 本机免验；远程校验 token（URL / Header / Cookie） |
-| `static/js/access-token.js` | 解析 `?token=`，localStorage + API Header |
-| `GET /api/health` | 健康检查（公开） |
-| `scripts/backup-db.py` | SQLite 自动备份，保留 N 份 |
-| `scripts/check-health.bat` | 本地健康探测 |
+| `database.py` | 幂等创建 `users`，不修改既有业务表 |
+| `auth_repository.py` | 用户查询、登录状态、密码与状态更新；bootstrap 使用原子事务；无删除接口 |
+| `auth_service.py` | 规范化、Werkzeug 哈希、失败锁定、临时密码与普通用户管理规则 |
+| `app.py` | Flask-Login、Flask-WTF、页面/API 权限、bootstrap CLI |
+| `templates/login.html` / `change_password.html` / `admin_users.html` | 认证与最小管理界面 |
+| `static/service-worker.js` | 升级时删除所有旧 cache，只缓存静态资源，所有 HTML navigation 与 API 绕过缓存 |
 
-**安全默认值**：
+旧 `access_control.py` 与 `access-token.js` 已从 Phase 1 代码删除；URL、Header、Cookie token 均不再构成认证路径。`PERSONAL_OS_REMOTE` 是远程部署安全信号和非 localhost 绑定许可，所有来源（包括本机）都必须登录。管理员只能通过本地交互式 `bootstrap-admin` 命令原子初始化；管理 API 只能创建 `user`。
 
-- 监听 `127.0.0.1`，不默认 `0.0.0.0`
-- 不推荐公网端口转发
-- `PERSONAL_OS_BIND_HOST` 非 localhost 时必须 `PERSONAL_OS_REMOTE=1`
+Phase 1.1 期间，普通用户只可访问登录、退出、当前账户查询、修改密码与必需静态资源；业务 HTML 使用权限拒绝页，业务 API 返回 `403 business_access_pending`。退出会递增当前账户 `auth_version`，因此等价于撤销该账户全部现有 session。PWA 在 bfcache 恢复认证页面时会先隐藏文档并向服务器重新校验 session，失败或离线时不重新展示私人页面。
 
-详见 [home-server.md](home-server.md)。
+运行模式采用显式开发、默认加固：只有 `PERSONAL_OS_ENV=development`、loopback 且非远程时允许临时密钥与本地 debug；环境缺失/未知、production、remote 或非 loopback 任一情况都进入统一生产安全校验。
+
+详见 [home-server.md](home-server.md) 与 [development-guide.md](development-guide.md)。

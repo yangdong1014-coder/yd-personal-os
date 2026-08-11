@@ -8,6 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="PSY-1">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}个人能力操作系统{% endblock %}</title>
   <script>
     (function () {
@@ -27,7 +28,8 @@
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
+  {% block page_shell %}
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="sidebar-head">
@@ -69,6 +71,15 @@
         {% endfor %}
       </nav>
       <div class="sidebar-foot">
+        {% if current_user.is_authenticated and current_user.is_admin %}
+        <a
+          href="/admin/users"
+          class="nav-link sidebar-admin-link{% if active_page == 'admin_users' %} active{% endif %}"
+        >
+          <span class="nav-link-icon" aria-hidden="true">⚙</span>
+          <span class="nav-link-label">用户管理</span>
+        </a>
+        {% endif %}
         <button
           type="button"
           id="theme-toggle-btn"
@@ -79,6 +90,18 @@
           <span class="nav-export-icon theme-toggle-icon theme-toggle__icon" aria-hidden="true">◐</span>
           <span class="nav-export-label theme-toggle__label" id="theme-toggle-label">暖色</span>
         </button>
+        {% if current_user.is_authenticated %}
+        <div class="sidebar-account">
+          <div class="sidebar-account-copy">
+            <span class="sidebar-account-label">当前用户</span>
+            <strong class="sidebar-account-name">{{ current_user.username }}</strong>
+          </div>
+          <form method="post" action="{{ url_for('logout') }}" class="sidebar-logout-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="nav-export-btn sidebar-logout-btn">退出</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
     </aside>
 
@@ -119,10 +142,12 @@
       </div>
     </div>
   </div>
+  {% endblock %}
 
-  <script src="{{ url_for('static', filename='js/access-token.js') }}"></script>
+  {% block core_scripts %}
   <script src="{{ url_for('static', filename='js/toast.js') }}"></script>
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  {% endblock %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

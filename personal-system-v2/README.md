@@ -29,6 +29,16 @@ python app.py
 
 浏览器访问 http://127.0.0.1:5000
 
+本机开发的 `.env` 必须显式设置 `PERSONAL_OS_ENV=development`。缺失或未知环境值默认进入加固模式，不能隐式退化为 debug 开发运行。
+
+首次使用前设置持久 `SECRET_KEY`，并通过本地交互式命令初始化唯一管理员：
+
+```bash
+python -m flask --app app bootstrap-admin
+```
+
+密码采用隐藏输入且不会回显。初始化后访问 `/login`；本机与远程请求都必须登录。
+
 ### 桌面快捷方式（Windows）
 
 **创建 / 重建快捷方式**（升级后若仍出现黑框，请重新执行一次）：
@@ -74,15 +84,12 @@ python scripts/create_desktop_shortcut.py
 简要流程：
 
 1. 家里电脑与手机安装 Tailscale，登录同一账号。
-2. 在 `.env` 设置 `PERSONAL_OS_REMOTE=1` 与强随机 `PERSONAL_OS_ACCESS_TOKEN`。
+2. 在 `.env` 设置强随机 `SECRET_KEY`；受控远程运行同时设置 `PERSONAL_OS_ENV=production` 与 `PERSONAL_OS_REMOTE=1`。
 3. 桌面快捷方式或开机自启启动 PSY-1（默认仍监听 `127.0.0.1`）。
-4. 推荐 `tailscale serve --bg 5000` 将本机服务暴露给 tailnet。
-5. 手机访问 `http://Tailscale地址/?token=你的令牌`；验证后 token 自动保存。
+4. 推荐通过受控 HTTPS 反向代理将本机服务暴露给 tailnet。
+5. 手机访问服务地址并使用个人账户登录。
 
-| 访问来源 | 需要 token |
-|----------|------------|
-| 本机 `127.0.0.1` | 否 |
-| Tailscale / 远程 | 是 |
+旧共享 token 的 URL、Header、Cookie 与 localStorage 路径已移除；无论本机或远程都只接受用户 session。`PERSONAL_OS_REMOTE` 是远程部署安全信号，也是非 localhost 绑定的显式许可，不是第二套鉴权。
 
 **数据库备份**：
 
@@ -102,13 +109,15 @@ python scripts/backup-db.py
 | `DEEPSEEK_BASE_URL` | 否 | API 地址，默认 `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | 否 | 锁定模型；设置后 AI管理页不可改 |
 | `DEEPSEEK_TIMEOUT` | 否 | 超时秒数，默认 60 |
-| `PERSONAL_OS_REMOTE` | 否 | 设为 `1` 启用家庭服务器远程鉴权 |
-| `PERSONAL_OS_ACCESS_TOKEN` | REMOTE=1 时必填 | 远程访问令牌；本机 127.0.0.1 免验 |
+| `SECRET_KEY` | 生产/远程/非 loopback 必填 | Flask session 签名密钥，至少 32 字节强随机值 |
+| `PERSONAL_OS_ENV` | 是 | 本机开发显式设 `development`；缺失/未知值与 `production` 均按加固模式处理 |
+| `PERSONAL_OS_REMOTE` | 远程运行必填 | 远程部署安全信号；也许可非 localhost 绑定，不承担鉴权 |
 | `PERSONAL_OS_BIND_HOST` | 否 | 显式绑定地址，默认 `127.0.0.1`；仅 REMOTE=1 时允许非 localhost |
+| `PERSONAL_OS_BG` | 否 | 仅关闭正常本地开发的 debug/reloader，不能降低生产安全配置 |
 
 未配置 `DEEPSEEK_API_KEY` 时，CRUD 功能正常，AI 按钮不可用。
 
-> **安全提示**：开启 `PERSONAL_OS_REMOTE=1` 后务必使用强 token；不要将 5000 端口暴露到公网；优先 Tailscale 而非路由器端口转发。
+> **安全提示**：远程使用必须设置远程/生产信号、强 `SECRET_KEY` 并使用 HTTPS；不要将 Flask 5000 端口直接暴露到公网。未标注环境不会进入本地开发模式；反向代理仍须显式设置远程/生产信号，以表达部署意图。Phase 1.1 尚未完成业务数据隔离：中央门禁暂时只允许普通用户访问认证与改密表面，管理员仍可访问现有共享业务数据。
 
 ## 数据文件
 

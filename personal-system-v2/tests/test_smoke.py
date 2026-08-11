@@ -104,7 +104,11 @@ def test_service_worker_is_available(client):
     script = response.get_data(as_text=True)
     assert '"/api/"' in script
     assert "caches.open" in script
-    assert "psy-2-pwa-v2.1.4" in script
+    assert "psy-2-pwa-auth-shell-v2" in script
+    assert 'const APP_SHELL_URLS = [\n  "/static/' in script
+    assert 'request.mode === "navigate"' in script
+    assert 'cache.match("/")' not in script
+    assert "X-Personal-OS-Token" not in script
 
 
 def test_positioning_page(client):

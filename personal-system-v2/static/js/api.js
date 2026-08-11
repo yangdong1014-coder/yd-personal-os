@@ -1,7 +1,8 @@
 async function apiRequest(url, options = {}) {
+  const csrfToken = getCsrfToken();
   const headers = {
     "Content-Type": "application/json",
-    ...getAccessTokenHeaders(),
+    ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
     ...(options.headers || {}),
   };
   const response = await fetch(url, {

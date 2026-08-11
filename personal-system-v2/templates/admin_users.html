@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}用户管理 · 个人能力操作系统{% endblock %}
+
+{% block content %}
+<header class="page-header">
+  <h1 class="page-title">用户管理</h1>
+  <p class="page-subtitle">创建和维护登录账户。Phase 1 仅管理身份，不授予查看其他用户业务数据的能力。</p>
+</header>
+
+<div class="page-split admin-users-layout">
+  <section class="section-card page-split-side admin-create-panel">
+    <h2>创建普通用户</h2>
+    <p class="form-hint section-hint">系统自动生成一次性临时密码；首次登录必须修改。</p>
+    <form id="admin-create-user-form" class="auth-form admin-create-form">
+      <label class="auth-field">
+        <span class="form-label">用户名</span>
+        <input class="input" name="username" type="text" maxlength="64" autocomplete="off" required>
+      </label>
+      <label class="auth-field">
+        <span class="form-label">邮箱</span>
+        <input class="input" name="email" type="email" maxlength="254" autocomplete="off" required>
+      </label>
+      <button class="btn" type="submit">创建用户</button>
+    </form>
+
+    <div id="temporary-password-panel" class="temporary-password-panel" hidden aria-live="polite">
+      <p class="temporary-password-label">临时密码 · 仅显示这一次</p>
+      <code id="temporary-password-value" class="temporary-password-value"></code>
+      <button id="copy-temporary-password" class="btn btn-sm btn-ghost" type="button">复制密码</button>
+      <p id="temporary-password-owner" class="form-hint"></p>
+    </div>
+    <p id="admin-users-status" class="form-hint admin-users-status" aria-live="polite"></p>
+  </section>
+
+  <section class="section-card page-split-main admin-users-panel">
+    <div class="section-header-row">
+      <div>
+        <h2>账户列表</h2>
+        <p class="form-hint section-hint">禁用、启用或重置普通用户密码；管理员账户只能通过安全 bootstrap 初始化。</p>
+      </div>
+    </div>
+    <div id="admin-users-list" class="admin-users-list"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.INITIAL_ADMIN_USERS = {{ users | tojson }};</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin-users.js') }}"></script>
+{% endblock %}

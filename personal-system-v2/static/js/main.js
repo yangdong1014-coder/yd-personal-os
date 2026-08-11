@@ -50,12 +50,18 @@ function cycleUiTheme() {
   applyUiTheme(next.id);
 }
 
-function authFetchOptions(options = {}) {
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? (meta.getAttribute("content") || "").trim() : "";
+}
+
+function sessionFetchOptions(options = {}) {
+  const csrfToken = getCsrfToken();
   return {
     credentials: "same-origin",
     ...options,
     headers: {
-      ...getAccessTokenHeaders(),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
       ...(options.headers || {}),
     },
   };
@@ -72,6 +78,28 @@ function registerServiceWorker() {
 }
 
 registerServiceWorker();
+
+function guardBackForwardCacheRestore(event) {
+  if (!event.persisted) return;
+
+  // Never reveal a restored authenticated document until the server revalidates it.
+  document.documentElement.style.visibility = "hidden";
+  fetch("/api/auth/me", {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  })
+    .then((response) => {
+      if (!response.ok) {
+        window.location.replace("/login");
+        return;
+      }
+      window.location.reload();
+    })
+    .catch(() => window.location.replace("/login"));
+}
+
+window.addEventListener("pageshow", guardBackForwardCacheRestore);
 
 document.addEventListener("DOMContentLoaded", () => {
   applyUiTheme(getStoredUiTheme());
@@ -300,7 +328,7 @@ async function handleImportSelect(event) {
 
     const response = await fetch(
       "/api/import/preview",
-      authFetchOptions({
+      sessionFetchOptions({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -340,7 +368,7 @@ async function executeImport() {
   try {
     const response = await fetch(
       "/api/import",
-      authFetchOptions({
+      sessionFetchOptions({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pendingImportPayload),
@@ -390,7 +418,7 @@ async function handleObsidianExport() {
   }
 
   try {
-    const response = await fetch("/api/export/obsidian.zip", authFetchOptions());
+    const response = await fetch("/api/export/obsidian.zip", sessionFetchOptions());
     if (!response.ok) {
       let message = "Obsidian 导出失败，请稍后重试";
       try {
@@ -438,7 +466,7 @@ async function handleExport() {
   }
 
   try {
-    const response = await fetch("/api/export", authFetchOptions());
+    const response = await fetch("/api/export", sessionFetchOptions());
     if (!response.ok) {
       let message = "导出失败，请稍后重试";
       try {

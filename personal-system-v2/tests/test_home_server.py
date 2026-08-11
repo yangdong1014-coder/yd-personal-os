@@ -1,8 +1,10 @@
-import os
-import shutil
 from pathlib import Path
 
+import pytest
+
+import auth_service
 import config
+from conftest import extract_csrf_token
 
 
 def test_health_endpoint(client):
@@ -14,50 +16,53 @@ def test_health_endpoint(client):
     assert "version" in payload["data"]
 
 
-def test_local_access_without_token_when_remote_off(client, monkeypatch):
+def test_authenticated_local_access_when_remote_off(client, monkeypatch):
     monkeypatch.delenv("PERSONAL_OS_REMOTE", raising=False)
-    monkeypatch.setattr(config, "is_remote_mode", lambda: False)
     response = client.get("/")
     assert response.status_code == 200
 
 
-def test_remote_mode_forbidden_without_token(client, monkeypatch):
-    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
-    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
-    response = client.get(
+def test_remote_request_without_session_returns_401(unauthenticated_client):
+    response = unauthenticated_client.get(
         "/api/goals",
         environ_overrides={"REMOTE_ADDR": "100.64.0.1"},
     )
-    assert response.status_code == 403
-    assert "令牌" in response.get_json()["error"]
+    assert response.status_code == 401
+    assert response.get_json()["code"] == "authentication_required"
 
 
-def test_remote_mode_page_with_valid_token(client, monkeypatch):
-    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
-    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
-    response = client.get(
-        "/?token=test-secret-token",
-        environ_overrides={"REMOTE_ADDR": "100.64.0.1"},
+def test_remote_request_with_authenticated_session_is_allowed(test_app):
+    password = "remote admin password"
+    auth_service.bootstrap_admin("remoteadmin", "remote@example.com", password)
+    remote_client = test_app.test_client()
+    remote_address = {"REMOTE_ADDR": "100.64.0.1"}
+    login_page = remote_client.get("/login", environ_overrides=remote_address)
+    csrf_token = extract_csrf_token(login_page)
+    login_response = remote_client.post(
+        "/login",
+        data={
+            "identifier": "remoteadmin",
+            "password": password,
+            "csrf_token": csrf_token,
+        },
+        environ_overrides=remote_address,
+    )
+    assert login_response.status_code == 302
+
+    response = remote_client.get(
+        "/api/goals",
+        environ_overrides=remote_address,
     )
     assert response.status_code == 200
 
 
-def test_remote_mode_api_with_header_token(client, monkeypatch):
-    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
-    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
-    response = client.get(
-        "/api/goals",
-        headers={"X-Personal-OS-Token": "test-secret-token"},
-        environ_overrides={"REMOTE_ADDR": "100.64.0.1"},
-    )
-    assert response.status_code == 200
-    assert response.get_json()["ok"] is True
+def test_legacy_query_token_cannot_bypass_login(unauthenticated_client):
+    response = unauthenticated_client.get("/api/goals?token=legacy-shared-token")
+    assert response.status_code == 401
 
 
-def test_remote_mode_service_worker_is_public(client, monkeypatch):
-    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
-    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
-    response = client.get(
+def test_service_worker_is_public(unauthenticated_client):
+    response = unauthenticated_client.get(
         "/service-worker.js",
         environ_overrides={"REMOTE_ADDR": "100.64.0.1"},
     )
@@ -65,14 +70,22 @@ def test_remote_mode_service_worker_is_public(client, monkeypatch):
     assert response.content_type.startswith("application/javascript")
 
 
-def test_local_remote_mode_no_token_required(client, monkeypatch):
-    monkeypatch.setattr(config, "is_remote_mode", lambda: True)
-    monkeypatch.setattr(config, "get_access_token", lambda: "test-secret-token")
-    response = client.get(
+def test_local_request_without_session_also_requires_login(unauthenticated_client):
+    response = unauthenticated_client.get(
         "/api/goals",
         environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 401
+
+
+def test_remote_mode_requires_persistent_secret_key(monkeypatch):
+    monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    with pytest.raises(SystemExit, match="SECRET_KEY"):
+        config.validate_server_config()
+
+    monkeypatch.setenv("SECRET_KEY", "x" * 48)
+    config.validate_server_config()
 
 
 def test_backup_db_does_not_modify_source(tmp_path, monkeypatch):

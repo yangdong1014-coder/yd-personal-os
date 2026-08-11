@@ -679,6 +679,36 @@ def _migrate_deliberations_table(conn):
     )
 
 
+def _migrate_users_table(conn):
+    """Add the Phase 1 identity store without changing existing business tables."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL COLLATE NOCASE UNIQUE
+                CHECK (length(trim(username)) > 0 AND instr(username, '@') = 0),
+            email TEXT NOT NULL COLLATE NOCASE UNIQUE
+                CHECK (length(trim(email)) > 0 AND instr(email, '@') > 1),
+            password_hash TEXT NOT NULL CHECK (length(password_hash) > 0),
+            role TEXT NOT NULL DEFAULT 'user'
+                CHECK (role IN ('admin', 'user')),
+            is_active INTEGER NOT NULL DEFAULT 1
+                CHECK (is_active IN (0, 1)),
+            must_change_password INTEGER NOT NULL DEFAULT 0
+                CHECK (must_change_password IN (0, 1)),
+            auth_version INTEGER NOT NULL DEFAULT 1
+                CHECK (auth_version >= 1),
+            failed_login_count INTEGER NOT NULL DEFAULT 0
+                CHECK (failed_login_count >= 0),
+            locked_until TEXT,
+            last_login_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
 def init_db():
     conn = get_connection()
     conn.executescript(
@@ -761,6 +791,7 @@ def init_db():
     _migrate_assets_table(conn)
     _migrate_value_tables(conn)
     _migrate_deliberations_table(conn)
+    _migrate_users_table(conn)
     _migrate_positioning_tables(conn)
     _migrate_goals_status(conn)
     _ensure_default_capability_practice_steps(conn)

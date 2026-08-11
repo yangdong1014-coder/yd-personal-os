@@ -1,11 +1,13 @@
-# 家庭服务器模式（v1.13+）
+# 家庭服务器模式
 
-## 定位
+## 当前边界
 
-将家里常开的 Windows 电脑作为 PSY-1 **家庭服务器**，供手机在外通过 **Tailscale** 安全访问。本版本只做远程访问 MVP，不包含完整移动端。
+v2.2 Phase 1 只在本地开发账户与认证骨架。正式生产仍为 v2.1.4，本阶段不得部署、迁移生产数据库或向普通用户开放真实业务使用。
 
-```
-手机（Tailscale）→ tailnet → 家里电脑 PSY-1（127.0.0.1:5000）
+远程拓扑仍建议为：
+
+```text
+手机（Tailscale）→ 受控 HTTPS → 家里电脑 PSY（127.0.0.1:5000）
 ```
 
 ## 安全原则
@@ -13,95 +15,76 @@
 | 原则 | 说明 |
 |------|------|
 | 默认监听 | `127.0.0.1:5000`，不默认暴露公网 |
-| 禁止默认 `0.0.0.0` | 不允许未配置时监听所有网卡 |
-| 不推荐端口转发 | 不要将路由器 5000 端口映射到公网 |
-| 推荐远程方式 | **Tailscale** 组网 + 访问令牌 |
-| 显式开启远程 | 设置 `PERSONAL_OS_REMOTE=1` 后才要求 token |
-| 显式改绑定 | `PERSONAL_OS_BIND_HOST` 仅在 `REMOTE=1` 时允许非 localhost |
+| 单一认证 | 本机与远程都使用用户 session，不存在本机免验或共享凭据旁路 |
+| HTTPS | 远程输入密码和发送 session cookie 时必须使用受控 HTTPS |
+| 持久密钥 | 生产、远程或非 loopback 运行必须设置至少 32 字节强随机 `SECRET_KEY` |
+| 显式绑定 | `PERSONAL_OS_BIND_HOST` 非 localhost 时必须同时设置 `PERSONAL_OS_REMOTE=1` |
+| 运行加固 | 上述任一暴露信号都会强制 Secure cookie、`debug=False` 与关闭 reloader |
+| 数据边界 | Phase 1 业务表没有 `user_id`；中央门禁暂时禁止普通用户访问业务系统 |
 
-## 环境变量
+`PERSONAL_OS_REMOTE` 标记远程可达运行并许可显式非 localhost 绑定，不参与身份认证。通过反向代理远程访问时，即使 Flask 仍绑定 loopback，也必须设置该信号或生产信号。旧共享访问凭据及其 URL、Header、Cookie、localStorage 路径已从 Phase 1 代码删除。
 
-在 `personal-system-v2/.env` 中配置：
+## 本地开发配置
+
+所有开发、手测先使用临时数据库，禁止指向 `data/yd_os.db`：
+
+```powershell
+$env:YD_OS_DB_PATH = Join-Path $env:TEMP "psy-v22-auth-dev.db"
+$env:PERSONAL_OS_ENV = "development"
+$env:SECRET_KEY = "请替换为至少32字节的本地随机值"
+python -m flask --app app bootstrap-admin
+python app.py
+```
+
+`bootstrap-admin` 在终端隐藏输入并二次确认密码；管理员不能通过前端或管理 API 创建。不要把密钥、密码或临时数据库提交到 Git。
+
+受控远程配置在后续正式发布前另行验收。目标配置至少包括：
 
 ```env
+PERSONAL_OS_ENV=production
 PERSONAL_OS_REMOTE=1
-PERSONAL_OS_ACCESS_TOKEN=你的长随机令牌
+SECRET_KEY=至少32字节强随机值
 ```
 
-可选：
+只有确需 Flask 直接绑定非 localhost 时才增加：
 
 ```env
-# 仅在 REMOTE=1 时生效；默认 127.0.0.1
-# PERSONAL_OS_BIND_HOST=100.x.x.x
+PERSONAL_OS_BIND_HOST=受控内网地址
 ```
 
-生成 token 示例（PowerShell）：
+## 认证行为
 
-```powershell
-[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
-```
+| 场景 | 结果 |
+|------|------|
+| 未登录访问业务 HTML | 跳转 `/login` |
+| 未登录访问 JSON API | `401` |
+| 普通用户访问 admin API | `403 admin_required` |
+| 普通用户访问任意业务 HTML/API | 权限拒绝页 / `403 business_access_pending` |
+| 用户被禁用 | 现有 session 下一请求立即失效 |
+| 密码重置或 `auth_version` 变化 | 旧 session 下一请求失效 |
+| 退出 | 递增 `auth_version`，撤销该账户全部现有 session |
+| 首次临时密码登录 | 强制进入 `/change-password` |
+| 浏览器写请求缺失 CSRF | `400` |
 
-## Tailscale 推荐配置
+`GET /api/health`、静态资源与 service worker 保持公开；公开不代表它们能读取业务数据。
 
-### 1. 安装与登录
+## PWA 缓存边界
 
-1. 在家里电脑安装 [Tailscale](https://tailscale.com/download)。
-2. 在手机安装 Tailscale 客户端。
-3. 使用**同一账号**登录。
-
-### 2. 启动 PSY-1
-
-- 桌面快捷方式（后台无黑框）
-- 或 `scripts/install-startup.vbs` 开机自启
-
-### 3. 暴露服务（推荐 Tailscale Serve）
-
-Flask 保持 `127.0.0.1:5000`，用 Serve 转发到 tailnet：
-
-```powershell
-tailscale serve --bg 5000
-```
-
-手机浏览器访问（示例）：
-
-```
-http://你的机器名.tailnet-name.ts.net:端口/?token=你的令牌
-```
-
-或 Tailscale IP（若使用 `PERSONAL_OS_BIND_HOST` 绑定 tailnet IP）：
-
-```
-http://100.x.x.x:5000/?token=你的令牌
-```
-
-### 4. 不建议的做法
-
-- ❌ 路由器端口转发 5000 到公网
-- ❌ 未设 token 就开启 `PERSONAL_OS_REMOTE=1`
-- ❌ 将 token 分享给不可信的人
-
-## 访问鉴权
-
-| 访问来源 | 是否需要 token |
-|----------|----------------|
-| 本机 `127.0.0.1` | 否（保持原有体验） |
-| Tailscale / 局域网远程 | 是 |
-
-令牌传递方式：
-
-1. URL：`/?token=xxx`（首次推荐）
-2. 请求头：`X-Personal-OS-Token: xxx`（API）
-3. Cookie：首次 URL 验证成功后自动写入（页面跳转用）
-4. localStorage：前端 API 自动携带
+- service worker 只缓存 CSS、JavaScript、manifest 与图标等静态资源。
+- `/login` 和所有业务 HTML navigation 不进入 Cache Storage。
+- `/api/*` 与所有非 GET 请求不缓存。
+- 激活新版 worker 时删除全部旧版本 Cache Storage；退出响应清理 cache 与 storage。
+- bfcache 恢复认证页面时先隐藏内容并重新校验 session；失败或离线时不显示旧私人内容。
+- 即使离线，也不以旧业务 HTML 作为 fallback。
 
 ## Windows 常开设置
 
-1. **电源**：控制面板 → 电源选项 → 关闭「睡眠」；笔记本合盖可选「不采取任何操作」。
-2. **网络**：保持 Wi-Fi/有线不断线；路由器勿频繁断网。
-3. **开机自启**：`scripts/install-startup.vbs`。
-4. **后台运行**：使用桌面快捷方式（`start-server.vbs`）。
+1. 电源设置关闭自动睡眠；笔记本按实际需要设置合盖行为。
+2. 保持网络连接稳定，不做公网 5000 端口转发。
+3. 可用 `scripts/install-startup.vbs` 配置开机自启。
+4. 后台运行使用 `scripts/start-server.vbs`。
 
-## 启动 / 停止 / 健康检查
+## 启动、停止与备份
 
 | 操作 | 命令 |
 |------|------|
@@ -110,32 +93,15 @@ http://100.x.x.x:5000/?token=你的令牌
 | 健康检查 | `scripts/check-health.bat` 或 `GET /api/health` |
 | 数据库备份 | `python scripts/backup-db.py` |
 
-## 数据库备份与恢复
+备份位置为 `personal-system-v2/backups/yd_os_YYYYMMDD_HHMMSS.db`，默认保留最近 30 份。生产备份、migration 与恢复必须另按数据库和发布规范执行，本阶段不操作生产。
 
-### 自动备份脚本
+## Phase 1 本地验收清单
 
-```bash
-python scripts/backup-db.py
-python scripts/backup-db.py --keep 30
-```
-
-备份位置：`personal-system-v2/backups/yd_os_YYYYMMDD_HHMMSS.db`  
-默认保留最近 **30** 份；`backups/` 已加入 `.gitignore`。
-
-### 手动恢复
-
-1. `scripts/stop-server.bat` 停止服务。
-2. 复制备份文件覆盖 `personal-system-v2/data/yd_os.db`。
-3. 重新启动 PSY-1。
-
-也可用 JSON 全量备份（侧边栏「导出备份」）通过导入恢复。
-
-## 验收清单
-
-- [ ] 桌面快捷方式启动正常
-- [ ] `/api/health` 返回 `status: up`
-- [ ] 本机 `http://127.0.0.1:5000` 无需 token
-- [ ] `PERSONAL_OS_REMOTE=1` 时，远程无 token 返回 403
-- [ ] 带正确 token 可访问页面与 API
-- [ ] 手机 Tailscale 访问成功
-- [ ] `backup-db.py` 生成备份且原库不变
+- [ ] 使用临时 `YD_OS_DB_PATH`，没有读取或写入真实数据库
+- [ ] bootstrap 管理员在并发下也只能原子初始化一次，密码不回显
+- [ ] 本机与模拟远程地址未登录均无法访问业务数据
+- [ ] 普通用户只能访问认证/改密表面，所有业务页面与 API 都由后端拒绝
+- [ ] 登录、全会话退出、禁用、重置与首次改密行为符合上表
+- [ ] service worker 升级会清旧 cache，不缓存登录后 HTML，也不提供旧页面离线 fallback
+- [ ] `backup-db.py` 的既有回归测试仍通过
+- [ ] 正式生产 v2.1.4 未被修改或部署
