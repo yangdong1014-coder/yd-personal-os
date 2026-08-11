@@ -129,8 +129,12 @@ def create_user(
                 now,
             ),
         )
+        database.ensure_default_capability_practice_steps(conn, cursor.lastrowid)
+        created = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
         conn.commit()
-        return get_user_by_id(cursor.lastrowid)
+        return _user_from_row(created)
     except sqlite3.IntegrityError:
         conn.rollback()
         raise
@@ -160,6 +164,7 @@ def create_bootstrap_admin(username, email, password_hash):
             """,
             (username, email, password_hash, now, now),
         )
+        database.ensure_default_capability_practice_steps(conn, cursor.lastrowid)
         created = conn.execute(
             "SELECT * FROM users WHERE id = ?", (cursor.lastrowid,)
         ).fetchone()

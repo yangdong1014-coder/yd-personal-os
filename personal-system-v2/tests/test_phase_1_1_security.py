@@ -371,7 +371,7 @@ def test_private_html_and_api_responses_are_never_cacheable(client):
         assert "Cookie" in response.headers.get("Vary", "")
 
 
-def test_phase_1_1_does_not_add_user_id_to_business_tables(test_app):
+def test_phase_1_1_fail_closed_remains_with_phase_2_owned_tables(test_app):
     conn = database.get_connection()
     try:
         tables = {
@@ -382,11 +382,12 @@ def test_phase_1_1_does_not_add_user_id_to_business_tables(test_app):
             if not row["name"].startswith("sqlite_")
         }
         assert "users" in tables
-        for table in tables - {"users"}:
+        assert set(database.PERSONAL_DATA_TABLES) <= tables
+        for table in database.PERSONAL_DATA_TABLES:
             columns = {
                 row["name"]
                 for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()
             }
-            assert "user_id" not in columns, table
+            assert "user_id" in columns, table
     finally:
         conn.close()

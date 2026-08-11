@@ -45,16 +45,20 @@ def test_list_assets_filter_by_type(client):
     assert sop_only[0]["title"] == "SOP B"
 
 
-def test_legacy_asset_migration(client):
+def test_init_db_does_not_rewrite_existing_asset_rows(client):
     conn = database.get_connection()
+    admin_id = conn.execute(
+        "SELECT id FROM users WHERE role = 'admin'"
+    ).fetchone()["id"]
     cur = conn.execute(
         """
         INSERT INTO assets (
-            title, trigger_context, core_content, asset_type,
+            user_id, title, trigger_context, core_content, asset_type,
             capability_tags, source_review_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            admin_id,
             "旧知识卡片",
             "某场景",
             "某本质内容",
@@ -69,11 +73,14 @@ def test_legacy_asset_migration(client):
     conn.close()
 
     database.init_db()
-    asset = database.get_asset(asset_id)
-    assert asset["asset_type"] in ("本质洞察", "方法论", "通用资产")
-    assert asset["asset_level"] == "资料"
-    assert asset["fields"]
-    assert asset["summary"]
+    conn = database.get_connection()
+    asset = conn.execute(
+        "SELECT asset_type, fields, summary FROM assets WHERE id = ?", (asset_id,)
+    ).fetchone()
+    conn.close()
+    assert asset["asset_type"] == "知识卡片"
+    assert asset["fields"] == "{}"
+    assert asset["summary"] == ""
 
 
 def test_assets_api_returns_case_asset_value_fields(client):

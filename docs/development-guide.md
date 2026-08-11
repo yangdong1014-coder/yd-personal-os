@@ -48,12 +48,34 @@ python -m flask --app app bootstrap-admin
 
 命令在终端隐藏输入并二次确认密码，不接受前端或管理 API 创建管理员。初始化后通过 `/login` 登录；所有来源（包括 `127.0.0.1`）都必须认证。
 
+## v2.2 离线 staged migration
+
+Phase 2 代码不会在 `init_db()` 中自动绑定 legacy 数据。检测到 v2.1.4 业务表缺少 `user_id` 时，应用会 fail closed；只能对数据库副本或发布阶段明确指定的只读源执行：
+
+```bash
+cd personal-system-v2
+python scripts/migrate-v2.2-multiuser.py \
+  path/to/legacy-v2.1.4.db \
+  path/to/staged-v2.2.db \
+  --admin-username admin \
+  --admin-email admin@example.com
+
+python scripts/verify-v2.2-migration.py \
+  path/to/legacy-v2.1.4.db \
+  path/to/staged-v2.2.db
+```
+
+迁移密码只通过隐藏终端输入，不接受命令行参数。工具以 SQLite `mode=ro` 打开源库；目标必须不存在，且不得与源路径相同。它先写目标目录内的临时 DB，复制 16 表并执行 row count、`user_id`、双向 EXCEPT、主键、`sqlite_sequence`、integrity、FK、硬/软关联验证，全部成功后才原子生成 staged 文件。
+
+开发与测试 MUST 使用 fixture、临时库或数据库副本。不要把 `data/yd_os.db` 作为命令参数；Phase 2 不执行生产切换，staged DB 也不得提交 Git。迁移 admin 只承接 legacy 原有训练路径，不额外 seed，以保证旧表 row count 完全相等；之后新建的账户会在各自事务中获得独立默认训练路径。
+
 ## 运行测试
 
 ```bash
 cd personal-system-v2
 pytest
 pytest -v tests/test_obsidian_export.py   # 单文件
+pytest -v tests/test_phase_2_schema.py tests/test_phase_2_migration.py
 ```
 
 - 使用临时数据库，**不要**指向生产 `data/yd_os.db`

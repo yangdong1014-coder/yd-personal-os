@@ -7,7 +7,8 @@
         ↓ HTTP
 Flask (app.py) — 路由、模板、API
         ↓
-database.py — SQLite CRUD、导入导出、资产迁移
+database.py — SQLite CRUD、v2.2 ownership schema 与启动门禁
+v22_migration.py — v2.1.4 legacy → staged v2.2 离线复制与完整性验证
 asset_schemas.py — 资产类型与动态字段 schema
 auth_repository.py — users 与登录状态数据访问
 auth_service.py — 密码哈希、登录、锁定、账户状态与 auth_version
@@ -35,7 +36,9 @@ changelog.py — 版本日志
 - 路径：`data/yd_os.db`（可通过 `YD_OS_DB_PATH` 覆盖）
 - 连接启用 `PRAGMA foreign_keys = ON`
 - 初始化：`database.init_db()`
-- `users` 独立承载身份；Phase 1 不给业务表增加 `user_id`
+- `users` 承载身份；16 张个人业务表均以 `user_id NOT NULL` 标记所有者
+- `init_db()` 只创建/验证空库或当前 v2.2 schema；检测到 legacy 表会 fail closed
+- legacy 数据只能经 `scripts/migrate-v2.2-multiuser.py` 复制到新的 staged DB
 
 ## 前端
 
@@ -173,9 +176,9 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 - 历史：`GET /api/inbox` 列表 + `/inbox/history` 详情
 - 拒绝：`POST /api/inbox/suggestions/<id>/reject`
 
-## v2.2 Phase 1（本地开发）：账户与认证骨架
+## v2.2 Phase 1（已关账）：账户与认证骨架
 
-**定位**：只建立“当前用户是谁”的身份层；业务表尚无 `user_id`，因此本阶段普通用户不能对外开放真实业务使用。
+**定位**：先建立“当前用户是谁”的身份层。Phase 1 当时业务表尚无 `user_id`；Phase 2 已增加所有权 schema，但 Phase 3 查询隔离未完成，因此普通用户仍不能进入业务系统。
 
 ```
 浏览器 → Flask session + CSRF → 每请求加载 users
@@ -186,7 +189,7 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 
 | 组件 | 职责 |
 |------|------|
-| `database.py` | 幂等创建 `users`，不修改既有业务表 |
+| `database.py` | Phase 1 时幂等创建 `users`；当前 ownership schema 见下方 Phase 2 |
 | `auth_repository.py` | 用户查询、登录状态、密码与状态更新；bootstrap 使用原子事务；无删除接口 |
 | `auth_service.py` | 规范化、Werkzeug 哈希、失败锁定、临时密码与普通用户管理规则 |
 | `app.py` | Flask-Login、Flask-WTF、页面/API 权限、bootstrap CLI |
@@ -198,5 +201,15 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 Phase 1.1 期间，普通用户只可访问登录、退出、当前账户查询、修改密码与必需静态资源；业务 HTML 使用权限拒绝页，业务 API 返回 `403 business_access_pending`。退出会递增当前账户 `auth_version`，因此等价于撤销该账户全部现有 session。PWA 在 bfcache 恢复认证页面时会先隐藏文档并向服务器重新校验 session，失败或离线时不重新展示私人页面。
 
 运行模式采用显式开发、默认加固：只有 `PERSONAL_OS_ENV=development`、loopback 且非远程时允许临时密钥与本地 debug；环境缺失/未知、production、remote 或非 loopback 任一情况都进入统一生产安全校验。
+
+## v2.2 Phase 2（本地开发）：数据所有权 Schema + Migration
+
+16 张个人业务表统一增加 `user_id INTEGER NOT NULL REFERENCES users(id)` 与前导索引。`project → goal`、`task → project`、`positioning_goal_action → calibration`、`inbox_suggestion → inbox_entry` 使用包含 `user_id` 的复合外键，直接阻断跨用户父子关联；可空 `SET NULL` 关系和已知多态关系由触发器校验 owner。所有业务行的 `user_id` 创建后不可修改。
+
+`positioning_anchor` 使用 `UNIQUE(user_id)`，从“全库最新一行”升级为每用户一行。主线降级、训练路径排序和定位锚读写均按 owner 工作；`init_db()` 不再 seed、归一化或重写任何既有业务行。创建账户时只在同一用户、同一事务内 seed 默认 `capability_practice_steps`。
+
+普通应用启动不会把 legacy 行绑定管理员。`v22_migration.py` 只读打开 v2.1.4 源库，在目标目录创建临时 staged DB，创建唯一 admin 后逐表原样复制 16 表并赋予该 admin；字段、ID、时间、JSON 与 `sqlite_sequence` 全部通过双向 EXCEPT、integrity/FK/孤儿检查后，才原子发布 staged 文件。源库与目标相同、目标已存在、源 schema 不匹配、单例冲突或任何验证失败都会停止。
+
+Phase 2 仍不实现业务查询的 `WHERE user_id` 隔离，也不改造 JSON/Obsidian/AI/Inbox 的多用户读取链路；Phase 1.1 的普通用户中央门禁继续 fail closed，直至 Phase 3 完成。
 
 详见 [home-server.md](home-server.md) 与 [development-guide.md](development-guide.md)。

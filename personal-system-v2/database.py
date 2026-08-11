@@ -9,6 +9,26 @@ import asset_schemas
 _DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), "data", "yd_os.db")
 DB_PATH = os.environ.get("YD_OS_DB_PATH", _DEFAULT_DB_PATH)
 
+SCHEMA_USER_VERSION = 220
+PERSONAL_DATA_TABLES = (
+    "goals",
+    "projects",
+    "tasks",
+    "reviews",
+    "assets",
+    "capability_entries",
+    "capability_practice_steps",
+    "opportunities",
+    "experiments",
+    "feedback_items",
+    "deliberations",
+    "positioning_anchor",
+    "positioning_calibration",
+    "positioning_goal_action",
+    "inbox_entries",
+    "inbox_suggestions",
+)
+
 GOAL_TYPES = ("年度", "季度", "月度", "当前主线")
 TASK_STATUSES = ("待处理", "进行中", "完成")
 PRIORITY_LEVELS = ("high", "medium", "low")
@@ -421,6 +441,29 @@ def get_connection():
     return conn
 
 
+def _resolve_owner_id(conn, user_id=None):
+    """Resolve transitional Phase 2 writes without opening user business access."""
+    if user_id is not None:
+        try:
+            owner_id = int(user_id)
+        except (TypeError, ValueError) as exc:
+            raise OwnershipContextError("无效的数据所有者") from exc
+        if owner_id <= 0 or not conn.execute(
+            "SELECT 1 FROM users WHERE id = ?", (owner_id,)
+        ).fetchone():
+            raise OwnershipContextError("数据所有者不存在")
+        return owner_id
+
+    admins = conn.execute(
+        "SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 2"
+    ).fetchall()
+    if len(admins) != 1:
+        raise OwnershipContextError(
+            "Phase 2 业务写入需要显式 user_id 或唯一 bootstrap 管理员"
+        )
+    return int(admins[0]["id"])
+
+
 def _row_to_dict(row):
     return dict(row) if row else None
 
@@ -528,6 +571,7 @@ def _table_columns(conn, table):
 
 
 def _migrate_projects_table(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     columns = _table_columns(conn, "projects")
     if "priority" not in columns:
         conn.execute(
@@ -536,6 +580,7 @@ def _migrate_projects_table(conn):
 
 
 def _migrate_tasks_table(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     columns = _table_columns(conn, "tasks")
     if "today_progress" not in columns:
         conn.execute(
@@ -557,6 +602,7 @@ def _add_columns(conn, table, additions):
 
 
 def _migrate_projects_value_fields(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     _add_columns(conn, "projects", {
         "core_hypothesis": "TEXT NOT NULL DEFAULT ''",
         "disconfirming_signal": "TEXT NOT NULL DEFAULT ''",
@@ -577,6 +623,7 @@ def _migrate_projects_value_fields(conn):
 
 
 def _migrate_value_tables(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS opportunities (
@@ -648,6 +695,7 @@ def _migrate_value_tables(conn):
 
 
 def _migrate_deliberations_table(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS deliberations (
@@ -680,7 +728,7 @@ def _migrate_deliberations_table(conn):
 
 
 def _migrate_users_table(conn):
-    """Add the Phase 1 identity store without changing existing business tables."""
+    """Create the identity store before any owned business table."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -709,49 +757,197 @@ def _migrate_users_table(conn):
     )
 
 
-def init_db():
-    conn = get_connection()
+class LegacyMigrationRequired(RuntimeError):
+    """Raised when an old database must use the explicit staged migration."""
+
+
+class OwnershipContextError(RuntimeError):
+    """Raised when a business write has no unambiguous owner."""
+
+
+def _existing_table_names(conn):
+    return {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        if not row["name"].startswith("sqlite_")
+    }
+
+
+def _foreign_key_groups(conn, table):
+    groups = {}
+    for row in conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():
+        group = groups.setdefault(
+            int(row["id"]), {"table": row["table"], "columns": {}}
+        )
+        group["columns"][row["from"]] = row["to"]
+    return tuple(groups.values())
+
+
+def _has_unique_index(conn, table, columns):
+    expected = list(columns)
+    for index in conn.execute(f'PRAGMA index_list("{table}")').fetchall():
+        if not int(index["unique"]):
+            continue
+        actual = [
+            row["name"]
+            for row in conn.execute(
+                f'PRAGMA index_info("{index["name"]}")'
+            ).fetchall()
+        ]
+        if actual == expected:
+            return True
+    return False
+
+
+def _assert_v22_or_fresh_schema(conn):
+    """Fail closed instead of silently binding legacy rows to an account."""
+    existing = _existing_table_names(conn)
+    present = set(PERSONAL_DATA_TABLES) & existing
+    if not present:
+        return
+
+    expected = set(PERSONAL_DATA_TABLES)
+    if present != expected:
+        missing = ", ".join(sorted(expected - present))
+        raise LegacyMigrationRequired(
+            "检测到不完整的旧业务 schema；请先运行离线 v2.2 staged migration。"
+            f" 缺少表：{missing}"
+        )
+    if "users" not in existing:
+        raise LegacyMigrationRequired(
+            "检测到旧业务数据库；普通 app 启动不会自动创建管理员或绑定历史数据。"
+        )
+
+    invalid = []
+    for table in PERSONAL_DATA_TABLES:
+        columns = {
+            row["name"]: row
+            for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+        }
+        user_column = columns.get("user_id")
+        if user_column is None or int(user_column["notnull"]) != 1:
+            invalid.append(table)
+            continue
+        foreign_keys = _foreign_key_groups(conn, table)
+        if not any(
+            item["table"] == "users"
+            and item["columns"] == {"user_id": "id"}
+            for item in foreign_keys
+        ):
+            invalid.append(f"{table}(user FK)")
+    if invalid:
+        raise LegacyMigrationRequired(
+            "检测到未完成数据所有权升级的业务表；请运行离线 v2.2 staged migration："
+            + ", ".join(invalid)
+        )
+
+    composite_relations = (
+        ("projects", "goals", {"goal_id": "id", "user_id": "user_id"}),
+        ("tasks", "projects", {"project_id": "id", "user_id": "user_id"}),
+        (
+            "positioning_goal_action",
+            "positioning_calibration",
+            {"calibration_id": "id", "user_id": "user_id"},
+        ),
+        (
+            "inbox_suggestions",
+            "inbox_entries",
+            {"inbox_entry_id": "id", "user_id": "user_id"},
+        ),
+    )
+    missing_relations = []
+    for table, parent, columns in composite_relations:
+        if not any(
+            item["table"] == parent and item["columns"] == columns
+            for item in _foreign_key_groups(conn, table)
+        ):
+            missing_relations.append(f"{table}→{parent}")
+    if missing_relations:
+        raise LegacyMigrationRequired(
+            "检测到缺少同用户复合外键的非标准 schema："
+            + ", ".join(missing_relations)
+        )
+    if not _has_unique_index(conn, "positioning_anchor", ("user_id",)):
+        raise LegacyMigrationRequired(
+            "positioning_anchor 缺少每用户单例约束；请重新生成 staged DB"
+        )
+
+
+def _create_v22_business_tables(conn):
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS goals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             type TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            UNIQUE (id, user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             goal_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             priority TEXT NOT NULL DEFAULT 'medium',
             created_at TEXT NOT NULL,
-            FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE
+            core_hypothesis TEXT NOT NULL DEFAULT '',
+            disconfirming_signal TEXT NOT NULL DEFAULT '',
+            seven_day_mvp TEXT NOT NULL DEFAULT '',
+            real_feedback TEXT NOT NULL DEFAULT '',
+            result_data TEXT NOT NULL DEFAULT '',
+            asset_deposit TEXT NOT NULL DEFAULT '',
+            value_capture TEXT NOT NULL DEFAULT '',
+            stop_condition TEXT NOT NULL DEFAULT '',
+            value_tags TEXT NOT NULL DEFAULT '',
+            importance_score INTEGER NOT NULL DEFAULT 0,
+            feedback_speed_score INTEGER NOT NULL DEFAULT 0,
+            revenue_score INTEGER NOT NULL DEFAULT 0,
+            asset_score INTEGER NOT NULL DEFAULT 0,
+            leverage_score INTEGER NOT NULL DEFAULT 0,
+            total_score INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (id, user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (goal_id, user_id)
+                REFERENCES goals(id, user_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             project_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT '待处理',
             priority TEXT NOT NULL DEFAULT 'medium',
             created_at TEXT NOT NULL,
-            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            today_progress INTEGER NOT NULL DEFAULT 0,
+            today_progress_date TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (project_id, user_id)
+                REFERENCES projects(id, user_id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             review_date TEXT NOT NULL,
             type TEXT NOT NULL,
             what_done TEXT NOT NULL DEFAULT '',
             stuck TEXT NOT NULL DEFAULT '',
             next_adjust TEXT NOT NULL DEFAULT '',
             depositable TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             title TEXT NOT NULL,
             trigger_context TEXT NOT NULL DEFAULT '',
             core_content TEXT NOT NULL DEFAULT '',
@@ -759,48 +955,350 @@ def init_db():
             capability_tags TEXT NOT NULL DEFAULT '[]',
             source_review_id INTEGER,
             created_at TEXT NOT NULL,
+            summary TEXT NOT NULL DEFAULT '',
+            fields TEXT NOT NULL DEFAULT '{}',
+            reusable_scenario TEXT NOT NULL DEFAULT '',
+            maturity TEXT NOT NULL DEFAULT '草稿',
+            reuse_count INTEGER NOT NULL DEFAULT 0,
+            source_type TEXT NOT NULL DEFAULT '',
+            source_id INTEGER,
+            updated_at TEXT NOT NULL DEFAULT '',
+            asset_level TEXT NOT NULL DEFAULT '资料',
+            evidence TEXT NOT NULL DEFAULT '',
+            external_expression TEXT NOT NULL DEFAULT '',
+            transferable_scene TEXT NOT NULL DEFAULT '',
+            productization_next_step TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
             FOREIGN KEY (source_review_id) REFERENCES reviews(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS capability_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             module TEXT NOT NULL,
             entry_date TEXT NOT NULL,
             content TEXT NOT NULL,
             source_project TEXT,
             level_type TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
         );
 
         CREATE TABLE IF NOT EXISTS capability_practice_steps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             module TEXT NOT NULL,
-            step_order INTEGER NOT NULL,
+            step_order INTEGER NOT NULL CHECK (step_order > 0),
             title TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
             detail TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS opportunities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            related_context TEXT NOT NULL DEFAULT '',
+            target_user TEXT NOT NULL DEFAULT '',
+            affects_revenue TEXT NOT NULL DEFAULT '',
+            affects_cost TEXT NOT NULL DEFAULT '',
+            affects_efficiency TEXT NOT NULL DEFAULT '',
+            affects_experience TEXT NOT NULL DEFAULT '',
+            productization_potential TEXT NOT NULL DEFAULT '',
+            transaction_potential TEXT NOT NULL DEFAULT '',
+            seven_day_mvp TEXT NOT NULL DEFAULT '',
+            case_asset_potential TEXT NOT NULL DEFAULT '',
+            leverage_potential TEXT NOT NULL DEFAULT '',
+            importance_score INTEGER NOT NULL DEFAULT 0,
+            feedback_speed_score INTEGER NOT NULL DEFAULT 0,
+            revenue_score INTEGER NOT NULL DEFAULT 0,
+            asset_score INTEGER NOT NULL DEFAULT 0,
+            leverage_score INTEGER NOT NULL DEFAULT 0,
+            total_score INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT '待审计',
+            next_action TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            opportunity_id INTEGER,
+            name TEXT NOT NULL,
+            hypothesis TEXT NOT NULL DEFAULT '',
+            experiment_type TEXT NOT NULL DEFAULT '结果型MVP',
+            minimum_action TEXT NOT NULL DEFAULT '',
+            test_target TEXT NOT NULL DEFAULT '',
+            feedback_source TEXT NOT NULL DEFAULT '',
+            validation_period TEXT NOT NULL DEFAULT '',
+            success_criteria TEXT NOT NULL DEFAULT '',
+            failure_criteria TEXT NOT NULL DEFAULT '',
+            progress TEXT NOT NULL DEFAULT '',
+            real_feedback TEXT NOT NULL DEFAULT '',
+            data_result TEXT NOT NULL DEFAULT '',
+            next_decision TEXT NOT NULL DEFAULT '',
+            review_conclusion TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '设计中',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (opportunity_id)
+                REFERENCES opportunities(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS feedback_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            related_type TEXT NOT NULL DEFAULT '' CHECK (
+                related_type IN ('', 'opportunity', 'experiment', 'project', 'asset', 'review')
+            ),
+            related_id INTEGER,
+            title TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '自我判断',
+            level TEXT NOT NULL DEFAULT 'L0 只是想法',
+            content TEXT NOT NULL DEFAULT '',
+            evidence TEXT NOT NULL DEFAULT '',
+            next_action TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS deliberations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            problem TEXT NOT NULL,
+            context TEXT NOT NULL DEFAULT '',
+            initial_judgment TEXT NOT NULL,
+            reasoning TEXT NOT NULL,
+            assumptions TEXT NOT NULL,
+            related_type TEXT NOT NULL DEFAULT '' CHECK (
+                related_type IN ('', 'project', 'opportunity')
+            ),
+            related_id INTEGER,
+            ai_analysis TEXT NOT NULL DEFAULT '{}',
+            final_judgment TEXT NOT NULL DEFAULT '',
+            decision TEXT NOT NULL DEFAULT '',
+            decision_reasoning TEXT NOT NULL DEFAULT '',
+            next_action TEXT NOT NULL DEFAULT '',
+            actual_result TEXT NOT NULL DEFAULT '',
+            judgment_accuracy TEXT NOT NULL DEFAULT '',
+            judgment_error TEXT NOT NULL DEFAULT '',
+            key_variable TEXT NOT NULL DEFAULT '',
+            lesson TEXT NOT NULL DEFAULT '',
+            principle TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS positioning_anchor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL UNIQUE,
+            first_principle TEXT NOT NULL DEFAULT '',
+            identity_core TEXT NOT NULL DEFAULT '',
+            flywheel_def TEXT NOT NULL DEFAULT '',
+            current_stage TEXT NOT NULL DEFAULT '',
+            north_star TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS positioning_calibration (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            calibrated_at TEXT NOT NULL,
+            cycle TEXT NOT NULL DEFAULT '触发式',
+            primary_contradiction TEXT NOT NULL DEFAULT '',
+            doing_but_shouldnt TEXT NOT NULL DEFAULT '',
+            should_but_not_doing TEXT NOT NULL DEFAULT '',
+            alignment_review TEXT NOT NULL DEFAULT '',
+            conclusion TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE (id, user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS positioning_goal_action (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            calibration_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            target_goal_id INTEGER,
+            payload TEXT NOT NULL DEFAULT '{}',
+            reason TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (calibration_id, user_id)
+                REFERENCES positioning_calibration(id, user_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS inbox_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            raw_text TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            UNIQUE (id, user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+
+        CREATE TABLE IF NOT EXISTS inbox_suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            inbox_entry_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL DEFAULT '',
+            suggested_payload TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (inbox_entry_id, user_id)
+                REFERENCES inbox_entries(id, user_id) ON DELETE CASCADE
         );
         """
     )
-    _migrate_projects_table(conn)
-    _migrate_tasks_table(conn)
-    _migrate_projects_value_fields(conn)
-    _migrate_inbox_tables(conn)
-    _migrate_assets_table(conn)
-    _migrate_value_tables(conn)
-    _migrate_deliberations_table(conn)
+
+
+def _create_v22_indexes(conn):
+    for table in PERSONAL_DATA_TABLES:
+        conn.execute(
+            f'CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON "{table}" (user_id)'
+        )
+    relation_indexes = (
+        ("projects", "goal_id"),
+        ("tasks", "project_id"),
+        ("assets", "source_review_id"),
+        ("capability_practice_steps", "module, step_order"),
+        ("experiments", "opportunity_id"),
+        ("feedback_items", "related_type, related_id"),
+        ("deliberations", "related_type, related_id"),
+        ("positioning_goal_action", "calibration_id"),
+        ("positioning_goal_action", "target_goal_id"),
+        ("inbox_suggestions", "inbox_entry_id"),
+    )
+    for table, columns in relation_indexes:
+        suffix = columns.replace(", ", "_")
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_{suffix} "
+            f'ON "{table}" (user_id, {columns})'
+        )
+
+
+def _create_owner_guard_triggers(conn):
+    for table in PERSONAL_DATA_TABLES:
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS trg_{table}_owner_immutable
+            BEFORE UPDATE OF user_id ON "{table}"
+            WHEN OLD.user_id != NEW.user_id
+            BEGIN
+                SELECT RAISE(ABORT, 'business row owner is immutable');
+            END
+            """
+        )
+
+    optional_relations = (
+        ("assets", "source_review_id", "reviews"),
+        ("experiments", "opportunity_id", "opportunities"),
+        ("positioning_goal_action", "target_goal_id", "goals"),
+    )
+    for table, column, parent in optional_relations:
+        for operation, suffix in (("INSERT", "insert"), ("UPDATE", "update")):
+            update_columns = f" OF user_id, {column}" if operation == "UPDATE" else ""
+            conn.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_{column}_owner_{suffix}
+                BEFORE {operation}{update_columns} ON "{table}"
+                WHEN NEW.{column} IS NOT NULL
+                 AND NOT EXISTS (
+                    SELECT 1 FROM "{parent}"
+                    WHERE id = NEW.{column} AND user_id = NEW.user_id
+                 )
+                BEGIN
+                    SELECT RAISE(ABORT, 'cross-user relation is not allowed');
+                END
+                """
+            )
+
+    polymorphic_relations = {
+        "feedback_items": {
+            "opportunity": "opportunities",
+            "experiment": "experiments",
+            "project": "projects",
+            "asset": "assets",
+            "review": "reviews",
+        },
+        "deliberations": {
+            "project": "projects",
+            "opportunity": "opportunities",
+        },
+    }
+    for table, targets in polymorphic_relations.items():
+        invalid_cases = " OR ".join(
+            "(NEW.related_type = '"
+            + related_type
+            + f"' AND NOT EXISTS (SELECT 1 FROM \"{target}\" "
+            "WHERE id = NEW.related_id AND user_id = NEW.user_id))"
+            for related_type, target in targets.items()
+        )
+        for operation, suffix in (("INSERT", "insert"), ("UPDATE", "update")):
+            update_columns = (
+                " OF user_id, related_type, related_id"
+                if operation == "UPDATE"
+                else ""
+            )
+            conn.execute(
+                f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_related_owner_{suffix}
+                BEFORE {operation}{update_columns} ON "{table}"
+                WHEN NEW.related_id IS NOT NULL AND ({invalid_cases})
+                BEGIN
+                    SELECT RAISE(ABORT, 'cross-user polymorphic relation is not allowed');
+                END
+                """
+            )
+
+
+def initialize_v22_schema(conn):
+    """Create or validate an empty/current v2.2 schema without migrating legacy rows."""
+    conn.execute("PRAGMA foreign_keys = ON")
+    _assert_v22_or_fresh_schema(conn)
     _migrate_users_table(conn)
-    _migrate_positioning_tables(conn)
-    _migrate_goals_status(conn)
-    _ensure_default_capability_practice_steps(conn)
-    _normalize_mainline_goals(conn)
-    conn.commit()
-    conn.close()
+    _create_v22_business_tables(conn)
+    _create_v22_indexes(conn)
+    _create_owner_guard_triggers(conn)
+    conn.execute(f"PRAGMA user_version = {SCHEMA_USER_VERSION}")
+
+
+def init_db():
+    conn = get_connection()
+    try:
+        initialize_v22_schema(conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _migrate_positioning_tables(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS positioning_anchor (
@@ -841,6 +1339,7 @@ def _migrate_positioning_tables(conn):
 
 
 def _migrate_goals_status(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     columns = _table_columns(conn, "goals")
     if "status" not in columns:
         conn.execute(
@@ -849,6 +1348,7 @@ def _migrate_goals_status(conn):
 
 
 def _migrate_inbox_tables(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS inbox_entries (
@@ -877,6 +1377,7 @@ def _migrate_inbox_tables(conn):
 
 
 def _migrate_assets_table(conn):
+    raise LegacyMigrationRequired("legacy schema migration must use the staged tool")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(assets)").fetchall()}
     additions = {
         "summary": "TEXT NOT NULL DEFAULT ''",
@@ -956,22 +1457,33 @@ def _migrate_assets_table(conn):
         )
 
 
-def _demote_other_mainline_goals(conn, keep_goal_id):
+def _demote_other_mainline_goals(conn, keep_goal_id, user_id=None):
+    if user_id is None:
+        owner = conn.execute(
+            "SELECT user_id FROM goals WHERE id = ?", (keep_goal_id,)
+        ).fetchone()
+        if owner is None:
+            raise ValueError("目标不存在")
+        user_id = owner["user_id"]
     conn.execute(
         """
         UPDATE goals SET type = '季度'
-        WHERE type = '当前主线' AND id != ?
+        WHERE user_id = ? AND type = '当前主线' AND id != ?
         """,
-        (keep_goal_id,),
+        (user_id, keep_goal_id),
         )
 
 
-def _ensure_default_capability_practice_steps(conn):
+def ensure_default_capability_practice_steps(conn, user_id):
+    user_id = _resolve_owner_id(conn, user_id)
     now = _now()
     for module in CAPABILITY_MODULES:
         existing = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM capability_practice_steps WHERE module = ?",
-            (module,),
+            """
+            SELECT COUNT(*) AS cnt FROM capability_practice_steps
+            WHERE user_id = ? AND module = ?
+            """,
+            (user_id, module),
         ).fetchone()
         if existing and existing["cnt"]:
             continue
@@ -979,10 +1491,12 @@ def _ensure_default_capability_practice_steps(conn):
             conn.execute(
                 """
                 INSERT INTO capability_practice_steps (
-                    module, step_order, title, description, detail, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    user_id, module, step_order, title, description, detail,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    user_id,
                     module,
                     index,
                     step["title"],
@@ -994,18 +1508,20 @@ def _ensure_default_capability_practice_steps(conn):
             )
 
 
-def _normalize_mainline_goals(conn):
+def _normalize_mainline_goals(conn, user_id=None):
+    user_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT id FROM goals
-        WHERE type = '当前主线'
+        WHERE user_id = ? AND type = '当前主线'
         ORDER BY created_at DESC
-        """
+        """,
+        (user_id,),
     ).fetchall()
     if len(rows) <= 1:
         return
     keep_id = rows[0][0]
-    _demote_other_mainline_goals(conn, keep_id)
+    _demote_other_mainline_goals(conn, keep_id, user_id)
 
 
 def _deliberation_row(row):
@@ -1025,7 +1541,7 @@ def _deliberation_row(row):
     return data
 
 
-def _normalize_deliberation_relation(conn, related_type, related_id):
+def _normalize_deliberation_relation(conn, related_type, related_id, user_id=None):
     related_type = _clean_text(related_type)
     if not related_type:
         return "", None
@@ -1039,10 +1555,12 @@ def _normalize_deliberation_relation(conn, related_type, related_id):
         raise ValueError("请选择有效的关联对象")
 
     table = "projects" if related_type == "project" else "opportunities"
-    if not conn.execute(
-        f"SELECT id FROM {table} WHERE id = ?",
-        (related_id,),
-    ).fetchone():
+    query = f"SELECT id FROM {table} WHERE id = ?"
+    params = [related_id]
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(int(user_id))
+    if not conn.execute(query, tuple(params)).fetchone():
         label = "项目" if related_type == "project" else "机会"
         raise ValueError(f"关联的{label}不存在")
     return related_type, related_id
@@ -1072,7 +1590,7 @@ def _deliberation_title_from_problem(problem, max_length=48):
     return f"{title[: max_length - 1].rstrip()}…"
 
 
-def create_deliberation(payload):
+def create_deliberation(payload, user_id=None):
     payload = payload or {}
     values = _clean_deliberation_fields(payload, DELIBERATION_INITIAL_FIELDS)
     _require_deliberation_fields(
@@ -1085,20 +1603,24 @@ def create_deliberation(payload):
 
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         related_type, related_id = _normalize_deliberation_relation(
             conn,
             values["related_type"],
             payload.get("related_id"),
+            owner_id,
         )
         now = _now()
         cursor = conn.execute(
             """
             INSERT INTO deliberations (
-                title, problem, context, initial_judgment, reasoning, assumptions,
-                related_type, related_id, ai_analysis, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', 'draft', ?, ?)
+                user_id, title, problem, context, initial_judgment, reasoning,
+                assumptions, related_type, related_id, ai_analysis, status,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'draft', ?, ?)
             """,
             (
+                owner_id,
                 values["title"],
                 values["problem"],
                 values["context"],
@@ -1173,6 +1695,7 @@ def update_deliberation(deliberation_id, payload):
             conn,
             values["related_type"],
             merged.get("related_id"),
+            current["user_id"],
         )
         conn.execute(
             """
@@ -1328,7 +1851,7 @@ def delete_deliberation(deliberation_id):
     return _delete_entity("deliberations", deliberation_id, "推演")
 
 
-def create_goal(name, goal_type):
+def create_goal(name, goal_type, user_id=None):
     if goal_type not in GOAL_TYPES:
         raise ValueError("无效的目标类型")
     name = name.strip()
@@ -1336,13 +1859,14 @@ def create_goal(name, goal_type):
         raise ValueError("目标名称不能为空")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
-        "INSERT INTO goals (name, type, created_at) VALUES (?, ?, ?)",
-        (name, goal_type, _now()),
+        "INSERT INTO goals (user_id, name, type, created_at) VALUES (?, ?, ?, ?)",
+        (owner_id, name, goal_type, _now()),
     )
     goal_id = cur.lastrowid
     if goal_type == "当前主线":
-        _demote_other_mainline_goals(conn, goal_id)
+        _demote_other_mainline_goals(conn, goal_id, owner_id)
     conn.commit()
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
     conn.close()
@@ -1381,7 +1905,7 @@ def update_goal(goal_id, payload):
         (*updates.values(), goal_id),
     )
     if updates.get("type") == "当前主线":
-        _demote_other_mainline_goals(conn, goal_id)
+        _demote_other_mainline_goals(conn, goal_id, existing["user_id"])
     conn.commit()
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
     conn.close()
@@ -1404,21 +1928,27 @@ def get_goal(goal_id):
     return _row_to_dict(row)
 
 
-def create_project(goal_id, name, priority=None):
+def create_project(goal_id, name, priority=None, user_id=None):
     name = name.strip()
     if not name:
         raise ValueError("项目名称不能为空")
     priority = _normalize_priority(priority, strict=True)
 
     conn = get_connection()
-    goal = conn.execute("SELECT id FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    goal = conn.execute(
+        "SELECT id FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+    ).fetchone()
     if not goal:
         conn.close()
         raise ValueError("目标不存在")
 
     cur = conn.execute(
-        "INSERT INTO projects (goal_id, name, priority, created_at) VALUES (?, ?, ?, ?)",
-        (goal_id, name, priority, _now()),
+        """
+        INSERT INTO projects (user_id, goal_id, name, priority, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (owner_id, goal_id, name, priority, _now()),
     )
     conn.commit()
     project_id = cur.lastrowid
@@ -1522,23 +2052,28 @@ def list_projects(goal_id=None):
     return [_row_to_dict(r) for r in rows]
 
 
-def create_task(project_id, name, priority=None):
+def create_task(project_id, name, priority=None, user_id=None):
     name = name.strip()
     if not name:
         raise ValueError("任务名称不能为空")
     priority = _normalize_priority(priority, strict=True)
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     project = conn.execute(
-        "SELECT id FROM projects WHERE id = ?", (project_id,)
+        "SELECT id FROM projects WHERE id = ? AND user_id = ?",
+        (project_id, owner_id),
     ).fetchone()
     if not project:
         conn.close()
         raise ValueError("项目不存在")
 
     cur = conn.execute(
-        "INSERT INTO tasks (project_id, name, status, priority, created_at) VALUES (?, ?, ?, ?, ?)",
-        (project_id, name, "待处理", priority, _now()),
+        """
+        INSERT INTO tasks (user_id, project_id, name, status, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (owner_id, project_id, name, "待处理", priority, _now()),
     )
     conn.commit()
     task_id = cur.lastrowid
@@ -2051,7 +2586,15 @@ def _asset_row(row):
     return data
 
 
-def create_review(review_date, review_type, what_done, stuck, next_adjust, depositable):
+def create_review(
+    review_date,
+    review_type,
+    what_done,
+    stuck,
+    next_adjust,
+    depositable,
+    user_id=None,
+):
     if review_type not in REVIEW_TYPES:
         raise ValueError("无效的复盘类型")
     review_date = (review_date or "").strip()
@@ -2059,13 +2602,16 @@ def create_review(review_date, review_type, what_done, stuck, next_adjust, depos
         raise ValueError("复盘日期不能为空")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
         """
         INSERT INTO reviews (
-            review_date, type, what_done, stuck, next_adjust, depositable, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            user_id, review_date, type, what_done, stuck, next_adjust,
+            depositable, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            owner_id,
             review_date,
             review_type,
             (what_done or "").strip(),
@@ -2116,6 +2662,7 @@ def create_asset(
     productization_next_step="",
     source_type="",
     source_id=None,
+    user_id=None,
 ):
     title = (title or "").strip()
     if not title:
@@ -2159,30 +2706,32 @@ def create_asset(
 
     tags = _parse_tags(json.dumps(capability_tags or []))
     source_type = (source_type or "").strip()
+    conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     if source_review_id is not None:
-        conn = get_connection()
         review = conn.execute(
-            "SELECT id FROM reviews WHERE id = ?", (source_review_id,)
+            "SELECT id FROM reviews WHERE id = ? AND user_id = ?",
+            (source_review_id, owner_id),
         ).fetchone()
-        conn.close()
         if not review:
+            conn.close()
             raise ValueError("来源复盘不存在")
         source_type = "review"
         source_id = source_review_id
 
     now = _now()
-    conn = get_connection()
     cur = conn.execute(
         """
         INSERT INTO assets (
-            title, trigger_context, core_content, asset_type,
+            user_id, title, trigger_context, core_content, asset_type,
             capability_tags, source_review_id, created_at,
             summary, fields, reusable_scenario, maturity, reuse_count,
             source_type, source_id, updated_at, asset_level, evidence,
             external_expression, transferable_scene, productization_next_step
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            owner_id,
             title,
             legacy_trigger,
             legacy_core,
@@ -2253,6 +2802,7 @@ def create_asset_from_feedback(feedback_id):
         productization_next_step=productization_next_step,
         source_type="feedback",
         source_id=feedback["id"],
+        user_id=feedback["user_id"],
     )
 
 
@@ -2418,7 +2968,7 @@ def increment_asset_reuse(asset_id):
 
 
 def create_capability_entry(
-    module, entry_date, content, source_project, level_type
+    module, entry_date, content, source_project, level_type, user_id=None
 ):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
@@ -2434,13 +2984,15 @@ def create_capability_entry(
     source_project = (source_project or "").strip() or None
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
         """
         INSERT INTO capability_entries (
-            module, entry_date, content, source_project, level_type, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            user_id, module, entry_date, content, source_project, level_type,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (module, entry_date, content, source_project, level_type, _now()),
+        (owner_id, module, entry_date, content, source_project, level_type, _now()),
     )
     conn.commit()
     entry_id = cur.lastrowid
@@ -2484,14 +3036,14 @@ def _practice_step_row(row):
     return data
 
 
-def _normalize_practice_step_order(conn, module):
+def _normalize_practice_step_order(conn, module, user_id):
     rows = conn.execute(
         """
         SELECT id FROM capability_practice_steps
-        WHERE module = ?
+        WHERE user_id = ? AND module = ?
         ORDER BY step_order ASC, id ASC
         """,
-        (module,),
+        (user_id, module),
     ).fetchall()
     now = _now()
     for index, row in enumerate(rows, start=1):
@@ -2505,13 +3057,16 @@ def _normalize_practice_step_order(conn, module):
         )
 
 
-def list_capability_practice_paths():
+def list_capability_practice_paths(user_id=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM capability_practice_steps
+        WHERE user_id = ?
         ORDER BY module ASC, step_order ASC, id ASC
-        """
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     paths = {module: [] for module in CAPABILITY_MODULES}
@@ -2522,24 +3077,25 @@ def list_capability_practice_paths():
     return paths
 
 
-def get_capability_practice_path(module):
+def get_capability_practice_path(module, user_id=None):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM capability_practice_steps
-        WHERE module = ?
+        WHERE user_id = ? AND module = ?
         ORDER BY step_order ASC, id ASC
         """,
-        (module,),
+        (owner_id, module),
     ).fetchall()
     conn.close()
     return [_practice_step_row(row) for row in rows]
 
 
 def create_capability_practice_step(
-    module, title, description="", detail="", step_order=None
+    module, title, description="", detail="", step_order=None, user_id=None
 ):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
@@ -2550,14 +3106,15 @@ def create_capability_practice_step(
     detail = (detail or "").strip()
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     if step_order is None:
         row = conn.execute(
             """
             SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order
             FROM capability_practice_steps
-            WHERE module = ?
+            WHERE user_id = ? AND module = ?
             """,
-            (module,),
+            (owner_id, module),
         ).fetchone()
         step_order = int(row["next_order"])
     else:
@@ -2570,21 +3127,22 @@ def create_capability_practice_step(
             """
             UPDATE capability_practice_steps
             SET step_order = step_order + 1
-            WHERE module = ? AND step_order >= ?
+            WHERE user_id = ? AND module = ? AND step_order >= ?
             """,
-            (module, step_order),
+            (owner_id, module, step_order),
         )
 
     now = _now()
     cur = conn.execute(
         """
         INSERT INTO capability_practice_steps (
-            module, step_order, title, description, detail, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            user_id, module, step_order, title, description, detail,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (module, step_order, title, description, detail, now, now),
+        (owner_id, module, step_order, title, description, detail, now, now),
     )
-    _normalize_practice_step_order(conn, module)
+    _normalize_practice_step_order(conn, module, owner_id)
     conn.commit()
     row = conn.execute(
         "SELECT * FROM capability_practice_steps WHERE id = ?",
@@ -2595,15 +3153,17 @@ def create_capability_practice_step(
 
 
 def update_capability_practice_step(step_id, **kwargs):
+    user_id = kwargs.pop("user_id", None)
     allowed = {"title", "description", "detail", "step_order"}
     updates = {key: value for key, value in kwargs.items() if key in allowed}
     if not updates:
         raise ValueError("没有可更新的训练步骤字段")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM capability_practice_steps WHERE id = ?",
-        (step_id,),
+        "SELECT * FROM capability_practice_steps WHERE id = ? AND user_id = ?",
+        (step_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
@@ -2630,18 +3190,20 @@ def update_capability_practice_step(step_id, **kwargs):
             """
             UPDATE capability_practice_steps
             SET step_order = step_order + 1
-            WHERE module = ? AND id != ? AND step_order >= ? AND step_order < ?
+            WHERE user_id = ? AND module = ? AND id != ?
+              AND step_order >= ? AND step_order < ?
             """,
-            (current["module"], step_id, step_order, current_order),
+            (owner_id, current["module"], step_id, step_order, current_order),
         )
     elif step_order > current_order:
         conn.execute(
             """
             UPDATE capability_practice_steps
             SET step_order = step_order - 1
-            WHERE module = ? AND id != ? AND step_order <= ? AND step_order > ?
+            WHERE user_id = ? AND module = ? AND id != ?
+              AND step_order <= ? AND step_order > ?
             """,
-            (current["module"], step_id, step_order, current_order),
+            (owner_id, current["module"], step_id, step_order, current_order),
         )
 
     conn.execute(
@@ -2659,7 +3221,7 @@ def update_capability_practice_step(step_id, **kwargs):
             step_id,
         ),
     )
-    _normalize_practice_step_order(conn, current["module"])
+    _normalize_practice_step_order(conn, current["module"], owner_id)
     conn.commit()
     row = conn.execute(
         "SELECT * FROM capability_practice_steps WHERE id = ?",
@@ -2669,18 +3231,19 @@ def update_capability_practice_step(step_id, **kwargs):
     return _practice_step_row(row)
 
 
-def delete_capability_practice_step(step_id):
+def delete_capability_practice_step(step_id, user_id=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM capability_practice_steps WHERE id = ?",
-        (step_id,),
+        "SELECT * FROM capability_practice_steps WHERE id = ? AND user_id = ?",
+        (step_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
         raise ValueError("训练步骤不存在")
     module = row["module"]
     conn.execute("DELETE FROM capability_practice_steps WHERE id = ?", (step_id,))
-    _normalize_practice_step_order(conn, module)
+    _normalize_practice_step_order(conn, module, owner_id)
     conn.commit()
     conn.close()
     return {"id": step_id, "deleted": True, "module": module}
@@ -3490,7 +4053,7 @@ def _import_failure_stats(stats=None, errors=None):
     }
 
 
-def _import_row(conn, table, raw, stats):
+def _import_row(conn, table, raw, stats, user_id):
     action, record = _resolve_import_action(conn, table, raw)
     row_id = record["id"]
 
@@ -3509,11 +4072,11 @@ def _import_row(conn, table, raw, stats):
         return
 
     fields = _TABLE_FIELDS[table]
-    columns = ", ".join(fields)
-    placeholders = ", ".join("?" for _ in fields)
+    columns = ", ".join(("user_id", *fields))
+    placeholders = ", ".join("?" for _ in range(len(fields) + 1))
     conn.execute(
         f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
-        tuple(record[f] for f in fields),
+        (user_id, *(record[f] for f in fields)),
     )
     stats["created"] += 1
 
@@ -3612,11 +4175,12 @@ def import_all_data(payload):
     conn = get_connection()
     try:
         conn.execute("BEGIN")
+        owner_id = _resolve_owner_id(conn)
         for table in IMPORT_TABLES:
             for index, raw in enumerate(payload.get(table, [])):
                 label = f"{table}[{index}]"
                 try:
-                    _import_row(conn, table, raw, stats)
+                    _import_row(conn, table, raw, stats, owner_id)
                 except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
                     stats["failed"] += 1
                     message = str(exc) or "记录无效"
@@ -3653,22 +4217,28 @@ def backup_filename():
 
 def export_all_data():
     try:
+        def legacy_rows(table, rows):
+            fields = _TABLE_FIELDS[table]
+            return [{field: row.get(field) for field in fields} for row in rows]
+
         return {
             "meta": {
                 "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "version": "2.0",
                 "tables": list(IMPORT_TABLES),
             },
-            "goals": list_goals(),
-            "projects": list_projects(),
-            "tasks": list_tasks(),
-            "reviews": list_reviews(),
-            "assets": list_assets(),
-            "capability_entries": list_capability_entries(),
-            "opportunities": list_opportunities(),
-            "experiments": list_experiments(),
-            "feedback_items": list_feedback_items(),
-            "deliberations": list_deliberations(),
+            "goals": legacy_rows("goals", list_goals()),
+            "projects": legacy_rows("projects", list_projects()),
+            "tasks": legacy_rows("tasks", list_tasks()),
+            "reviews": legacy_rows("reviews", list_reviews()),
+            "assets": legacy_rows("assets", list_assets()),
+            "capability_entries": legacy_rows(
+                "capability_entries", list_capability_entries()
+            ),
+            "opportunities": legacy_rows("opportunities", list_opportunities()),
+            "experiments": legacy_rows("experiments", list_experiments()),
+            "feedback_items": legacy_rows("feedback_items", list_feedback_items()),
+            "deliberations": legacy_rows("deliberations", list_deliberations()),
         }
     except sqlite3.Error as exc:
         raise ExportError(
@@ -3707,7 +4277,7 @@ def get_opportunity(opportunity_id):
     return _opportunity_row(row)
 
 
-def create_opportunity(payload):
+def create_opportunity(payload, user_id=None):
     payload = payload or {}
     name = _clean_text(payload.get("name"))
     if not name:
@@ -3728,9 +4298,11 @@ def create_opportunity(payload):
     fields = tuple(record.keys())
     placeholders = ", ".join("?" for _ in fields)
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
-        f"INSERT INTO opportunities ({', '.join(fields)}) VALUES ({placeholders})",
-        tuple(record[field] for field in fields),
+        f"INSERT INTO opportunities (user_id, {', '.join(fields)}) "
+        f"VALUES (?, {placeholders})",
+        (owner_id, *(record[field] for field in fields)),
     )
     conn.commit()
     row = conn.execute(
@@ -3798,15 +4370,17 @@ def _experiment_row(row):
     return data
 
 
-def _normalize_opportunity_id(conn, value):
+def _normalize_opportunity_id(conn, value, user_id=None):
     if value in (None, ""):
         return None
     try:
         opportunity_id = int(value)
     except (TypeError, ValueError):
         raise ValueError("关联机会无效")
+    owner_id = _resolve_owner_id(conn, user_id)
     if not conn.execute(
-        "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
+        "SELECT id FROM opportunities WHERE id = ? AND user_id = ?",
+        (opportunity_id, owner_id),
     ).fetchone():
         raise ValueError("关联机会不存在")
     return opportunity_id
@@ -3841,7 +4415,7 @@ def get_experiment(experiment_id):
     return _experiment_row(row)
 
 
-def create_experiment(payload):
+def create_experiment(payload, user_id=None):
     payload = payload or {}
     name = _clean_text(payload.get("name"))
     if not name:
@@ -3854,9 +4428,11 @@ def create_experiment(payload):
         status = "设计中"
     now = _now()
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     opportunity_id = _normalize_opportunity_id(
         conn,
         payload.get("opportunity_id", payload.get("source_opportunity_id")),
+        owner_id,
     )
     if payload.get("require_opportunity") and opportunity_id is None:
         conn.close()
@@ -3873,8 +4449,9 @@ def create_experiment(payload):
     fields = tuple(record.keys())
     placeholders = ", ".join("?" for _ in fields)
     cur = conn.execute(
-        f"INSERT INTO experiments ({', '.join(fields)}) VALUES ({placeholders})",
-        tuple(record[field] for field in fields),
+        f"INSERT INTO experiments (user_id, {', '.join(fields)}) "
+        f"VALUES (?, {placeholders})",
+        (owner_id, *(record[field] for field in fields)),
     )
     if opportunity_id:
         conn.execute(
@@ -3913,7 +4490,7 @@ def update_experiment(experiment_id, payload):
         updates["name"] = name
     if "opportunity_id" in payload:
         updates["opportunity_id"] = _normalize_opportunity_id(
-            conn, payload.get("opportunity_id")
+            conn, payload.get("opportunity_id"), existing["user_id"]
         )
     if "experiment_type" in payload:
         if payload.get("experiment_type") not in EXPERIMENT_TYPES:
@@ -3997,7 +4574,7 @@ def _normalize_feedback_relation(related_type, related_id):
         raise ValueError("反馈关联 id 无效")
 
 
-def create_feedback_item(payload):
+def create_feedback_item(payload, user_id=None):
     payload = payload or {}
     title = _clean_text(payload.get("title"))
     if not title:
@@ -4027,9 +4604,25 @@ def create_feedback_item(payload):
     fields = tuple(record.keys())
     placeholders = ", ".join("?" for _ in fields)
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
+    if related_id is not None:
+        target_table = {
+            "opportunity": "opportunities",
+            "experiment": "experiments",
+            "project": "projects",
+            "asset": "assets",
+            "review": "reviews",
+        }[related_type]
+        if not conn.execute(
+            f'SELECT id FROM "{target_table}" WHERE id = ? AND user_id = ?',
+            (related_id, owner_id),
+        ).fetchone():
+            conn.close()
+            raise ValueError("反馈关联对象不存在")
     cur = conn.execute(
-        f"INSERT INTO feedback_items ({', '.join(fields)}) VALUES ({placeholders})",
-        tuple(record[field] for field in fields),
+        f"INSERT INTO feedback_items (user_id, {', '.join(fields)}) "
+        f"VALUES (?, {placeholders})",
+        (owner_id, *(record[field] for field in fields)),
     )
     conn.commit()
     row = conn.execute(
@@ -4072,6 +4665,20 @@ def update_feedback_item(feedback_id, payload):
         )
         updates["related_type"] = related_type
         updates["related_id"] = related_id
+        if related_id is not None:
+            target_table = {
+                "opportunity": "opportunities",
+                "experiment": "experiments",
+                "project": "projects",
+                "asset": "assets",
+                "review": "reviews",
+            }[related_type]
+            if not conn.execute(
+                f'SELECT id FROM "{target_table}" WHERE id = ? AND user_id = ?',
+                (related_id, existing["user_id"]),
+            ).fetchone():
+                conn.close()
+                raise ValueError("反馈关联对象不存在")
     for field in ("content", "evidence", "next_action"):
         if field in payload:
             updates[field] = _clean_text(payload.get(field))
@@ -4645,7 +5252,7 @@ def _suggestion_row(row):
     return data
 
 
-def create_inbox_entry(raw_text, source_type="manual"):
+def create_inbox_entry(raw_text, source_type="manual", user_id=None):
     text = (raw_text or "").strip()
     if not text:
         raise ValueError("输入文本不能为空")
@@ -4653,12 +5260,14 @@ def create_inbox_entry(raw_text, source_type="manual"):
         raise ValueError("无效的 source_type")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
         """
-        INSERT INTO inbox_entries (raw_text, source_type, status, created_at)
-        VALUES (?, ?, 'draft', ?)
+        INSERT INTO inbox_entries (
+            user_id, raw_text, source_type, status, created_at
+        ) VALUES (?, ?, ?, 'draft', ?)
         """,
-        (text, source_type, _now()),
+        (owner_id, text, source_type, _now()),
     )
     conn.commit()
     entry_id = cur.lastrowid
@@ -4738,10 +5347,14 @@ def list_inbox_entries(limit=20):
 
 
 def create_inbox_suggestions(entry_id, items):
-    if not get_inbox_entry(entry_id):
-        raise ValueError("inbox 记录不存在")
-
     conn = get_connection()
+    entry = conn.execute(
+        "SELECT id, user_id FROM inbox_entries WHERE id = ?", (entry_id,)
+    ).fetchone()
+    if not entry:
+        conn.close()
+        raise ValueError("inbox 记录不存在")
+    owner_id = int(entry["user_id"])
     created = []
     try:
         for item in items:
@@ -4759,11 +5372,12 @@ def create_inbox_suggestions(entry_id, items):
             cur = conn.execute(
                 """
                 INSERT INTO inbox_suggestions (
-                    inbox_entry_id, target_type, title, content,
+                    user_id, inbox_entry_id, target_type, title, content,
                     confidence, reason, suggested_payload, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
                 (
+                    owner_id,
                     entry_id,
                     target_type,
                     title,
@@ -5002,6 +5616,7 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
     title = suggestion.get("title") or ""
     content = suggestion.get("content") or ""
     payload = suggestion["suggested_payload"]
+    owner_id = int(suggestion["user_id"])
 
     if target_type == "goal":
         name = (payload.get("name") or title).strip()
@@ -5020,7 +5635,8 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
                 "请先在目标模块创建目标后再归档项目"
             )
         if not conn.execute(
-            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+            "SELECT id FROM goals WHERE id = ? AND user_id = ?",
+            (goal_id, owner_id),
         ).fetchone():
             return f"建议 #{sid}（项目）：关联目标 #{goal_id} 不存在"
         return None
@@ -5050,7 +5666,8 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
                 "请选择归属项目或关联同批项目"
             )
         if not conn.execute(
-            "SELECT id FROM projects WHERE id = ?", (project_id,)
+            "SELECT id FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, owner_id),
         ).fetchone():
             return f"建议 #{sid}（任务）：关联项目 #{project_id} 不存在"
         return None
@@ -5100,7 +5717,8 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
         if payload.get("opportunity_id") not in (None, "") and not opportunity_id:
             return f"建议 #{sid}（实验）：opportunity_id 需为数字 ID"
         if opportunity_id and not conn.execute(
-            "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
+            "SELECT id FROM opportunities WHERE id = ? AND user_id = ?",
+            (opportunity_id, owner_id),
         ).fetchone():
             return f"建议 #{sid}（实验）：关联机会 #{opportunity_id} 不存在"
         return None
@@ -5115,6 +5733,19 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
             return f"建议 #{sid}（反馈）：关联类型无效"
         if payload.get("related_id") not in (None, "") and not related_id:
             return f"建议 #{sid}（反馈）：related_id 需为数字 ID"
+        if related_type and related_id:
+            target_table = {
+                "opportunity": "opportunities",
+                "experiment": "experiments",
+                "project": "projects",
+                "asset": "assets",
+                "review": "reviews",
+            }[related_type]
+            if not conn.execute(
+                f'SELECT id FROM "{target_table}" WHERE id = ? AND user_id = ?',
+                (related_id, owner_id),
+            ).fetchone():
+                return f"建议 #{sid}（反馈）：关联对象不存在或属于其他用户"
         return None
 
     return f"建议 #{sid} 类型为 {target_type}，不可入库"
@@ -5126,6 +5757,7 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
     title = suggestion["title"]
     content = suggestion["content"]
     payload = dict(suggestion["suggested_payload"])
+    owner_id = int(suggestion["user_id"])
 
     if target_type == "goal":
         name = (payload.get("name") or title).strip()
@@ -5133,11 +5765,14 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
             raise ValueError("目标名称不能为空")
         goal_type = _map_goal_type(payload.get("type"))
         cur = conn.execute(
-            "INSERT INTO goals (name, type, created_at) VALUES (?, ?, ?)",
-            (name, goal_type, _now()),
+            """
+            INSERT INTO goals (user_id, name, type, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (owner_id, name, goal_type, _now()),
         )
         if goal_type == "当前主线":
-            _demote_other_mainline_goals(conn, cur.lastrowid)
+            _demote_other_mainline_goals(conn, cur.lastrowid, owner_id)
         return "goals", cur.lastrowid
 
     if target_type == "project":
@@ -5148,13 +5783,17 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         if not goal_id:
             raise ValueError("项目归档需要关联目标 goal_id")
         goal = conn.execute(
-            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+            "SELECT id FROM goals WHERE id = ? AND user_id = ?",
+            (goal_id, owner_id),
         ).fetchone()
         if not goal:
             raise ValueError("关联目标不存在")
         cur = conn.execute(
-            "INSERT INTO projects (goal_id, name, created_at) VALUES (?, ?, ?)",
-            (goal_id, name, _now()),
+            """
+            INSERT INTO projects (user_id, goal_id, name, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (owner_id, goal_id, name, _now()),
         )
         return "projects", cur.lastrowid
 
@@ -5167,16 +5806,17 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         if not project_id:
             raise ValueError("任务归档需要关联项目 project_id")
         project = conn.execute(
-            "SELECT id FROM projects WHERE id = ?", (project_id,)
+            "SELECT id FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, owner_id),
         ).fetchone()
         if not project:
             raise ValueError("关联项目不存在")
         cur = conn.execute(
             """
-            INSERT INTO tasks (project_id, name, status, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO tasks (user_id, project_id, name, status, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (project_id, name, status, _now()),
+            (owner_id, project_id, name, status, _now()),
         )
         return "tasks", cur.lastrowid
 
@@ -5189,10 +5829,12 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO reviews (
-                review_date, type, what_done, stuck, next_adjust, depositable, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                user_id, review_date, type, what_done, stuck, next_adjust,
+                depositable, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 review_date,
                 review_type,
                 what_done,
@@ -5244,13 +5886,14 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO assets (
-                title, trigger_context, core_content, asset_type,
+                user_id, title, trigger_context, core_content, asset_type,
                 capability_tags, source_review_id, created_at,
                 summary, fields, reusable_scenario, maturity, reuse_count,
                 source_type, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 asset_title,
                 legacy_trigger,
                 legacy_core,
@@ -5283,10 +5926,12 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO capability_entries (
-                module, entry_date, content, source_project, level_type, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                user_id, module, entry_date, content, source_project,
+                level_type, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 module,
                 entry_date,
                 entry_content,
@@ -5305,11 +5950,12 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO opportunities (
-                name, source, description, related_context, target_user,
+                user_id, name, source, description, related_context, target_user,
                 status, next_action, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 name,
                 _as_text(payload.get("source")),
                 _as_text(payload.get("description"), _as_text(content)),
@@ -5332,13 +5978,14 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO experiments (
-                opportunity_id, name, hypothesis, experiment_type,
+                user_id, opportunity_id, name, hypothesis, experiment_type,
                 minimum_action, test_target, feedback_source,
                 validation_period, success_criteria, failure_criteria,
                 status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 opportunity_id,
                 name,
                 _as_text(payload.get("hypothesis"), _as_text(content)),
@@ -5369,11 +6016,12 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
         cur = conn.execute(
             """
             INSERT INTO feedback_items (
-                related_type, related_id, title, source, level,
+                user_id, related_type, related_id, title, source, level,
                 content, evidence, next_action, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 related_type,
                 related_id,
                 feedback_title,
@@ -5443,6 +6091,10 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
                 )
                 continue
             candidates.append(suggestion)
+
+        owner_ids = {int(item["user_id"]) for item in candidates}
+        if len(owner_ids) > 1:
+            raise ValueError("不能跨用户批量提交 inbox 建议")
 
         batch_project_refs = _batch_project_local_refs(candidates)
         to_commit = []
@@ -5526,16 +6178,18 @@ def _positioning_action_row(row):
     return data
 
 
-def get_positioning_anchor():
+def get_positioning_anchor(user_id=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM positioning_anchor ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM positioning_anchor WHERE user_id = ? LIMIT 1",
+        (owner_id,),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def upsert_positioning_anchor(payload):
+def upsert_positioning_anchor(payload, user_id=None):
     payload = payload or {}
     field_names = (
         "first_principle",
@@ -5546,8 +6200,10 @@ def upsert_positioning_anchor(payload):
     )
     now = _now()
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT * FROM positioning_anchor ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM positioning_anchor WHERE user_id = ? LIMIT 1",
+        (owner_id,),
     ).fetchone()
     if existing:
         fields = {}
@@ -5579,11 +6235,12 @@ def upsert_positioning_anchor(payload):
         cur = conn.execute(
             """
             INSERT INTO positioning_anchor (
-                first_principle, identity_core, flywheel_def,
+                user_id, first_principle, identity_core, flywheel_def,
                 current_stage, north_star, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                owner_id,
                 fields["first_principle"],
                 fields["identity_core"],
                 fields["flywheel_def"],
@@ -5601,7 +6258,7 @@ def upsert_positioning_anchor(payload):
     return _row_to_dict(row)
 
 
-def create_positioning_calibration(payload):
+def create_positioning_calibration(payload, user_id=None):
     payload = payload or {}
     calibrated_at = _as_text(payload.get("calibrated_at"))
     if not calibrated_at:
@@ -5611,15 +6268,17 @@ def create_positioning_calibration(payload):
         raise ValueError("无效的校准周期")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
         """
         INSERT INTO positioning_calibration (
-            calibrated_at, cycle, primary_contradiction,
+            user_id, calibrated_at, cycle, primary_contradiction,
             doing_but_shouldnt, should_but_not_doing,
             alignment_review, conclusion, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            owner_id,
             calibrated_at,
             cycle,
             _as_text(payload.get("primary_contradiction")),
@@ -5789,6 +6448,7 @@ def update_positioning_goal_action(action_id, payload):
         payload.get("payload")
         if "payload" in payload
         else existing.get("payload"),
+        existing["user_id"],
     )
 
     reason = (
@@ -5868,7 +6528,9 @@ def update_positioning_goal_action_status(action_id, status):
     return _positioning_action_row(row)
 
 
-def _validate_positioning_goal_action_fields(action_type, target_goal_id, action_payload):
+def _validate_positioning_goal_action_fields(
+    action_type, target_goal_id, action_payload, user_id=None
+):
     if action_type not in POSITIONING_ACTION_TYPES:
         raise ValueError("无效的目标变更类型")
 
@@ -5880,6 +6542,8 @@ def _validate_positioning_goal_action_fields(action_type, target_goal_id, action
         goal = get_goal(target_goal_id)
         if not goal:
             raise ValueError("目标不存在")
+        if user_id is not None and int(goal["user_id"]) != int(user_id):
+            raise ValueError("目标不属于当前数据所有者")
     else:
         target_goal_id = None
 
@@ -5916,6 +6580,7 @@ def create_positioning_goal_action(calibration_id, payload):
         action_type,
         payload.get("target_goal_id"),
         payload.get("payload"),
+        calibration["user_id"],
     )
 
     reason = _as_text(payload.get("reason"))
@@ -5926,11 +6591,12 @@ def create_positioning_goal_action(calibration_id, payload):
     cur = conn.execute(
         """
         INSERT INTO positioning_goal_action (
-            calibration_id, action_type, target_goal_id,
+            user_id, calibration_id, action_type, target_goal_id,
             payload, reason, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
         """,
         (
+            calibration["user_id"],
             calibration_id,
             action_type,
             target_goal_id,

@@ -3,7 +3,9 @@ data/settings.json
 data/backup_*.json
 data/*backup*.json
 backups/
-scripts/
+scripts/*
+!scripts/migrate-v2.2-multiuser.py
+!scripts/verify-v2.2-migration.py
 __pycache__/
 *.pyc
 venv/

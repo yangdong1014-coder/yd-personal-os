@@ -125,7 +125,7 @@ def _seed_dashboard_project(
     return project, tasks
 
 
-def test_init_db_migrates_legacy_project_and_task_priority(tmp_path, monkeypatch):
+def test_init_db_refuses_partial_legacy_priority_migration(tmp_path, monkeypatch):
     db_path = tmp_path / "legacy.db"
     monkeypatch.setattr(database, "DB_PATH", str(db_path))
     conn = sqlite3.connect(db_path)
@@ -163,19 +163,16 @@ def test_init_db_migrates_legacy_project_and_task_priority(tmp_path, monkeypatch
     conn.commit()
     conn.close()
 
-    database.init_db()
+    with pytest.raises(database.LegacyMigrationRequired):
+        database.init_db()
 
     conn = sqlite3.connect(db_path)
     project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
     task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
-    project_priority = conn.execute("SELECT priority FROM projects WHERE id = 1").fetchone()[0]
-    task_priority = conn.execute("SELECT priority FROM tasks WHERE id = 1").fetchone()[0]
     conn.close()
 
-    assert "priority" in project_columns
-    assert "priority" in task_columns
-    assert project_priority == "medium"
-    assert task_priority == "medium"
+    assert "priority" not in project_columns
+    assert "priority" not in task_columns
 
 
 def test_delete_project_success(client):

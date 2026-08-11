@@ -99,6 +99,16 @@ python scripts/backup-db.py
 
 备份至 `personal-system-v2/backups/`，默认保留 30 份。
 
+**v2.2 Phase 2 staged migration（仅本地开发/发布准备，不切生产）**：
+
+```bash
+python scripts/migrate-v2.2-multiuser.py LEGACY.db STAGED.db \
+  --admin-username admin --admin-email admin@example.com
+python scripts/verify-v2.2-migration.py LEGACY.db STAGED.db
+```
+
+源库只读、目标必须是不存在的新文件；16 张业务表的 ID、字段、时间、JSON、外键与 `sqlite_sequence` 均逐表校验。普通 `init_db()` 遇到 legacy schema 会停止，不会自动绑定管理员。完整安全流程见 [开发指南](../docs/development-guide.md#v22-离线-staged-migration)。
+
 ## 环境变量
 
 在项目根目录创建 `.env`（参考 `.env.example`）：
@@ -117,7 +127,7 @@ python scripts/backup-db.py
 
 未配置 `DEEPSEEK_API_KEY` 时，CRUD 功能正常，AI 按钮不可用。
 
-> **安全提示**：远程使用必须设置远程/生产信号、强 `SECRET_KEY` 并使用 HTTPS；不要将 Flask 5000 端口直接暴露到公网。未标注环境不会进入本地开发模式；反向代理仍须显式设置远程/生产信号，以表达部署意图。Phase 1.1 尚未完成业务数据隔离：中央门禁暂时只允许普通用户访问认证与改密表面，管理员仍可访问现有共享业务数据。
+> **安全提示**：远程使用必须设置远程/生产信号、强 `SECRET_KEY` 并使用 HTTPS；不要将 Flask 5000 端口直接暴露到公网。未标注环境不会进入本地开发模式；反向代理仍须显式设置远程/生产信号，以表达部署意图。Phase 2 只完成 schema 所有权与 staged migration，Phase 3 Repository 查询隔离尚未完成；中央门禁仍只允许普通用户访问认证与改密表面，管理员继续作为唯一业务使用者。
 
 ## 数据文件
 

@@ -5,9 +5,9 @@ SQLite 表结构及关系说明（`database.py` / `init_db`）。
 ## 实体关系
 
 ```
-positioning_anchor — 定位锚（低频，单行有效）
+users (1) ──< positioning_anchor（每用户至多一行）
 
-users — 身份账户（Phase 1 独立表，尚不关联业务表）
+users (1) ──< 16 张个人业务表（user_id NOT NULL）
 
 positioning_calibration (1) ──< positioning_goal_action (N)
 
@@ -41,7 +41,39 @@ inbox_entries (1) ──< inbox_suggestions (N)
 | last_login_at | 最近成功登录时间 |
 | created_at / updated_at | UTC 时间戳 |
 
-Phase 1 不删除用户，只禁用；不向任何业务表添加 `user_id`，也不把用户凭据纳入现有 JSON 导入导出。身份存在不代表已完成业务数据隔离；Phase 1.1 的后端中央门禁暂时禁止普通用户进入全部业务页面与 API。
+Phase 1 不删除用户，只禁用，也不把用户凭据纳入现有 JSON 导入导出。Phase 2 已为业务表增加所有权 schema，但业务查询的 Repository 隔离属于 Phase 3；因此 Phase 1.1 的后端中央门禁继续禁止普通用户进入全部业务页面与 API。
+
+## Phase 2 数据所有权边界
+
+以下 16 张表均增加 `user_id INTEGER NOT NULL REFERENCES users(id)`，并建立以 `user_id` 为前导的索引：
+
+`goals`、`projects`、`tasks`、`reviews`、`assets`、`capability_entries`、`capability_practice_steps`、`opportunities`、`experiments`、`feedback_items`、`deliberations`、`positioning_anchor`、`positioning_calibration`、`positioning_goal_action`、`inbox_entries`、`inbox_suggestions`。
+
+所有业务行的 owner 创建后由触发器禁止修改。当前阶段管理员仍是唯一业务使用者；普通用户继续由中央门禁拒绝。Phase 2 仅保证 schema 与迁移后的归属，不代表读取查询已经完成多用户隔离。
+
+### 同用户硬约束
+
+| 关系 | 数据库约束 |
+|------|------------|
+| project → goal | `(goal_id, user_id) → goals(id, user_id)`，级联删除 |
+| task → project | `(project_id, user_id) → projects(id, user_id)`，级联删除 |
+| positioning_goal_action → calibration | `(calibration_id, user_id) → positioning_calibration(id, user_id)`，级联删除 |
+| inbox_suggestion → inbox_entry | `(inbox_entry_id, user_id) → inbox_entries(id, user_id)`，级联删除 |
+| asset → source_review | 保留 `ON DELETE SET NULL`，INSERT/UPDATE 触发器校验同 owner |
+| experiment → opportunity | 保留 `ON DELETE SET NULL`，INSERT/UPDATE 触发器校验同 owner |
+| positioning action → target goal | 可空软引用，INSERT/UPDATE 触发器校验同 owner |
+| feedback / deliberation 多态关联 | 已知 target_type 由 INSERT/UPDATE 触发器校验同 owner |
+
+SQLite 不能给 JSON 内的 `suggested_payload` 建立外键；`assets.source_type/source_id` 及多态对象删除后的孤儿清理也不适合用单一 FK 表达。这些关系由 staged migration verifier 执行孤儿检查，运行期 Repository 校验与删除策略留给 Phase 3。
+
+### 初始化与启动
+
+- 新账户的普通业务表为空。
+- 只为该账户 seed 独立的默认 `capability_practice_steps`，并与用户创建处于同一事务。
+- `positioning_anchor` 以 `UNIQUE(user_id)` 实现每用户单例。
+- `_demote_other_mainline_goals()`、训练路径排序和定位锚读写均要求 owner scope。
+- `init_db()` 不 seed、不归一化、不重写既有业务数据；检测到缺少 `user_id` 的 legacy schema 会抛出 `LegacyMigrationRequired`。
+- v2.1.4 历史库只能离线复制到新的 staged v2.2 DB；普通 app 启动不会自动绑定管理员。
 
 ## 表说明
 
@@ -123,7 +155,7 @@ v1.12 起，资产从「知识卡片列表」升级为**可复用资产库**：�
 
 `草稿` · `可用` · `稳定` · `标准化`
 
-#### 旧数据迁移（`_migrate_assets_table`）
+#### 历史旧数据迁移
 
 `init_db()` 启动时自动执行，**幂等**（重复执行不重复污染 fields、不重置 reuse_count / created_at）：
 
@@ -136,7 +168,9 @@ v1.12 起，资产从「知识卡片列表」升级为**可复用资产库**：�
 
 - 旧 `trigger_context` / `core_content` 自动写入对应 `fields`
 - 自动补全 `summary`、`reusable_scenario`、`maturity`、`updated_at`、`source_type`
-- 逻辑实现：`database._migrate_assets_table()` + `asset_schemas.build_fields_from_legacy()`
+- 上述规则是 v1.12 历史升级行为。Phase 2 起 `init_db()` 不再运行全库资产重写。
+- v2.2 staged migration 只接受字段完整的 v2.1.4 数据库，并逐字保留现有 asset 字段与 JSON；更早版本必须先按原发布链升级到 v2.1.4。
+- 新建/导入单条资产仍复用 `asset_schemas` 做输入规范化，但这不是 legacy 数据库主迁移路径。
 
 ### capability_entries
 
@@ -198,7 +232,7 @@ v1.12 起，资产从「知识卡片列表」升级为**可复用资产库**：�
 
 ### positioning_anchor（v1.19+）
 
-定位锚：战略不动点，低频修订。实现上保留最新一行（`upsert` 覆盖更新）。
+定位锚：战略不动点，低频修订。Phase 2 起按 `user_id` upsert，并由 `UNIQUE(user_id)` 保证每个用户至多一行。
 
 | 字段 | 说明 |
 |------|------|

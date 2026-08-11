@@ -2,6 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import ai_service
 import database
 
@@ -18,7 +20,7 @@ def test_value_tables_are_initialized(client):
     assert "asset_level" in asset_columns
 
 
-def test_legacy_database_migrates_value_fields(tmp_path, monkeypatch):
+def test_init_db_refuses_partial_legacy_value_migration(tmp_path, monkeypatch):
     db_path = tmp_path / "legacy-value.db"
     monkeypatch.setattr(database, "DB_PATH", str(db_path))
     conn = sqlite3.connect(db_path)
@@ -84,12 +86,19 @@ def test_legacy_database_migrates_value_fields(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    database.init_db()
+    with pytest.raises(database.LegacyMigrationRequired):
+        database.init_db()
 
-    conn = database.get_connection()
-    assert "opportunities" in {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert conn.execute("SELECT core_hypothesis FROM projects WHERE id = 1").fetchone()[0] == ""
-    assert conn.execute("SELECT asset_level FROM assets WHERE id = 1").fetchone()[0] == "资料"
+    conn = sqlite3.connect(db_path)
+    assert "opportunities" not in {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert "core_hypothesis" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(projects)")
+    }
+    assert "asset_level" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(assets)")
+    }
     conn.close()
 
 
@@ -1052,13 +1061,17 @@ def test_asset_delete_api_still_works_for_case_asset(client):
 
 
 def test_links_api_handles_missing_relations_without_500(client):
-    feedback = client.post(
+    invalid_feedback = client.post(
         "/api/feedback",
         json={
             "title": "断链反馈",
             "related_type": "experiment",
             "related_id": 999999,
         },
+    )
+    assert invalid_feedback.status_code == 400
+    feedback = client.post(
+        "/api/feedback", json={"title": "无关联反馈"}
     ).get_json()["data"]
     asset = client.post(
         "/api/assets",
@@ -1071,21 +1084,27 @@ def test_links_api_handles_missing_relations_without_500(client):
     ).get_json()["data"]
 
     conn = database.get_connection()
+    owner_id = conn.execute(
+        "SELECT user_id FROM assets WHERE id = ?", (asset["id"],)
+    ).fetchone()["user_id"]
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.execute(
         "UPDATE assets SET source_type = ?, source_id = ? WHERE id = ?",
         ("feedback", 999999, asset["id"]),
     )
     conn.execute(
+        "DROP TRIGGER trg_experiments_opportunity_id_owner_insert"
+    )
+    conn.execute(
         """
         INSERT INTO experiments (
-            id, opportunity_id, name, hypothesis, experiment_type,
+            id, user_id, opportunity_id, name, hypothesis, experiment_type,
             minimum_action, test_target, feedback_source, validation_period,
             success_criteria, failure_criteria, progress, real_feedback,
             data_result, next_decision, review_conclusion, status, created_at, updated_at
-        ) VALUES (?, ?, ?, '', '结果型MVP', '', '', '', '', '', '', '', '', '', '', '', '设计中', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+        ) VALUES (?, ?, ?, ?, '', '结果型MVP', '', '', '', '', '', '', '', '', '', '', '', '设计中', '2026-01-01 00:00:00', '2026-01-01 00:00:00')
         """,
-        (999998, 999997, "断链实验"),
+        (999998, owner_id, 999997, "断链实验"),
     )
     conn.commit()
     conn.close()
