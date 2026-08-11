@@ -441,27 +441,19 @@ def get_connection():
     return conn
 
 
-def _resolve_owner_id(conn, user_id=None):
-    """Resolve transitional Phase 2 writes without opening user business access."""
-    if user_id is not None:
-        try:
-            owner_id = int(user_id)
-        except (TypeError, ValueError) as exc:
-            raise OwnershipContextError("无效的数据所有者") from exc
-        if owner_id <= 0 or not conn.execute(
-            "SELECT 1 FROM users WHERE id = ?", (owner_id,)
-        ).fetchone():
-            raise OwnershipContextError("数据所有者不存在")
-        return owner_id
-
-    admins = conn.execute(
-        "SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 2"
-    ).fetchall()
-    if len(admins) != 1:
-        raise OwnershipContextError(
-            "Phase 2 业务写入需要显式 user_id 或唯一 bootstrap 管理员"
-        )
-    return int(admins[0]["id"])
+def _resolve_owner_id(conn, user_id):
+    """Validate the explicit owner supplied by the authenticated request context."""
+    if user_id is None:
+        raise OwnershipContextError("业务数据访问必须提供 user_id")
+    try:
+        owner_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise OwnershipContextError("无效的数据所有者") from exc
+    if owner_id <= 0 or not conn.execute(
+        "SELECT 1 FROM users WHERE id = ?", (owner_id,)
+    ).fetchone():
+        raise OwnershipContextError("数据所有者不存在")
+    return owner_id
 
 
 def _row_to_dict(row):
@@ -1457,14 +1449,7 @@ def _migrate_assets_table(conn):
         )
 
 
-def _demote_other_mainline_goals(conn, keep_goal_id, user_id=None):
-    if user_id is None:
-        owner = conn.execute(
-            "SELECT user_id FROM goals WHERE id = ?", (keep_goal_id,)
-        ).fetchone()
-        if owner is None:
-            raise ValueError("目标不存在")
-        user_id = owner["user_id"]
+def _demote_other_mainline_goals(conn, keep_goal_id, user_id):
     conn.execute(
         """
         UPDATE goals SET type = '季度'
@@ -1508,7 +1493,7 @@ def ensure_default_capability_practice_steps(conn, user_id):
             )
 
 
-def _normalize_mainline_goals(conn, user_id=None):
+def _normalize_mainline_goals(conn, user_id):
     user_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
@@ -1541,7 +1526,7 @@ def _deliberation_row(row):
     return data
 
 
-def _normalize_deliberation_relation(conn, related_type, related_id, user_id=None):
+def _normalize_deliberation_relation(conn, related_type, related_id, user_id):
     related_type = _clean_text(related_type)
     if not related_type:
         return "", None
@@ -1555,12 +1540,10 @@ def _normalize_deliberation_relation(conn, related_type, related_id, user_id=Non
         raise ValueError("请选择有效的关联对象")
 
     table = "projects" if related_type == "project" else "opportunities"
-    query = f"SELECT id FROM {table} WHERE id = ?"
-    params = [related_id]
-    if user_id is not None:
-        query += " AND user_id = ?"
-        params.append(int(user_id))
-    if not conn.execute(query, tuple(params)).fetchone():
+    if not conn.execute(
+        f"SELECT id FROM {table} WHERE id = ? AND user_id = ?",
+        (related_id, int(user_id)),
+    ).fetchone():
         label = "项目" if related_type == "project" else "机会"
         raise ValueError(f"关联的{label}不存在")
     return related_type, related_id
@@ -1590,7 +1573,7 @@ def _deliberation_title_from_problem(problem, max_length=48):
     return f"{title[: max_length - 1].rstrip()}…"
 
 
-def create_deliberation(payload, user_id=None):
+def create_deliberation(payload, user_id):
     payload = payload or {}
     values = _clean_deliberation_fields(payload, DELIBERATION_INITIAL_FIELDS)
     _require_deliberation_fields(
@@ -1635,43 +1618,48 @@ def create_deliberation(payload, user_id=None):
         )
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM deliberations WHERE id = ?",
-            (cursor.lastrowid,),
+            "SELECT * FROM deliberations WHERE id = ? AND user_id = ?",
+            (cursor.lastrowid, owner_id),
         ).fetchone()
         return _deliberation_row(row)
     finally:
         conn.close()
 
 
-def list_deliberations():
+def list_deliberations(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM deliberations
+        WHERE user_id = ?
         ORDER BY updated_at DESC, created_at DESC, id DESC
-        """
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_deliberation_row(row) for row in rows]
 
 
-def get_deliberation(deliberation_id):
+def get_deliberation(deliberation_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM deliberations WHERE id = ?",
-        (deliberation_id,),
+        "SELECT * FROM deliberations WHERE id = ? AND user_id = ?",
+        (deliberation_id, owner_id),
     ).fetchone()
     conn.close()
     return _deliberation_row(row)
 
 
-def update_deliberation(deliberation_id, payload):
+def update_deliberation(deliberation_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         row = conn.execute(
-            "SELECT * FROM deliberations WHERE id = ?",
-            (deliberation_id,),
+            "SELECT * FROM deliberations WHERE id = ? AND user_id = ?",
+            (deliberation_id, owner_id),
         ).fetchone()
         if not row:
             raise ValueError("推演不存在")
@@ -1695,7 +1683,7 @@ def update_deliberation(deliberation_id, payload):
             conn,
             values["related_type"],
             merged.get("related_id"),
-            current["user_id"],
+            owner_id,
         )
         conn.execute(
             """
@@ -1703,7 +1691,7 @@ def update_deliberation(deliberation_id, payload):
                 title = ?, problem = ?, context = ?, initial_judgment = ?,
                 reasoning = ?, assumptions = ?, related_type = ?, related_id = ?,
                 updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 values["title"],
@@ -1716,15 +1704,16 @@ def update_deliberation(deliberation_id, payload):
                 related_id,
                 _now(),
                 deliberation_id,
+                owner_id,
             ),
         )
         conn.commit()
-        return get_deliberation(deliberation_id)
+        return get_deliberation(deliberation_id, owner_id)
     finally:
         conn.close()
 
 
-def save_deliberation_analysis(deliberation_id, analysis):
+def save_deliberation_analysis(deliberation_id, analysis, user_id):
     if not isinstance(analysis, dict):
         raise ValueError("AI 分析结果格式无效")
     normalized = {}
@@ -1736,9 +1725,10 @@ def save_deliberation_analysis(deliberation_id, analysis):
 
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         row = conn.execute(
-            "SELECT status FROM deliberations WHERE id = ?",
-            (deliberation_id,),
+            "SELECT status FROM deliberations WHERE id = ? AND user_id = ?",
+            (deliberation_id, owner_id),
         ).fetchone()
         if not row:
             raise ValueError("推演不存在")
@@ -1748,21 +1738,22 @@ def save_deliberation_analysis(deliberation_id, analysis):
             """
             UPDATE deliberations
             SET ai_analysis = ?, status = 'analyzed', updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 json.dumps(normalized, ensure_ascii=False),
                 _now(),
                 deliberation_id,
+                owner_id,
             ),
         )
         conn.commit()
-        return get_deliberation(deliberation_id)
+        return get_deliberation(deliberation_id, owner_id)
     finally:
         conn.close()
 
 
-def save_deliberation_decision(deliberation_id, payload):
+def save_deliberation_decision(deliberation_id, payload, user_id):
     payload = payload or {}
     values = _clean_deliberation_fields(payload, DELIBERATION_DECISION_FIELDS)
     _require_deliberation_fields(
@@ -1773,9 +1764,10 @@ def save_deliberation_decision(deliberation_id, payload):
 
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         row = conn.execute(
-            "SELECT status FROM deliberations WHERE id = ?",
-            (deliberation_id,),
+            "SELECT status FROM deliberations WHERE id = ? AND user_id = ?",
+            (deliberation_id, owner_id),
         ).fetchone()
         if not row:
             raise ValueError("推演不存在")
@@ -1786,7 +1778,7 @@ def save_deliberation_decision(deliberation_id, payload):
             UPDATE deliberations SET
                 final_judgment = ?, decision = ?, decision_reasoning = ?,
                 next_action = ?, status = 'decided', updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 values["final_judgment"],
@@ -1795,15 +1787,16 @@ def save_deliberation_decision(deliberation_id, payload):
                 values["next_action"],
                 _now(),
                 deliberation_id,
+                owner_id,
             ),
         )
         conn.commit()
-        return get_deliberation(deliberation_id)
+        return get_deliberation(deliberation_id, owner_id)
     finally:
         conn.close()
 
 
-def save_deliberation_review(deliberation_id, payload):
+def save_deliberation_review(deliberation_id, payload, user_id):
     payload = payload or {}
     values = _clean_deliberation_fields(payload, DELIBERATION_REVIEW_FIELDS)
     _require_deliberation_fields(
@@ -1814,9 +1807,10 @@ def save_deliberation_review(deliberation_id, payload):
 
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         row = conn.execute(
-            "SELECT status FROM deliberations WHERE id = ?",
-            (deliberation_id,),
+            "SELECT status FROM deliberations WHERE id = ? AND user_id = ?",
+            (deliberation_id, owner_id),
         ).fetchone()
         if not row:
             raise ValueError("推演不存在")
@@ -1828,7 +1822,7 @@ def save_deliberation_review(deliberation_id, payload):
                 actual_result = ?, judgment_accuracy = ?, judgment_error = ?,
                 key_variable = ?, lesson = ?, principle = ?,
                 status = 'reviewed', updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 values["actual_result"],
@@ -1839,19 +1833,20 @@ def save_deliberation_review(deliberation_id, payload):
                 values["principle"],
                 _now(),
                 deliberation_id,
+                owner_id,
             ),
         )
         conn.commit()
-        return get_deliberation(deliberation_id)
+        return get_deliberation(deliberation_id, owner_id)
     finally:
         conn.close()
 
 
-def delete_deliberation(deliberation_id):
-    return _delete_entity("deliberations", deliberation_id, "推演")
+def delete_deliberation(deliberation_id, user_id):
+    return _delete_entity("deliberations", deliberation_id, "推演", user_id)
 
 
-def create_goal(name, goal_type, user_id=None):
+def create_goal(name, goal_type, user_id):
     if goal_type not in GOAL_TYPES:
         raise ValueError("无效的目标类型")
     name = name.strip()
@@ -1868,15 +1863,20 @@ def create_goal(name, goal_type, user_id=None):
     if goal_type == "当前主线":
         _demote_other_mainline_goals(conn, goal_id, owner_id)
     conn.commit()
-    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+    ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def update_goal(goal_id, payload):
+def update_goal(goal_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
-    existing = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    existing = conn.execute(
+        "SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+    ).fetchone()
     if not existing:
         conn.close()
         raise ValueError("目标不存在")
@@ -1901,34 +1901,41 @@ def update_goal(goal_id, payload):
 
     assignments = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE goals SET {assignments} WHERE id = ?",
-        (*updates.values(), goal_id),
+        f"UPDATE goals SET {assignments} WHERE id = ? AND user_id = ?",
+        (*updates.values(), goal_id, owner_id),
     )
     if updates.get("type") == "当前主线":
-        _demote_other_mainline_goals(conn, goal_id, existing["user_id"])
+        _demote_other_mainline_goals(conn, goal_id, owner_id)
     conn.commit()
-    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+    ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_goals():
+def list_goals(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
-        "SELECT * FROM goals ORDER BY created_at DESC"
+        "SELECT * FROM goals WHERE user_id = ? ORDER BY created_at DESC",
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
-def get_goal(goal_id):
+def get_goal(goal_id, user_id):
     conn = get_connection()
-    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        "SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+    ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def create_project(goal_id, name, priority=None, user_id=None):
+def create_project(goal_id, name, priority=None, *, user_id):
     name = name.strip()
     if not name:
         raise ValueError("项目名称不能为空")
@@ -1952,31 +1959,37 @@ def create_project(goal_id, name, priority=None, user_id=None):
     )
     conn.commit()
     project_id = cur.lastrowid
-    row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    conn.close()
-    return _project_row(row)
-
-
-def get_project(project_id):
-    conn = get_connection()
     row = conn.execute(
-        """
-        SELECT p.*, g.name AS goal_name, g.type AS goal_type
-        FROM projects p
-        JOIN goals g ON g.id = p.goal_id
-        WHERE p.id = ?
-        """,
-        (project_id,),
+        "SELECT * FROM projects WHERE id = ? AND user_id = ?",
+        (project_id, owner_id),
     ).fetchone()
     conn.close()
     return _project_row(row)
 
 
-def update_project(project_id, payload):
+def get_project(project_id, user_id):
+    conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        """
+        SELECT p.*, g.name AS goal_name, g.type AS goal_type
+        FROM projects p
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        WHERE p.id = ? AND p.user_id = ?
+        """,
+        (project_id, owner_id),
+    ).fetchone()
+    conn.close()
+    return _project_row(row)
+
+
+def update_project(project_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT id FROM projects WHERE id = ?", (project_id,)
+        "SELECT id FROM projects WHERE id = ? AND user_id = ?",
+        (project_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
@@ -1998,7 +2011,8 @@ def update_project(project_id, payload):
             updates[field] = _clean_text(payload.get(field))
     if any(field in payload for field in VALUE_SCORE_FIELDS):
         existing_row = conn.execute(
-            "SELECT * FROM projects WHERE id = ?", (project_id,)
+            "SELECT * FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, owner_id),
         ).fetchone()
         scores = _value_scores_from_payload(payload, existing_row)
         updates.update(scores)
@@ -2009,50 +2023,53 @@ def update_project(project_id, payload):
 
     assignments = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE projects SET {assignments} WHERE id = ?",
-        (*updates.values(), project_id),
+        f"UPDATE projects SET {assignments} WHERE id = ? AND user_id = ?",
+        (*updates.values(), project_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
         """
         SELECT p.*, g.name AS goal_name, g.type AS goal_type
         FROM projects p
-        JOIN goals g ON g.id = p.goal_id
-        WHERE p.id = ?
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        WHERE p.id = ? AND p.user_id = ?
         """,
-        (project_id,),
+        (project_id, owner_id),
     ).fetchone()
     conn.close()
     return _project_row(row)
 
 
-def list_projects(goal_id=None):
+def list_projects(user_id, goal_id=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     if goal_id is not None:
         rows = conn.execute(
             """
             SELECT p.*, g.name AS goal_name
             FROM projects p
-            JOIN goals g ON g.id = p.goal_id
-            WHERE p.goal_id = ?
+            JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+            WHERE p.goal_id = ? AND p.user_id = ?
             ORDER BY p.created_at DESC
             """,
-            (goal_id,),
+            (goal_id, owner_id),
         ).fetchall()
     else:
         rows = conn.execute(
             """
             SELECT p.*, g.name AS goal_name
             FROM projects p
-            JOIN goals g ON g.id = p.goal_id
+            JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+            WHERE p.user_id = ?
             ORDER BY p.created_at DESC
-            """
+            """,
+            (owner_id,),
         ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
-def create_task(project_id, name, priority=None, user_id=None):
+def create_task(project_id, name, priority=None, *, user_id):
     name = name.strip()
     if not name:
         raise ValueError("任务名称不能为空")
@@ -2081,62 +2098,68 @@ def create_task(project_id, name, priority=None, user_id=None):
         """
         SELECT t.*, p.name AS project_name, g.name AS goal_name
         FROM tasks t
-        JOIN projects p ON p.id = t.project_id
-        JOIN goals g ON g.id = p.goal_id
-        WHERE t.id = ?
+        JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        WHERE t.id = ? AND t.user_id = ?
         """,
-        (task_id,),
+        (task_id, owner_id),
     ).fetchone()
     conn.close()
     return _task_row(row)
 
 
-def _fetch_task(conn, task_id):
+def _fetch_task(conn, task_id, user_id):
     row = conn.execute(
         """
         SELECT t.*, p.name AS project_name, g.name AS goal_name
         FROM tasks t
-        JOIN projects p ON p.id = t.project_id
-        JOIN goals g ON g.id = p.goal_id
-        WHERE t.id = ?
+        JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        WHERE t.id = ? AND t.user_id = ?
         """,
-        (task_id,),
+        (task_id, user_id),
     ).fetchone()
     return _task_row(row)
 
 
-def list_tasks(project_id=None):
+def list_tasks(user_id, project_id=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     if project_id is not None:
         rows = conn.execute(
             """
             SELECT t.*, p.name AS project_name, g.name AS goal_name
             FROM tasks t
-            JOIN projects p ON p.id = t.project_id
-            JOIN goals g ON g.id = p.goal_id
-            WHERE t.project_id = ?
+            JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+            JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+            WHERE t.project_id = ? AND t.user_id = ?
             ORDER BY t.created_at DESC
             """,
-            (project_id,),
+            (project_id, owner_id),
         ).fetchall()
     else:
         rows = conn.execute(
             """
             SELECT t.*, p.name AS project_name, g.name AS goal_name
             FROM tasks t
-            JOIN projects p ON p.id = t.project_id
-            JOIN goals g ON g.id = p.goal_id
+            JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+            JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+            WHERE t.user_id = ?
             ORDER BY t.created_at DESC
-            """
+            """,
+            (owner_id,),
         ).fetchall()
     conn.close()
     return [_task_row(r) for r in rows]
 
 
-def update_task(task_id, payload):
+def update_task(task_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
-    existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    existing = conn.execute(
+        "SELECT id FROM tasks WHERE id = ? AND user_id = ?", (task_id, owner_id)
+    ).fetchone()
     if not existing:
         conn.close()
         raise ValueError("任务不存在")
@@ -2163,35 +2186,44 @@ def update_task(task_id, payload):
 
     assignments = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE tasks SET {assignments} WHERE id = ?",
-        (*updates.values(), task_id),
+        f"UPDATE tasks SET {assignments} WHERE id = ? AND user_id = ?",
+        (*updates.values(), task_id, owner_id),
     )
     conn.commit()
-    row = _fetch_task(conn, task_id)
+    row = _fetch_task(conn, task_id, owner_id)
     conn.close()
     return row
 
 
-def update_task_status(task_id, status):
+def update_task_status(task_id, status, user_id):
     if status not in TASK_STATUSES:
         raise ValueError("无效的任务状态")
 
     conn = get_connection()
-    existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    existing = conn.execute(
+        "SELECT id FROM tasks WHERE id = ? AND user_id = ?", (task_id, owner_id)
+    ).fetchone()
     if not existing:
         conn.close()
         raise ValueError("任务不存在")
 
-    conn.execute("UPDATE tasks SET status = ? WHERE id = ?", (status, task_id))
+    conn.execute(
+        "UPDATE tasks SET status = ? WHERE id = ? AND user_id = ?",
+        (status, task_id, owner_id),
+    )
     conn.commit()
-    row = _fetch_task(conn, task_id)
+    row = _fetch_task(conn, task_id, owner_id)
     conn.close()
     return row
 
 
-def update_task_today_progress(task_id, enabled):
+def update_task_today_progress(task_id, enabled, user_id):
     conn = get_connection()
-    existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    existing = conn.execute(
+        "SELECT id FROM tasks WHERE id = ? AND user_id = ?", (task_id, owner_id)
+    ).fetchone()
     if not existing:
         conn.close()
         raise ValueError("任务不存在")
@@ -2201,42 +2233,45 @@ def update_task_today_progress(task_id, enabled):
             """
             UPDATE tasks
             SET today_progress = 1, today_progress_date = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (_today_local(), task_id),
+            (_today_local(), task_id, owner_id),
         )
     else:
         conn.execute(
             """
             UPDATE tasks
             SET today_progress = 0, today_progress_date = NULL
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (task_id,),
+            (task_id, owner_id),
         )
     conn.commit()
-    row = _fetch_task(conn, task_id)
+    row = _fetch_task(conn, task_id, owner_id)
     conn.close()
     return row
 
 
-def get_mainline_goal():
+def get_mainline_goal(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
         """
         SELECT * FROM goals
-        WHERE type = '当前主线'
+        WHERE user_id = ? AND type = '当前主线'
         ORDER BY created_at DESC
         LIMIT 1
-        """
+        """,
+        (owner_id,),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_active_projects():
+def list_active_projects(user_id):
     today = _today_local()
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT
@@ -2256,8 +2291,9 @@ def list_active_projects():
                 END
             ) AS active_task_count
         FROM projects p
-        JOIN goals g ON g.id = p.goal_id
-        JOIN tasks t ON t.project_id = p.id
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        JOIN tasks t ON t.project_id = p.id AND t.user_id = p.user_id
+        WHERE p.user_id = ?
         GROUP BY p.id
         HAVING active_task_count > 0
         ORDER BY
@@ -2266,25 +2302,26 @@ def list_active_projects():
             active_task_count DESC,
             p.created_at DESC
         """,
-        (today,),
+        (today, owner_id),
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
-def list_today_progress_tasks():
+def list_today_progress_tasks(user_id):
     today = _today_local()
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT t.*, p.name AS project_name, g.name AS goal_name
         FROM tasks t
-        JOIN projects p ON p.id = t.project_id
-        JOIN goals g ON g.id = p.goal_id
-        WHERE t.today_progress = 1 AND t.today_progress_date = ?
+        JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+        JOIN goals g ON g.id = p.goal_id AND g.user_id = p.user_id
+        WHERE t.user_id = ? AND t.today_progress = 1 AND t.today_progress_date = ?
         ORDER BY t.created_at DESC
         """,
-        (today,),
+        (owner_id, today),
     ).fetchall()
     conn.close()
     return [_project_row(r) for r in rows]
@@ -2433,12 +2470,12 @@ def _dashboard_project(project, tasks):
     return item
 
 
-def _build_dashboard_context():
+def _build_dashboard_context(user_id):
     today = _today_local()
-    goals = list_goals()
-    projects = list_projects()
-    tasks = [_dashboard_task(task, today) for task in list_tasks()]
-    mainline_goal = get_mainline_goal()
+    goals = list_goals(user_id)
+    projects = list_projects(user_id)
+    tasks = [_dashboard_task(task, today) for task in list_tasks(user_id)]
+    mainline_goal = get_mainline_goal(user_id)
     mainline_goal_id = mainline_goal["id"] if mainline_goal else None
 
     tasks_by_project = {}
@@ -2526,8 +2563,8 @@ def _build_dashboard_context():
     }
 
 
-def get_dashboard():
-    return _build_dashboard_context()
+def get_dashboard(user_id):
+    return _build_dashboard_context(user_id)
 
 
 def _parse_tags(raw):
@@ -2593,7 +2630,7 @@ def create_review(
     stuck,
     next_adjust,
     depositable,
-    user_id=None,
+    user_id,
 ):
     if review_type not in REVIEW_TYPES:
         raise ValueError("无效的复盘类型")
@@ -2623,23 +2660,36 @@ def create_review(
     )
     conn.commit()
     review_id = cur.lastrowid
-    row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM reviews WHERE id = ? AND user_id = ?",
+        (review_id, owner_id),
+    ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_reviews():
+def list_reviews(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
-        "SELECT * FROM reviews ORDER BY review_date DESC, created_at DESC"
+        """
+        SELECT * FROM reviews
+        WHERE user_id = ?
+        ORDER BY review_date DESC, created_at DESC
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
-def get_review(review_id):
+def get_review(review_id, user_id):
     conn = get_connection()
-    row = conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        "SELECT * FROM reviews WHERE id = ? AND user_id = ?",
+        (review_id, owner_id),
+    ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
@@ -2662,7 +2712,8 @@ def create_asset(
     productization_next_step="",
     source_type="",
     source_id=None,
-    user_id=None,
+    *,
+    user_id,
 ):
     title = (title or "").strip()
     if not title:
@@ -2718,6 +2769,32 @@ def create_asset(
             raise ValueError("来源复盘不存在")
         source_type = "review"
         source_id = source_review_id
+    elif source_id not in (None, ""):
+        source_tables = {
+            "review": "reviews",
+            "feedback": "feedback_items",
+            "experiment": "experiments",
+            "opportunity": "opportunities",
+        }
+        if source_type not in source_tables:
+            conn.close()
+            raise ValueError("无效的资产来源类型")
+        try:
+            source_id = int(source_id)
+        except (TypeError, ValueError):
+            conn.close()
+            raise ValueError("资产来源 id 无效")
+        if not conn.execute(
+            f"SELECT id FROM {source_tables[source_type]} WHERE id = ? AND user_id = ?",
+            (source_id, owner_id),
+        ).fetchone():
+            conn.close()
+            raise ValueError("资产来源对象不存在")
+        if source_type == "review":
+            source_review_id = source_id
+    elif source_type:
+        conn.close()
+        raise ValueError("资产来源缺少 source_id")
 
     now = _now()
     cur = conn.execute(
@@ -2756,13 +2833,15 @@ def create_asset(
     )
     conn.commit()
     asset_id = cur.lastrowid
-    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     conn.close()
     return _asset_row(row)
 
 
-def create_asset_from_feedback(feedback_id):
-    feedback = get_feedback_item(feedback_id)
+def create_asset_from_feedback(feedback_id, user_id):
+    feedback = get_feedback_item(feedback_id, user_id)
     if not feedback:
         raise ValueError("反馈不存在")
 
@@ -2802,21 +2881,30 @@ def create_asset_from_feedback(feedback_id):
         productization_next_step=productization_next_step,
         source_type="feedback",
         source_id=feedback["id"],
-        user_id=feedback["user_id"],
+        user_id=user_id,
     )
 
 
-def get_asset(asset_id):
+def get_asset(asset_id, user_id):
     conn = get_connection()
-    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        "SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     conn.close()
     return _asset_row(row)
 
 
-def list_assets(tag=None, asset_type=None):
+def list_assets(user_id, tag=None, asset_type=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
-        "SELECT * FROM assets ORDER BY updated_at DESC, created_at DESC"
+        """
+        SELECT * FROM assets
+        WHERE user_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     assets = [_asset_row(r) for r in rows]
@@ -2832,7 +2920,7 @@ def list_assets(tag=None, asset_type=None):
     return assets
 
 
-def update_asset(asset_id, **kwargs):
+def update_asset(asset_id, *, user_id, **kwargs):
     allowed_fields = {
         "title",
         "asset_type",
@@ -2854,7 +2942,10 @@ def update_asset(asset_id, **kwargs):
         raise ValueError("没有可更新的资产字段")
 
     conn = get_connection()
-    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        "SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     if not row:
         conn.close()
         raise ValueError("资产不存在")
@@ -2938,18 +3029,23 @@ def update_asset(asset_id, **kwargs):
 
     set_clause = ", ".join(f"{key} = ?" for key in updates)
     conn.execute(
-        f"UPDATE assets SET {set_clause} WHERE id = ?",
-        (*updates.values(), asset_id),
+        f"UPDATE assets SET {set_clause} WHERE id = ? AND user_id = ?",
+        (*updates.values(), asset_id, owner_id),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     conn.close()
     return _asset_row(row)
 
 
-def increment_asset_reuse(asset_id):
+def increment_asset_reuse(asset_id, user_id):
     conn = get_connection()
-    row = conn.execute("SELECT id FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    owner_id = _resolve_owner_id(conn, user_id)
+    row = conn.execute(
+        "SELECT id FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     if not row:
         conn.close()
         raise ValueError("资产不存在")
@@ -2957,18 +3053,20 @@ def increment_asset_reuse(asset_id):
         """
         UPDATE assets
         SET reuse_count = reuse_count + 1, updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
-        (_now(), asset_id),
+        (_now(), asset_id, owner_id),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM assets WHERE id = ? AND user_id = ?", (asset_id, owner_id)
+    ).fetchone()
     conn.close()
     return _asset_row(row)
 
 
 def create_capability_entry(
-    module, entry_date, content, source_project, level_type, user_id=None
+    module, entry_date, content, source_project, level_type, user_id
 ):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
@@ -2997,14 +3095,16 @@ def create_capability_entry(
     conn.commit()
     entry_id = cur.lastrowid
     row = conn.execute(
-        "SELECT * FROM capability_entries WHERE id = ?", (entry_id,)
+        "SELECT * FROM capability_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_capability_entries(module=None):
+def list_capability_entries(user_id, module=None):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     if module is not None:
         if module not in CAPABILITY_MODULES:
             conn.close()
@@ -3012,17 +3112,19 @@ def list_capability_entries(module=None):
         rows = conn.execute(
             """
             SELECT * FROM capability_entries
-            WHERE module = ?
+            WHERE user_id = ? AND module = ?
             ORDER BY entry_date DESC, created_at DESC
             """,
-            (module,),
+            (owner_id, module),
         ).fetchall()
     else:
         rows = conn.execute(
             """
             SELECT * FROM capability_entries
+            WHERE user_id = ?
             ORDER BY entry_date DESC, created_at DESC
-            """
+            """,
+            (owner_id,),
         ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
@@ -3051,13 +3153,13 @@ def _normalize_practice_step_order(conn, module, user_id):
             """
             UPDATE capability_practice_steps
             SET step_order = ?, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (index, now, row["id"]),
+            (index, now, row["id"], user_id),
         )
 
 
-def list_capability_practice_paths(user_id=None):
+def list_capability_practice_paths(user_id):
     conn = get_connection()
     owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
@@ -3077,7 +3179,7 @@ def list_capability_practice_paths(user_id=None):
     return paths
 
 
-def get_capability_practice_path(module, user_id=None):
+def get_capability_practice_path(module, user_id):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
     conn = get_connection()
@@ -3095,7 +3197,7 @@ def get_capability_practice_path(module, user_id=None):
 
 
 def create_capability_practice_step(
-    module, title, description="", detail="", step_order=None, user_id=None
+    module, title, description="", detail="", step_order=None, *, user_id
 ):
     if module not in CAPABILITY_MODULES:
         raise ValueError("无效的能力模块")
@@ -3145,15 +3247,14 @@ def create_capability_practice_step(
     _normalize_practice_step_order(conn, module, owner_id)
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM capability_practice_steps WHERE id = ?",
-        (cur.lastrowid,),
+        "SELECT * FROM capability_practice_steps WHERE id = ? AND user_id = ?",
+        (cur.lastrowid, owner_id),
     ).fetchone()
     conn.close()
     return _practice_step_row(row)
 
 
-def update_capability_practice_step(step_id, **kwargs):
-    user_id = kwargs.pop("user_id", None)
+def update_capability_practice_step(step_id, *, user_id, **kwargs):
     allowed = {"title", "description", "detail", "step_order"}
     updates = {key: value for key, value in kwargs.items() if key in allowed}
     if not updates:
@@ -3210,7 +3311,7 @@ def update_capability_practice_step(step_id, **kwargs):
         """
         UPDATE capability_practice_steps
         SET title = ?, description = ?, detail = ?, step_order = ?, updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
         (
             title,
@@ -3219,19 +3320,20 @@ def update_capability_practice_step(step_id, **kwargs):
             step_order,
             _now(),
             step_id,
+            owner_id,
         ),
     )
     _normalize_practice_step_order(conn, current["module"], owner_id)
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM capability_practice_steps WHERE id = ?",
-        (step_id,),
+        "SELECT * FROM capability_practice_steps WHERE id = ? AND user_id = ?",
+        (step_id, owner_id),
     ).fetchone()
     conn.close()
     return _practice_step_row(row)
 
 
-def delete_capability_practice_step(step_id, user_id=None):
+def delete_capability_practice_step(step_id, user_id):
     conn = get_connection()
     owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
@@ -3242,7 +3344,10 @@ def delete_capability_practice_step(step_id, user_id=None):
         conn.close()
         raise ValueError("训练步骤不存在")
     module = row["module"]
-    conn.execute("DELETE FROM capability_practice_steps WHERE id = ?", (step_id,))
+    conn.execute(
+        "DELETE FROM capability_practice_steps WHERE id = ? AND user_id = ?",
+        (step_id, owner_id),
+    )
     _normalize_practice_step_order(conn, module, owner_id)
     conn.commit()
     conn.close()
@@ -3322,10 +3427,10 @@ def _module_priority(module_summary):
     return (4, -asset_count, -reuse_total)
 
 
-def get_capability_summary():
-    assets = list_assets()
-    entries = list_capability_entries()
-    practice_paths = list_capability_practice_paths()
+def get_capability_summary(user_id):
+    assets = list_assets(user_id)
+    entries = list_capability_entries(user_id)
+    practice_paths = list_capability_practice_paths(user_id)
     entries_by_module = {module: [] for module in CAPABILITY_MODULES}
     for entry in entries:
         module = entry.get("module")
@@ -3502,15 +3607,29 @@ IMPORT_TABLES = (
     "projects",
     "tasks",
     "reviews",
+    "capability_entries",
+    "capability_practice_steps",
+    "opportunities",
+    "experiments",
+    "assets",
+    "feedback_items",
+    "deliberations",
+    "positioning_anchor",
+    "positioning_calibration",
+    "positioning_goal_action",
+    "inbox_entries",
+    "inbox_suggestions",
+)
+REQUIRED_IMPORT_TABLES = (
+    "goals",
+    "projects",
+    "tasks",
+    "reviews",
     "assets",
     "capability_entries",
     "opportunities",
     "experiments",
     "feedback_items",
-    "deliberations",
-)
-REQUIRED_IMPORT_TABLES = tuple(
-    table for table in IMPORT_TABLES if table != "deliberations"
 )
 LEGACY_IMPORT_TABLES = (
     "goals",
@@ -3522,7 +3641,7 @@ LEGACY_IMPORT_TABLES = (
 )
 
 _TABLE_FIELDS = {
-    "goals": ("id", "name", "type", "created_at"),
+    "goals": ("id", "name", "type", "created_at", "status"),
     "projects": (
         "id",
         "goal_id",
@@ -3579,6 +3698,16 @@ _TABLE_FIELDS = {
         "level_type",
         "created_at",
     ),
+    "capability_practice_steps": (
+        "id",
+        "module",
+        "step_order",
+        "title",
+        "description",
+        "detail",
+        "created_at",
+        "updated_at",
+    ),
     "opportunities": (
         "id",
         "name",
@@ -3633,21 +3762,152 @@ _TABLE_FIELDS = {
         "created_at",
         "updated_at",
     ),
+    "positioning_anchor": (
+        "id",
+        "first_principle",
+        "identity_core",
+        "flywheel_def",
+        "current_stage",
+        "north_star",
+        "updated_at",
+    ),
+    "positioning_calibration": (
+        "id",
+        "calibrated_at",
+        "cycle",
+        "primary_contradiction",
+        "doing_but_shouldnt",
+        "should_but_not_doing",
+        "alignment_review",
+        "conclusion",
+        "created_at",
+    ),
+    "positioning_goal_action": (
+        "id",
+        "calibration_id",
+        "action_type",
+        "target_goal_id",
+        "payload",
+        "reason",
+        "status",
+        "created_at",
+    ),
+    "inbox_entries": (
+        "id",
+        "raw_text",
+        "source_type",
+        "status",
+        "created_at",
+    ),
+    "inbox_suggestions": (
+        "id",
+        "inbox_entry_id",
+        "target_type",
+        "title",
+        "content",
+        "confidence",
+        "reason",
+        "suggested_payload",
+        "status",
+        "created_at",
+    ),
 }
 
 
-def _delete_entity(table, entity_id, entity_label):
+def _clear_soft_references(conn, table, entity_id, user_id):
+    """Clear same-owner polymorphic references before deleting their target."""
+    cleared = {}
+    related_type = {
+        "opportunities": "opportunity",
+        "experiments": "experiment",
+        "projects": "project",
+        "assets": "asset",
+        "reviews": "review",
+    }.get(table)
+    if related_type:
+        cursor = conn.execute(
+            """
+            UPDATE feedback_items
+            SET related_type = '', related_id = NULL, updated_at = ?
+            WHERE user_id = ? AND related_type = ? AND related_id = ?
+            """,
+            (_now(), user_id, related_type, entity_id),
+        )
+        cleared["feedback_items"] = cursor.rowcount
+
+    if table in ("projects", "opportunities"):
+        deliberation_type = "project" if table == "projects" else "opportunity"
+        cursor = conn.execute(
+            """
+            UPDATE deliberations
+            SET related_type = '', related_id = NULL, updated_at = ?
+            WHERE user_id = ? AND related_type = ? AND related_id = ?
+            """,
+            (_now(), user_id, deliberation_type, entity_id),
+        )
+        cleared["deliberations"] = cursor.rowcount
+
+    source_type = {
+        "reviews": "review",
+        "feedback_items": "feedback",
+        "experiments": "experiment",
+        "opportunities": "opportunity",
+    }.get(table)
+    if source_type:
+        if table == "reviews":
+            cursor = conn.execute(
+                """
+                UPDATE assets
+                SET source_review_id = NULL, source_type = '', source_id = NULL,
+                    updated_at = ?
+                WHERE user_id = ? AND (
+                    source_review_id = ? OR (source_type = 'review' AND source_id = ?)
+                )
+                """,
+                (_now(), user_id, entity_id, entity_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE assets
+                SET source_type = '', source_id = NULL, updated_at = ?
+                WHERE user_id = ? AND source_type = ? AND source_id = ?
+                """,
+                (_now(), user_id, source_type, entity_id),
+            )
+        cleared["assets"] = cursor.rowcount
+
+    if table == "goals":
+        cursor = conn.execute(
+            """
+            UPDATE positioning_goal_action
+            SET target_goal_id = NULL
+            WHERE user_id = ? AND target_goal_id = ?
+            """,
+            (user_id, entity_id),
+        )
+        cleared["positioning_goal_action"] = cursor.rowcount
+    return {key: value for key, value in cleared.items() if value}
+
+
+def _delete_entity(table, entity_id, entity_label, user_id):
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         existing = conn.execute(
-            f"SELECT id FROM {table} WHERE id = ?", (entity_id,)
+            f"SELECT id FROM {table} WHERE id = ? AND user_id = ?",
+            (entity_id, owner_id),
         ).fetchone()
         if not existing:
             raise ValueError(f"{entity_label}不存在")
 
-        conn.execute(f"DELETE FROM {table} WHERE id = ?", (entity_id,))
+        cleared = _clear_soft_references(conn, table, entity_id, owner_id)
+        conn.execute(
+            f"DELETE FROM {table} WHERE id = ? AND user_id = ?",
+            (entity_id, owner_id),
+        )
         conn.commit()
-        return {"id": entity_id, "deleted": True}
+        return {"id": entity_id, "deleted": True, "cleared": cleared}
     except sqlite3.IntegrityError as exc:
         conn.rollback()
         raise DeleteError(
@@ -3657,34 +3917,48 @@ def _delete_entity(table, entity_id, entity_label):
         conn.close()
 
 
-def delete_goal(goal_id):
+def delete_goal(goal_id, user_id):
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         existing = conn.execute(
-            "SELECT id FROM goals WHERE id = ?", (goal_id,)
+            "SELECT id FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
         ).fetchone()
         if not existing:
             raise ValueError("目标不存在")
 
-        project_count = conn.execute(
-            "SELECT COUNT(*) FROM projects WHERE goal_id = ?", (goal_id,)
-        ).fetchone()[0]
+        project_rows = conn.execute(
+            "SELECT id FROM projects WHERE goal_id = ? AND user_id = ?",
+            (goal_id, owner_id),
+        ).fetchall()
+        project_count = len(project_rows)
         task_count = conn.execute(
             """
             SELECT COUNT(*) FROM tasks
             WHERE project_id IN (
-                SELECT id FROM projects WHERE goal_id = ?
+                SELECT id FROM projects WHERE goal_id = ? AND user_id = ?
             )
+            AND user_id = ?
             """,
-            (goal_id,),
+            (goal_id, owner_id, owner_id),
         ).fetchone()[0]
 
-        conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+        cleared = _clear_soft_references(conn, "goals", goal_id, owner_id)
+        for project in project_rows:
+            child_cleared = _clear_soft_references(
+                conn, "projects", project["id"], owner_id
+            )
+            for table, count in child_cleared.items():
+                cleared[table] = cleared.get(table, 0) + count
+        conn.execute(
+            "DELETE FROM goals WHERE id = ? AND user_id = ?", (goal_id, owner_id)
+        )
         conn.commit()
         return {
             "id": goal_id,
             "deleted": True,
             "cascaded": {"projects": project_count, "tasks": task_count},
+            "cleared": cleared,
         }
     except sqlite3.IntegrityError as exc:
         conn.rollback()
@@ -3695,25 +3969,33 @@ def delete_goal(goal_id):
         conn.close()
 
 
-def delete_project(project_id):
+def delete_project(project_id, user_id):
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         existing = conn.execute(
-            "SELECT id FROM projects WHERE id = ?", (project_id,)
+            "SELECT id FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, owner_id),
         ).fetchone()
         if not existing:
             raise ValueError("项目不存在")
 
         task_count = conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE project_id = ?", (project_id,)
+            "SELECT COUNT(*) FROM tasks WHERE project_id = ? AND user_id = ?",
+            (project_id, owner_id),
         ).fetchone()[0]
 
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        cleared = _clear_soft_references(conn, "projects", project_id, owner_id)
+        conn.execute(
+            "DELETE FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, owner_id),
+        )
         conn.commit()
         return {
             "id": project_id,
             "deleted": True,
             "cascaded": {"tasks": task_count},
+            "cleared": cleared,
         }
     except sqlite3.IntegrityError as exc:
         conn.rollback()
@@ -3724,30 +4006,40 @@ def delete_project(project_id):
         conn.close()
 
 
-def delete_task(task_id):
-    return _delete_entity("tasks", task_id, "任务")
+def delete_task(task_id, user_id):
+    return _delete_entity("tasks", task_id, "任务", user_id)
 
 
-def delete_review(review_id):
+def delete_review(review_id, user_id):
     conn = get_connection()
     try:
+        owner_id = _resolve_owner_id(conn, user_id)
         existing = conn.execute(
-            "SELECT id FROM reviews WHERE id = ?", (review_id,)
+            "SELECT id FROM reviews WHERE id = ? AND user_id = ?",
+            (review_id, owner_id),
         ).fetchone()
         if not existing:
             raise ValueError("复盘不存在")
 
         asset_count = conn.execute(
-            "SELECT COUNT(*) FROM assets WHERE source_review_id = ?",
-            (review_id,),
+            """
+            SELECT COUNT(*) FROM assets
+            WHERE source_review_id = ? AND user_id = ?
+            """,
+            (review_id, owner_id),
         ).fetchone()[0]
 
-        conn.execute("DELETE FROM reviews WHERE id = ?", (review_id,))
+        cleared = _clear_soft_references(conn, "reviews", review_id, owner_id)
+        conn.execute(
+            "DELETE FROM reviews WHERE id = ? AND user_id = ?",
+            (review_id, owner_id),
+        )
         conn.commit()
         return {
             "id": review_id,
             "deleted": True,
             "cleared_asset_links": asset_count,
+            "cleared": cleared,
         }
     except sqlite3.IntegrityError as exc:
         conn.rollback()
@@ -3758,12 +4050,12 @@ def delete_review(review_id):
         conn.close()
 
 
-def delete_asset(asset_id):
-    return _delete_entity("assets", asset_id, "资产")
+def delete_asset(asset_id, user_id):
+    return _delete_entity("assets", asset_id, "资产", user_id)
 
 
-def delete_capability_entry(entry_id):
-    return _delete_entity("capability_entries", entry_id, "能力记录")
+def delete_capability_entry(entry_id, user_id):
+    return _delete_entity("capability_entries", entry_id, "能力记录", user_id)
 
 
 _OPTIONAL_IMPORT_FIELDS = {
@@ -3781,11 +4073,41 @@ _OPTIONAL_IMPORT_FIELDS = {
     "opportunity_id",
     "related_type",
     "related_id",
+    "target_goal_id",
+    "description",
+    "detail",
+    "payload",
+    "suggested_payload",
+    "confidence",
+    "reason",
     *PROJECT_AUDIT_FIELDS,
     *ASSET_VALUE_FIELDS,
     *OPPORTUNITY_TEXT_FIELDS,
     *EXPERIMENT_TEXT_FIELDS,
 }
+
+
+def _parse_import_json_object(value, label):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{label} 格式无效") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} 格式无效")
+    return value
+
+
+def _strip_import_user_ids(value):
+    if isinstance(value, dict):
+        return {
+            key: _strip_import_user_ids(item)
+            for key, item in value.items()
+            if key != "user_id"
+        }
+    if isinstance(value, list):
+        return [_strip_import_user_ids(item) for item in value]
+    return value
 
 
 def _normalize_import_record(table, raw):
@@ -3801,10 +4123,15 @@ def _normalize_import_record(table, raw):
                 record[key] = "medium"
             elif key in VALUE_SCORE_FIELDS or key == "total_score":
                 record[key] = 0
-            elif key == "status" and table == "opportunities":
-                record[key] = "待审计"
-            elif key == "status" and table == "experiments":
-                record[key] = "设计中"
+            elif key == "status":
+                record[key] = {
+                    "goals": "active",
+                    "opportunities": "待审计",
+                    "experiments": "设计中",
+                    "positioning_goal_action": "pending",
+                    "inbox_entries": "draft",
+                    "inbox_suggestions": "pending",
+                }.get(table, "")
             elif key == "experiment_type":
                 record[key] = "结果型MVP"
             elif key == "source" and table == "feedback_items":
@@ -3814,15 +4141,39 @@ def _normalize_import_record(table, raw):
             elif key == "asset_level":
                 record[key] = "资料"
             elif key == "source_type":
-                record[key] = ""
-            elif key == "source_id":
+                record[key] = "manual" if table == "inbox_entries" else ""
+            elif key in {"source_id", "target_goal_id"}:
                 record[key] = None
+            elif key in {"payload", "suggested_payload"}:
+                record[key] = {}
+            elif key == "confidence":
+                record[key] = 0.0
+            elif key == "cycle" and table == "positioning_calibration":
+                record[key] = "触发式"
             elif (
                 key in PROJECT_AUDIT_FIELDS
                 or key in ASSET_VALUE_FIELDS
                 or key in OPPORTUNITY_TEXT_FIELDS
                 or key in EXPERIMENT_TEXT_FIELDS
-                or key in {"related_type", "content", "evidence", "next_action"}
+                or key in {
+                    "related_type",
+                    "content",
+                    "evidence",
+                    "next_action",
+                    "description",
+                    "detail",
+                    "reason",
+                    "first_principle",
+                    "identity_core",
+                    "flywheel_def",
+                    "current_stage",
+                    "north_star",
+                    "primary_contradiction",
+                    "doing_but_shouldnt",
+                    "should_but_not_doing",
+                    "alignment_review",
+                    "conclusion",
+                }
             ):
                 record[key] = ""
             elif key in _OPTIONAL_IMPORT_FIELDS:
@@ -3831,6 +4182,9 @@ def _normalize_import_record(table, raw):
                 raise ValueError(f"缺少字段 {key}")
         else:
             record[key] = raw[key]
+
+    if "updated_at" in record and not record.get("updated_at"):
+        record["updated_at"] = record.get("created_at") or _now()
 
     if table == "assets":
         tags = record["capability_tags"]
@@ -3900,6 +4254,17 @@ def _normalize_import_record(table, raw):
             raise ValueError("无效的能力模块")
         if record["level_type"] not in LEVEL_TYPES:
             raise ValueError("无效的层级判断")
+    if table == "capability_practice_steps":
+        if record["module"] not in CAPABILITY_MODULES:
+            raise ValueError("无效的能力模块")
+        try:
+            record["step_order"] = int(record["step_order"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("训练步骤排序必须是正整数") from exc
+        if record["step_order"] <= 0:
+            raise ValueError("训练步骤排序必须是正整数")
+        if not _as_text(record.get("title")):
+            raise ValueError("训练步骤名称不能为空")
     if table == "opportunities":
         if record["status"] not in OPPORTUNITY_STATUSES:
             record["status"] = "待审计"
@@ -3932,6 +4297,47 @@ def _normalize_import_record(table, raw):
         if not isinstance(raw_analysis, dict):
             raise ValueError("AI 分析结果格式无效")
         record["ai_analysis"] = json.dumps(raw_analysis, ensure_ascii=False)
+    if table == "positioning_calibration":
+        if record["cycle"] not in POSITIONING_CYCLES:
+            raise ValueError("无效的校准周期")
+        if not _as_text(record.get("calibrated_at")):
+            raise ValueError("校准日期不能为空")
+    if table == "positioning_goal_action":
+        if record["action_type"] not in POSITIONING_ACTION_TYPES:
+            raise ValueError("无效的目标变更类型")
+        if record["status"] not in POSITIONING_ACTION_STATUSES:
+            raise ValueError("无效的目标变更状态")
+        action_payload = _strip_import_user_ids(
+            _parse_import_json_object(record.get("payload"), "目标变更 payload")
+        )
+        record["payload"] = json.dumps(action_payload, ensure_ascii=False)
+        if not _as_text(record.get("reason")):
+            raise ValueError("变更理由不能为空")
+    if table == "inbox_entries":
+        if not _as_text(record.get("raw_text")):
+            raise ValueError("Inbox 内容不能为空")
+        if record.get("source_type") != "manual":
+            raise ValueError("无效的 Inbox source_type")
+        if record.get("status") not in INBOX_ENTRY_STATUSES:
+            raise ValueError("无效的 Inbox 状态")
+    if table == "inbox_suggestions":
+        if record.get("target_type") not in INBOX_TARGET_TYPES:
+            raise ValueError("无效的 Inbox 建议类型")
+        if record.get("status") not in INBOX_SUGGESTION_STATUSES:
+            raise ValueError("无效的 Inbox 建议状态")
+        try:
+            confidence = float(record.get("confidence") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Inbox 建议 confidence 无效") from exc
+        record["confidence"] = max(0.0, min(1.0, confidence))
+        suggestion_payload = _strip_import_user_ids(
+            _parse_import_json_object(
+                record.get("suggested_payload"), "Inbox suggested_payload"
+            )
+        )
+        record["suggested_payload"] = json.dumps(
+            suggestion_payload, ensure_ascii=False
+        )
 
     return record
 
@@ -3944,75 +4350,361 @@ def _records_equal(table, existing_row, incoming):
         if key == "capability_tags" and table == "assets":
             existing_val = _parse_tags(existing_val)
             incoming_val = _parse_tags(incoming_val)
+        elif (table, key) in {
+            ("assets", "fields"),
+            ("deliberations", "ai_analysis"),
+            ("positioning_goal_action", "payload"),
+            ("inbox_suggestions", "suggested_payload"),
+        }:
+            try:
+                existing_val = json.loads(existing_val or "{}")
+            except (TypeError, json.JSONDecodeError):
+                existing_val = {}
+            try:
+                incoming_val = json.loads(incoming_val or "{}")
+            except (TypeError, json.JSONDecodeError):
+                incoming_val = {}
         if existing_val != incoming_val:
             return False
     return True
 
 
-def _validate_import_foreign_keys(table, record, conn, pending):
+_IMPORT_ASSET_SOURCE_TABLES = {
+    "review": "reviews",
+    "feedback": "feedback_items",
+    "experiment": "experiments",
+    "opportunity": "opportunities",
+}
+_IMPORT_FEEDBACK_TARGET_TABLES = {
+    "opportunity": "opportunities",
+    "experiment": "experiments",
+    "project": "projects",
+    "asset": "assets",
+    "review": "reviews",
+}
+
+
+def _coerce_import_id(value, label="id"):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{label} 必须是正整数")
+    return value
+
+
+def _map_import_reference(
+    conn, id_maps, table, value, user_id, label, *, required=False
+):
+    if value in (None, ""):
+        if required:
+            raise ValueError(f"{label} 不能为空")
+        return None, None
+    if isinstance(value, bool):
+        raise ValueError(f"{label} 必须是正整数")
+    try:
+        source_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} 必须是正整数") from exc
+    if source_id <= 0:
+        raise ValueError(f"{label} 必须是正整数")
+
+    if source_id in id_maps[table]:
+        destination_id = id_maps[table][source_id]
+        return destination_id, (table, destination_id)
+    owned = conn.execute(
+        f'SELECT id FROM "{table}" WHERE id = ? AND user_id = ?',
+        (source_id, user_id),
+    ).fetchone()
+    if owned:
+        return source_id, (table, source_id)
+    raise ValueError(f"{label} 不存在")
+
+
+def _map_suggestion_payload_references(
+    conn, record, id_maps, user_id, dependencies
+):
+    payload = _strip_import_user_ids(
+        _parse_import_json_object(
+            record.get("suggested_payload"), "Inbox suggested_payload"
+        )
+    )
+    payload.pop("target_id", None)
+    target_type = record.get("target_type")
+
+    def map_field(field, table, label):
+        if payload.get(field) in (None, ""):
+            return
+        mapped, dependency = _map_import_reference(
+            conn, id_maps, table, payload[field], user_id, label
+        )
+        payload[field] = mapped
+        if dependency:
+            dependencies.add(dependency)
+
+    if target_type == "project":
+        map_field("goal_id", "goals", "Inbox 建议关联目标")
+    elif target_type == "task":
+        map_field("project_id", "projects", "Inbox 建议关联项目")
+    elif target_type == "asset":
+        map_field("source_review_id", "reviews", "Inbox 建议来源复盘")
+        source_id = payload.get("source_id")
+        source_type = _as_text(payload.get("source_type"))
+        if source_id not in (None, ""):
+            if source_type not in _IMPORT_ASSET_SOURCE_TABLES:
+                raise ValueError("Inbox 建议资产来源类型无效")
+            map_field(
+                "source_id",
+                _IMPORT_ASSET_SOURCE_TABLES[source_type],
+                "Inbox 建议资产来源对象",
+            )
+    elif target_type == "experiment":
+        map_field("opportunity_id", "opportunities", "Inbox 建议关联机会")
+    elif target_type == "feedback":
+        related_type = _as_text(payload.get("related_type"))
+        related_id = payload.get("related_id")
+        if not related_type and related_id not in (None, ""):
+            raise ValueError("Inbox 建议缺少反馈关联类型")
+        if related_type and related_id not in (None, ""):
+            if related_type not in _IMPORT_FEEDBACK_TARGET_TABLES:
+                raise ValueError("Inbox 建议反馈关联类型无效")
+            map_field(
+                "related_id",
+                _IMPORT_FEEDBACK_TARGET_TABLES[related_type],
+                "Inbox 建议反馈关联对象",
+            )
+
+    record["suggested_payload"] = json.dumps(payload, ensure_ascii=False)
+
+
+def _rewrite_import_relationships(conn, table, incoming, id_maps, user_id):
+    record = dict(incoming)
+    dependencies = set()
+
+    def map_value(field, parent_table, label, *, required=False):
+        mapped, dependency = _map_import_reference(
+            conn,
+            id_maps,
+            parent_table,
+            record.get(field),
+            user_id,
+            label,
+            required=required,
+        )
+        record[field] = mapped
+        if dependency:
+            dependencies.add(dependency)
+
     if table == "projects":
-        goal_id = record["goal_id"]
-        if goal_id not in pending["goals"] and not conn.execute(
-            "SELECT id FROM goals WHERE id = ?", (goal_id,)
-        ).fetchone():
-            raise ValueError(f"目标 id={goal_id} 不存在")
+        map_value("goal_id", "goals", "关联目标", required=True)
     elif table == "tasks":
-        project_id = record["project_id"]
-        if project_id not in pending["projects"] and not conn.execute(
-            "SELECT id FROM projects WHERE id = ?", (project_id,)
-        ).fetchone():
-            raise ValueError(f"项目 id={project_id} 不存在")
-    elif table == "assets":
-        review_id = record.get("source_review_id")
-        if review_id is not None and review_id not in pending["reviews"]:
-            if not conn.execute(
-                "SELECT id FROM reviews WHERE id = ?", (review_id,)
-            ).fetchone():
-                raise ValueError(f"复盘 id={review_id} 不存在")
+        map_value("project_id", "projects", "关联项目", required=True)
     elif table == "experiments":
-        opportunity_id = record.get("opportunity_id")
-        if opportunity_id is not None and opportunity_id not in pending["opportunities"]:
-            if not conn.execute(
-                "SELECT id FROM opportunities WHERE id = ?", (opportunity_id,)
-            ).fetchone():
-                raise ValueError(f"机会 id={opportunity_id} 不存在")
-    elif table == "deliberations":
-        related_type = record.get("related_type")
+        map_value("opportunity_id", "opportunities", "关联机会")
+    elif table == "assets":
+        map_value("source_review_id", "reviews", "来源复盘")
+        source_type = _as_text(record.get("source_type"))
+        source_id = record.get("source_id")
+        if source_id not in (None, ""):
+            if source_type not in _IMPORT_ASSET_SOURCE_TABLES:
+                raise ValueError("无效的资产来源类型")
+            mapped, dependency = _map_import_reference(
+                conn,
+                id_maps,
+                _IMPORT_ASSET_SOURCE_TABLES[source_type],
+                source_id,
+                user_id,
+                "资产来源对象",
+            )
+            record["source_id"] = mapped
+            dependencies.add(dependency)
+            if source_type == "review":
+                if record.get("source_review_id") not in (None, mapped):
+                    raise ValueError("资产来源复盘不一致")
+                record["source_review_id"] = mapped
+        elif source_type:
+            raise ValueError("资产来源缺少 source_id")
+    elif table == "feedback_items":
+        related_type = _as_text(record.get("related_type"))
         related_id = record.get("related_id")
         if not related_type:
-            if related_id is not None:
-                raise ValueError("未设置关联类型时 related_id 必须为空")
-            return
-        target_table = (
-            "projects" if related_type == "project" else "opportunities"
+            if related_id not in (None, ""):
+                raise ValueError("未设置反馈关联类型时 related_id 必须为空")
+            record["related_id"] = None
+        elif related_id not in (None, ""):
+            map_value(
+                "related_id",
+                _IMPORT_FEEDBACK_TARGET_TABLES[related_type],
+                "反馈关联对象",
+            )
+    elif table == "deliberations":
+        related_type = _as_text(record.get("related_type"))
+        related_id = record.get("related_id")
+        if not related_type:
+            if related_id not in (None, ""):
+                raise ValueError("未设置推演关联类型时 related_id 必须为空")
+            record["related_id"] = None
+        else:
+            parent_table = (
+                "projects" if related_type == "project" else "opportunities"
+            )
+            map_value("related_id", parent_table, "推演关联对象", required=True)
+    elif table == "positioning_goal_action":
+        map_value(
+            "calibration_id",
+            "positioning_calibration",
+            "定位校准记录",
+            required=True,
         )
-        if related_id not in pending[target_table] and not conn.execute(
-            f"SELECT id FROM {target_table} WHERE id = ?",
-            (related_id,),
-        ).fetchone():
-            label = "项目" if related_type == "project" else "机会"
-            raise ValueError(f"{label} id={related_id} 不存在")
+        action_type = record.get("action_type")
+        if action_type == "新建目标":
+            if record.get("target_goal_id") not in (None, ""):
+                raise ValueError("新建目标不应指定 target_goal_id")
+            record["target_goal_id"] = None
+        else:
+            map_value(
+                "target_goal_id",
+                "goals",
+                "定位目标",
+                required=True,
+            )
+    elif table == "inbox_suggestions":
+        map_value(
+            "inbox_entry_id",
+            "inbox_entries",
+            "Inbox 记录",
+            required=True,
+        )
+        _map_suggestion_payload_references(
+            conn, record, id_maps, user_id, dependencies
+        )
+
+    return record, dependencies
 
 
-def _resolve_import_action(conn, table, raw, pending=None):
-    record = _normalize_import_record(table, raw)
-    row_id = record["id"]
-    if not isinstance(row_id, int):
-        raise ValueError("id 必须是整数")
+def _build_import_plan(conn, payload, user_id):
+    owner_id = _resolve_owner_id(conn, user_id)
+    occupied = {}
+    owned = {}
+    next_ids = {}
+    for table in IMPORT_TABLES:
+        occupied[table] = {
+            row["id"]
+            for row in conn.execute(f'SELECT id FROM "{table}"').fetchall()
+        }
+        owned[table] = {
+            row["id"]
+            for row in conn.execute(
+                f'SELECT id FROM "{table}" WHERE user_id = ?', (owner_id,)
+            ).fetchall()
+        }
+        next_ids[table] = max(occupied[table], default=0) + 1
 
-    existing = conn.execute(
-        f"SELECT * FROM {table} WHERE id = ?", (row_id,)
-    ).fetchone()
+    id_maps = {table: {} for table in IMPORT_TABLES}
+    source_ids = {table: set() for table in IMPORT_TABLES}
+    destination_ids = {table: set() for table in IMPORT_TABLES}
+    normalized_items = []
+    errors = []
 
-    if existing:
-        if _records_equal(table, existing, record):
-            return "skip", record
-        return "update", record
+    def add_error(label, message):
+        errors.append((label, message or "记录无效"))
 
-    if pending is not None:
-        _validate_import_foreign_keys(table, record, conn, pending)
-        pending[table].add(row_id)
-    return "insert", record
+    for table in IMPORT_TABLES:
+        existing_anchor_id = None
+        if table == "positioning_anchor" and owned[table]:
+            existing_anchor_id = next(iter(owned[table]))
+        for index, raw in enumerate(payload.get(table, [])):
+            label = f"{table}[{index}]"
+            try:
+                record = _normalize_import_record(table, raw)
+                source_id = _coerce_import_id(record.get("id"))
+                if source_id in source_ids[table]:
+                    raise ValueError(f"重复 id={source_id}")
+                source_ids[table].add(source_id)
+
+                if existing_anchor_id is not None:
+                    destination_id = existing_anchor_id
+                elif source_id in owned[table]:
+                    destination_id = source_id
+                elif source_id not in occupied[table]:
+                    destination_id = source_id
+                else:
+                    destination_id = next_ids[table]
+                    while destination_id in occupied[table]:
+                        destination_id += 1
+                    next_ids[table] = destination_id + 1
+
+                if destination_id in destination_ids[table]:
+                    raise ValueError("多条记录映射到同一目标 id")
+                destination_ids[table].add(destination_id)
+                occupied[table].add(destination_id)
+                id_maps[table][source_id] = destination_id
+                record["id"] = destination_id
+                normalized_items.append({
+                    "table": table,
+                    "index": index,
+                    "label": label,
+                    "source_id": source_id,
+                    "destination_id": destination_id,
+                    "record": record,
+                })
+            except (ValueError, TypeError) as exc:
+                add_error(label, str(exc))
+
+    preliminary = []
+    for item in normalized_items:
+        try:
+            record, dependencies = _rewrite_import_relationships(
+                conn, item["table"], item["record"], id_maps, owner_id
+            )
+            preliminary.append({**item, "record": record, "dependencies": dependencies})
+        except (ValueError, TypeError) as exc:
+            add_error(item["label"], str(exc))
+
+    valid = list(preliminary)
+    while True:
+        planned = {table: set() for table in IMPORT_TABLES}
+        for item in valid:
+            planned[item["table"]].add(item["destination_id"])
+        kept = []
+        removed = []
+        for item in valid:
+            missing = [
+                (table, entity_id)
+                for table, entity_id in item["dependencies"]
+                if entity_id not in owned[table] and entity_id not in planned[table]
+            ]
+            if missing:
+                removed.append(item)
+            else:
+                kept.append(item)
+        if not removed:
+            break
+        for item in removed:
+            add_error(item["label"], "关联对象未能通过导入校验")
+        valid = kept
+
+    plan = []
+    for item in valid:
+        table = item["table"]
+        destination_id = item["destination_id"]
+        existing = conn.execute(
+            f'SELECT * FROM "{table}" WHERE id = ? AND user_id = ?',
+            (destination_id, owner_id),
+        ).fetchone()
+        if existing and _records_equal(table, existing, item["record"]):
+            action = "skip"
+        elif existing:
+            action = "update"
+        else:
+            action = "insert"
+        plan.append({**item, "action": action})
+
+    return {
+        "owner_id": owner_id,
+        "rows": plan,
+        "errors": errors,
+        "remapped": sum(
+            item["source_id"] != item["destination_id"] for item in plan
+        ),
+    }
 
 
 def _new_import_stats():
@@ -4023,6 +4715,7 @@ def _new_import_stats():
         "failed": 0,
         "errors": [],
         "imported": 0,
+        "remapped": 0,
     }
 
 
@@ -4048,37 +4741,38 @@ def _import_failure_stats(stats=None, errors=None):
         "failed": failed,
         "errors": err_list,
         "imported": 0,
+        "remapped": 0,
         "rolled_back": True,
         "message": IMPORT_ROLLBACK_MESSAGE,
     }
 
 
-def _import_row(conn, table, raw, stats, user_id):
-    action, record = _resolve_import_action(conn, table, raw)
-    row_id = record["id"]
-
+def _apply_import_plan_row(conn, item, user_id):
+    action = item["action"]
     if action == "skip":
-        stats["skipped"] += 1
-        return
-    if action == "update":
-        fields = _TABLE_FIELDS[table]
-        set_clause = ", ".join(f"{f} = ?" for f in fields if f != "id")
-        values = [record[f] for f in fields if f != "id"]
-        conn.execute(
-            f"UPDATE {table} SET {set_clause} WHERE id = ?",
-            (*values, row_id),
-        )
-        stats["updated"] += 1
         return
 
+    table = item["table"]
+    record = item["record"]
+    row_id = item["destination_id"]
     fields = _TABLE_FIELDS[table]
-    columns = ", ".join(("user_id", *fields))
+    if action == "update":
+        update_fields = [field for field in fields if field != "id"]
+        set_clause = ", ".join(f'"{field}" = ?' for field in update_fields)
+        cursor = conn.execute(
+            f'UPDATE "{table}" SET {set_clause} WHERE id = ? AND user_id = ?',
+            (*(record[field] for field in update_fields), row_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("导入目标不存在")
+        return
+
+    columns = ", ".join(f'"{field}"' for field in ("user_id", *fields))
     placeholders = ", ".join("?" for _ in range(len(fields) + 1))
     conn.execute(
-        f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
-        (user_id, *(record[f] for f in fields)),
+        f'INSERT INTO "{table}" ({columns}) VALUES ({placeholders})',
+        (user_id, *(record[field] for field in fields)),
     )
-    stats["created"] += 1
 
 
 def _validate_import_payload(payload):
@@ -4126,43 +4820,28 @@ def _refresh_sqlite_sequences(conn):
             )
 
 
-def preview_import_data(payload):
+def preview_import_data(payload, user_id):
     _validate_import_payload(payload)
-
-    stats = {
-        "will_import": 0,
-        "will_update": 0,
-        "will_skip": 0,
-        "will_fail": 0,
-        "errors": [],
-    }
-    pending = {table: set() for table in IMPORT_TABLES}
     conn = get_connection()
     try:
-        for table in IMPORT_TABLES:
-            for index, raw in enumerate(payload.get(table, [])):
-                label = f"{table}[{index}]"
-                try:
-                    action, _record = _resolve_import_action(
-                        conn, table, raw, pending
-                    )
-                    if action == "skip":
-                        stats["will_skip"] += 1
-                    elif action == "insert":
-                        stats["will_import"] += 1
-                    elif action == "update":
-                        stats["will_update"] += 1
-                except (ValueError, TypeError) as exc:
-                    stats["will_fail"] += 1
-                    message = str(exc) or "记录无效"
-                    if len(stats["errors"]) < 20:
-                        stats["errors"].append(f"{label}: {message}")
-        return stats
+        plan = _build_import_plan(conn, payload, user_id)
+        actions = Counter(item["action"] for item in plan["rows"])
+        return {
+            "will_import": actions["insert"],
+            "will_update": actions["update"],
+            "will_skip": actions["skip"],
+            "will_fail": len(plan["errors"]),
+            "errors": [
+                f"{label}: {message}"
+                for label, message in plan["errors"][:20]
+            ],
+            "remapped": plan["remapped"],
+        }
     finally:
         conn.close()
 
 
-def import_all_data(payload):
+def import_all_data(payload, user_id):
     try:
         _validate_import_payload(payload)
     except DataImportError as exc:
@@ -4174,20 +4853,15 @@ def import_all_data(payload):
     stats = _new_import_stats()
     conn = get_connection()
     try:
-        conn.execute("BEGIN")
-        owner_id = _resolve_owner_id(conn)
-        for table in IMPORT_TABLES:
-            for index, raw in enumerate(payload.get(table, [])):
-                label = f"{table}[{index}]"
-                try:
-                    _import_row(conn, table, raw, stats, owner_id)
-                except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
-                    stats["failed"] += 1
-                    message = str(exc) or "记录无效"
-                    if len(stats["errors"]) < 20:
-                        stats["errors"].append(f"{label}: {message}")
-
-        if stats["failed"] > 0:
+        conn.execute("BEGIN IMMEDIATE")
+        plan = _build_import_plan(conn, payload, user_id)
+        owner_id = plan["owner_id"]
+        if plan["errors"]:
+            stats["failed"] = len(plan["errors"])
+            stats["errors"] = [
+                f"{label}: {message}"
+                for label, message in plan["errors"][:20]
+            ]
             conn.rollback()
             failure = _import_failure_stats(stats)
             summary = (
@@ -4196,6 +4870,34 @@ def import_all_data(payload):
             )
             raise DataImportError(summary, failure)
 
+        stats["remapped"] = plan["remapped"]
+        for item in plan["rows"]:
+            try:
+                _apply_import_plan_row(conn, item, owner_id)
+                stats[
+                    {"insert": "created", "update": "updated", "skip": "skipped"}[
+                        item["action"]
+                    ]
+                ] += 1
+            except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
+                stats["failed"] += 1
+                if len(stats["errors"]) < 20:
+                    stats["errors"].append(
+                        f"{item['label']}: {str(exc) or '记录无效'}"
+                    )
+                break
+
+        if stats["failed"]:
+            conn.rollback()
+            failure = _import_failure_stats(stats)
+            raise DataImportError(
+                f"导入失败：{failure['failed']} 条记录有误，已回滚，原有数据未改动",
+                failure,
+            )
+
+        _normalize_mainline_goals(conn, owner_id)
+        for module in CAPABILITY_MODULES:
+            _normalize_practice_step_order(conn, module, owner_id)
         _refresh_sqlite_sequences(conn)
         conn.commit()
         return _finalize_import_stats(stats)
@@ -4215,37 +4917,55 @@ def backup_filename():
     return datetime.now().strftime("backup_%Y%m%d_%H%M%S.json")
 
 
-def export_all_data():
-    try:
-        def legacy_rows(table, rows):
-            fields = _TABLE_FIELDS[table]
-            return [{field: row.get(field) for field in fields} for row in rows]
+def _export_business_row(table, row):
+    data = {field: row[field] for field in _TABLE_FIELDS[table]}
+    if table == "assets":
+        data["capability_tags"] = _parse_tags(data.get("capability_tags"))
+        data["fields"] = asset_schemas.parse_fields(data.get("fields"))
+    elif table == "deliberations":
+        try:
+            data["ai_analysis"] = json.loads(data.get("ai_analysis") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            data["ai_analysis"] = {}
+    elif table == "positioning_goal_action":
+        data["payload"] = _strip_import_user_ids(
+            _parse_positioning_payload(data.get("payload"))
+        )
+    elif table == "inbox_suggestions":
+        data["suggested_payload"] = _strip_import_user_ids(
+            _parse_suggested_payload(data.get("suggested_payload"))
+        )
+    return data
 
-        return {
+
+def export_all_data(user_id):
+    conn = get_connection()
+    try:
+        owner_id = _resolve_owner_id(conn, user_id)
+        payload = {
             "meta": {
                 "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "version": "2.0",
                 "tables": list(IMPORT_TABLES),
             },
-            "goals": legacy_rows("goals", list_goals()),
-            "projects": legacy_rows("projects", list_projects()),
-            "tasks": legacy_rows("tasks", list_tasks()),
-            "reviews": legacy_rows("reviews", list_reviews()),
-            "assets": legacy_rows("assets", list_assets()),
-            "capability_entries": legacy_rows(
-                "capability_entries", list_capability_entries()
-            ),
-            "opportunities": legacy_rows("opportunities", list_opportunities()),
-            "experiments": legacy_rows("experiments", list_experiments()),
-            "feedback_items": legacy_rows("feedback_items", list_feedback_items()),
-            "deliberations": legacy_rows("deliberations", list_deliberations()),
         }
+        for table in IMPORT_TABLES:
+            rows = conn.execute(
+                f'SELECT * FROM "{table}" WHERE user_id = ? ORDER BY id ASC',
+                (owner_id,),
+            ).fetchall()
+            payload[table] = [
+                _export_business_row(table, row) for row in rows
+            ]
+        return payload
     except sqlite3.Error as exc:
         raise ExportError(
             "数据库读取失败，请关闭占用数据库的程序后重试"
         ) from exc
     except Exception as exc:
         raise ExportError("导出数据时发生错误，请稍后重试") from exc
+    finally:
+        conn.close()
 
 
 def _opportunity_row(row):
@@ -4259,25 +4979,33 @@ def _opportunity_row(row):
     return data
 
 
-def list_opportunities():
+def list_opportunities(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
-        "SELECT * FROM opportunities ORDER BY total_score DESC, updated_at DESC, created_at DESC"
+        """
+        SELECT * FROM opportunities
+        WHERE user_id = ?
+        ORDER BY total_score DESC, updated_at DESC, created_at DESC
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_opportunity_row(row) for row in rows]
 
 
-def get_opportunity(opportunity_id):
+def get_opportunity(opportunity_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+        "SELECT * FROM opportunities WHERE id = ? AND user_id = ?",
+        (opportunity_id, owner_id),
     ).fetchone()
     conn.close()
     return _opportunity_row(row)
 
 
-def create_opportunity(payload, user_id=None):
+def create_opportunity(payload, user_id):
     payload = payload or {}
     name = _clean_text(payload.get("name"))
     if not name:
@@ -4306,17 +5034,20 @@ def create_opportunity(payload, user_id=None):
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM opportunities WHERE id = ?", (cur.lastrowid,)
+        "SELECT * FROM opportunities WHERE id = ? AND user_id = ?",
+        (cur.lastrowid, owner_id),
     ).fetchone()
     conn.close()
     return _opportunity_row(row)
 
 
-def update_opportunity(opportunity_id, payload):
+def update_opportunity(opportunity_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+        "SELECT * FROM opportunities WHERE id = ? AND user_id = ?",
+        (opportunity_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
@@ -4345,19 +5076,20 @@ def update_opportunity(opportunity_id, payload):
     updates["updated_at"] = _now()
     set_clause = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE opportunities SET {set_clause} WHERE id = ?",
-        (*updates.values(), opportunity_id),
+        f"UPDATE opportunities SET {set_clause} WHERE id = ? AND user_id = ?",
+        (*updates.values(), opportunity_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM opportunities WHERE id = ?", (opportunity_id,)
+        "SELECT * FROM opportunities WHERE id = ? AND user_id = ?",
+        (opportunity_id, owner_id),
     ).fetchone()
     conn.close()
     return _opportunity_row(row)
 
 
-def delete_opportunity(opportunity_id):
-    return _delete_entity("opportunities", opportunity_id, "机会")
+def delete_opportunity(opportunity_id, user_id):
+    return _delete_entity("opportunities", opportunity_id, "机会", user_id)
 
 
 def _experiment_row(row):
@@ -4370,7 +5102,7 @@ def _experiment_row(row):
     return data
 
 
-def _normalize_opportunity_id(conn, value, user_id=None):
+def _normalize_opportunity_id(conn, value, user_id):
     if value in (None, ""):
         return None
     try:
@@ -4386,36 +5118,42 @@ def _normalize_opportunity_id(conn, value, user_id=None):
     return opportunity_id
 
 
-def list_experiments():
+def list_experiments(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT e.*, o.name AS opportunity_name
         FROM experiments e
-        LEFT JOIN opportunities o ON o.id = e.opportunity_id
+        LEFT JOIN opportunities o
+          ON o.id = e.opportunity_id AND o.user_id = e.user_id
+        WHERE e.user_id = ?
         ORDER BY e.updated_at DESC, e.created_at DESC
-        """
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_experiment_row(row) for row in rows]
 
 
-def get_experiment(experiment_id):
+def get_experiment(experiment_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
         """
         SELECT e.*, o.name AS opportunity_name
         FROM experiments e
-        LEFT JOIN opportunities o ON o.id = e.opportunity_id
-        WHERE e.id = ?
+        LEFT JOIN opportunities o
+          ON o.id = e.opportunity_id AND o.user_id = e.user_id
+        WHERE e.id = ? AND e.user_id = ?
         """,
-        (experiment_id,),
+        (experiment_id, owner_id),
     ).fetchone()
     conn.close()
     return _experiment_row(row)
 
 
-def create_experiment(payload, user_id=None):
+def create_experiment(payload, user_id):
     payload = payload or {}
     name = _clean_text(payload.get("name"))
     if not name:
@@ -4455,28 +5193,34 @@ def create_experiment(payload, user_id=None):
     )
     if opportunity_id:
         conn.execute(
-            "UPDATE opportunities SET status = '已进入MVP', updated_at = ? WHERE id = ? AND status IN ('待审计', '值得测试')",
-            (now, opportunity_id),
+            """
+            UPDATE opportunities SET status = '已进入MVP', updated_at = ?
+            WHERE id = ? AND user_id = ? AND status IN ('待审计', '值得测试')
+            """,
+            (now, opportunity_id, owner_id),
         )
     conn.commit()
     row = conn.execute(
         """
         SELECT e.*, o.name AS opportunity_name
         FROM experiments e
-        LEFT JOIN opportunities o ON o.id = e.opportunity_id
-        WHERE e.id = ?
+        LEFT JOIN opportunities o
+          ON o.id = e.opportunity_id AND o.user_id = e.user_id
+        WHERE e.id = ? AND e.user_id = ?
         """,
-        (cur.lastrowid,),
+        (cur.lastrowid, owner_id),
     ).fetchone()
     conn.close()
     return _experiment_row(row)
 
 
-def update_experiment(experiment_id, payload):
+def update_experiment(experiment_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT * FROM experiments WHERE id = ?", (experiment_id,)
+        "SELECT * FROM experiments WHERE id = ? AND user_id = ?",
+        (experiment_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
@@ -4490,7 +5234,7 @@ def update_experiment(experiment_id, payload):
         updates["name"] = name
     if "opportunity_id" in payload:
         updates["opportunity_id"] = _normalize_opportunity_id(
-            conn, payload.get("opportunity_id"), existing["user_id"]
+            conn, payload.get("opportunity_id"), owner_id
         )
     if "experiment_type" in payload:
         if payload.get("experiment_type") not in EXPERIMENT_TYPES:
@@ -4511,25 +5255,26 @@ def update_experiment(experiment_id, payload):
     updates["updated_at"] = _now()
     set_clause = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE experiments SET {set_clause} WHERE id = ?",
-        (*updates.values(), experiment_id),
+        f"UPDATE experiments SET {set_clause} WHERE id = ? AND user_id = ?",
+        (*updates.values(), experiment_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
         """
         SELECT e.*, o.name AS opportunity_name
         FROM experiments e
-        LEFT JOIN opportunities o ON o.id = e.opportunity_id
-        WHERE e.id = ?
+        LEFT JOIN opportunities o
+          ON o.id = e.opportunity_id AND o.user_id = e.user_id
+        WHERE e.id = ? AND e.user_id = ?
         """,
-        (experiment_id,),
+        (experiment_id, owner_id),
     ).fetchone()
     conn.close()
     return _experiment_row(row)
 
 
-def delete_experiment(experiment_id):
-    return _delete_entity("experiments", experiment_id, "实验")
+def delete_experiment(experiment_id, user_id):
+    return _delete_entity("experiments", experiment_id, "实验", user_id)
 
 
 def _feedback_row(row):
@@ -4542,19 +5287,27 @@ def _feedback_row(row):
     return data
 
 
-def list_feedback_items():
+def list_feedback_items(user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
-        "SELECT * FROM feedback_items ORDER BY updated_at DESC, created_at DESC"
+        """
+        SELECT * FROM feedback_items
+        WHERE user_id = ?
+        ORDER BY updated_at DESC, created_at DESC
+        """,
+        (owner_id,),
     ).fetchall()
     conn.close()
     return [_feedback_row(row) for row in rows]
 
 
-def get_feedback_item(feedback_id):
+def get_feedback_item(feedback_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+        "SELECT * FROM feedback_items WHERE id = ? AND user_id = ?",
+        (feedback_id, owner_id),
     ).fetchone()
     conn.close()
     return _feedback_row(row)
@@ -4574,7 +5327,7 @@ def _normalize_feedback_relation(related_type, related_id):
         raise ValueError("反馈关联 id 无效")
 
 
-def create_feedback_item(payload, user_id=None):
+def create_feedback_item(payload, user_id):
     payload = payload or {}
     title = _clean_text(payload.get("title"))
     if not title:
@@ -4626,17 +5379,20 @@ def create_feedback_item(payload, user_id=None):
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM feedback_items WHERE id = ?", (cur.lastrowid,)
+        "SELECT * FROM feedback_items WHERE id = ? AND user_id = ?",
+        (cur.lastrowid, owner_id),
     ).fetchone()
     conn.close()
     return _feedback_row(row)
 
 
-def update_feedback_item(feedback_id, payload):
+def update_feedback_item(feedback_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+        "SELECT * FROM feedback_items WHERE id = ? AND user_id = ?",
+        (feedback_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
@@ -4675,7 +5431,7 @@ def update_feedback_item(feedback_id, payload):
             }[related_type]
             if not conn.execute(
                 f'SELECT id FROM "{target_table}" WHERE id = ? AND user_id = ?',
-                (related_id, existing["user_id"]),
+                (related_id, owner_id),
             ).fetchone():
                 conn.close()
                 raise ValueError("反馈关联对象不存在")
@@ -4688,19 +5444,20 @@ def update_feedback_item(feedback_id, payload):
     updates["updated_at"] = _now()
     set_clause = ", ".join(f"{field} = ?" for field in updates)
     conn.execute(
-        f"UPDATE feedback_items SET {set_clause} WHERE id = ?",
-        (*updates.values(), feedback_id),
+        f"UPDATE feedback_items SET {set_clause} WHERE id = ? AND user_id = ?",
+        (*updates.values(), feedback_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM feedback_items WHERE id = ?", (feedback_id,)
+        "SELECT * FROM feedback_items WHERE id = ? AND user_id = ?",
+        (feedback_id, owner_id),
     ).fetchone()
     conn.close()
     return _feedback_row(row)
 
 
-def delete_feedback_item(feedback_id):
-    return _delete_entity("feedback_items", feedback_id, "反馈")
+def delete_feedback_item(feedback_id, user_id):
+    return _delete_entity("feedback_items", feedback_id, "反馈", user_id)
 
 
 def _brief_item(item, fields):
@@ -4761,24 +5518,24 @@ def _brief_asset(item):
     )
 
 
-def _feedback_for_related(related_type, related_id):
+def _feedback_for_related(related_type, related_id, user_id):
     return [
-        item for item in list_feedback_items()
+        item for item in list_feedback_items(user_id)
         if item.get("related_type") == related_type and item.get("related_id") == related_id
     ]
 
 
-def _assets_for_source(source_type, source_ids):
+def _assets_for_source(source_type, source_ids, user_id):
     ids = {int(source_id) for source_id in source_ids if source_id is not None}
     if not ids:
         return []
     return [
-        item for item in list_assets()
+        item for item in list_assets(user_id)
         if item.get("source_type") == source_type and item.get("source_id") in ids
     ]
 
 
-def _source_object(source_type, source_id):
+def _source_object(source_type, source_id, user_id):
     if source_id in (None, ""):
         return None
     try:
@@ -4786,27 +5543,30 @@ def _source_object(source_type, source_id):
     except (TypeError, ValueError):
         return None
     if source_type == "feedback":
-        return _brief_feedback(get_feedback_item(source_id))
+        return _brief_feedback(get_feedback_item(source_id, user_id))
     if source_type == "opportunity":
-        return _brief_opportunity(get_opportunity(source_id))
+        return _brief_opportunity(get_opportunity(source_id, user_id))
     if source_type == "experiment":
-        return _brief_experiment(get_experiment(source_id))
+        return _brief_experiment(get_experiment(source_id, user_id))
     if source_type == "review":
-        return _brief_item(get_review(source_id), ("id", "review_date", "type", "depositable"))
+        return _brief_item(
+            get_review(source_id, user_id),
+            ("id", "review_date", "type", "depositable"),
+        )
     return None
 
 
-def get_opportunity_links(opportunity_id):
-    opportunity = get_opportunity(opportunity_id)
+def get_opportunity_links(opportunity_id, user_id):
+    opportunity = get_opportunity(opportunity_id, user_id)
     if not opportunity:
         raise ValueError("机会不存在")
     experiments = [
-        item for item in list_experiments()
+        item for item in list_experiments(user_id)
         if item.get("opportunity_id") == opportunity_id
     ]
     experiment_ids = {item["id"] for item in experiments}
     feedback = [
-        item for item in list_feedback_items()
+        item for item in list_feedback_items(user_id)
         if (
             item.get("related_type") == "opportunity"
             and item.get("related_id") == opportunity_id
@@ -4818,7 +5578,7 @@ def get_opportunity_links(opportunity_id):
     ]
     feedback_ids = {item["id"] for item in feedback}
     assets = [
-        item for item in list_assets()
+        item for item in list_assets(user_id)
         if (
             item.get("source_type") == "opportunity"
             and item.get("source_id") == opportunity_id
@@ -4845,19 +5605,19 @@ def get_opportunity_links(opportunity_id):
     }
 
 
-def get_experiment_links(experiment_id):
-    experiment = get_experiment(experiment_id)
+def get_experiment_links(experiment_id, user_id):
+    experiment = get_experiment(experiment_id, user_id)
     if not experiment:
         raise ValueError("实验不存在")
     opportunity = (
-        get_opportunity(experiment.get("opportunity_id"))
+        get_opportunity(experiment.get("opportunity_id"), user_id)
         if experiment.get("opportunity_id")
         else None
     )
-    feedback = _feedback_for_related("experiment", experiment_id)
+    feedback = _feedback_for_related("experiment", experiment_id, user_id)
     feedback_ids = {item["id"] for item in feedback}
     assets = [
-        item for item in list_assets()
+        item for item in list_assets(user_id)
         if (
             item.get("source_type") == "experiment"
             and item.get("source_id") == experiment_id
@@ -4879,8 +5639,8 @@ def get_experiment_links(experiment_id):
     }
 
 
-def get_feedback_links(feedback_id):
-    feedback = get_feedback_item(feedback_id)
+def get_feedback_links(feedback_id, user_id):
+    feedback = get_feedback_item(feedback_id, user_id)
     if not feedback:
         raise ValueError("反馈不存在")
     related_type = feedback.get("related_type") or ""
@@ -4888,23 +5648,26 @@ def get_feedback_links(feedback_id):
     related = None
     upstream = {}
     if related_type == "opportunity":
-        related = _brief_opportunity(get_opportunity(related_id))
+        related = _brief_opportunity(get_opportunity(related_id, user_id))
         upstream["opportunity"] = related
     elif related_type == "experiment":
-        experiment = get_experiment(related_id)
+        experiment = get_experiment(related_id, user_id)
         related = _brief_experiment(experiment)
         upstream["experiment"] = related
         if experiment and experiment.get("opportunity_id"):
             upstream["opportunity"] = _brief_opportunity(
-                get_opportunity(experiment.get("opportunity_id"))
+                get_opportunity(experiment.get("opportunity_id"), user_id)
             )
     elif related_type == "project":
-        related = _brief_item(get_project(related_id), ("id", "name", "status", "priority"))
+        related = _brief_item(
+            get_project(related_id, user_id),
+            ("id", "name", "status", "priority"),
+        )
         upstream["project"] = related
     elif related_type == "asset":
-        related = _brief_asset(get_asset(related_id))
+        related = _brief_asset(get_asset(related_id, user_id))
         upstream["asset"] = related
-    assets = _assets_for_source("feedback", [feedback_id])
+    assets = _assets_for_source("feedback", [feedback_id], user_id)
     return {
         "feedback": _brief_feedback(feedback),
         "related_type": related_type,
@@ -4915,38 +5678,42 @@ def get_feedback_links(feedback_id):
     }
 
 
-def get_asset_links(asset_id):
-    asset = get_asset(asset_id)
+def get_asset_links(asset_id, user_id):
+    asset = get_asset(asset_id, user_id)
     if not asset:
         raise ValueError("资产不存在")
     source_type = asset.get("source_type") or ""
     source_id = asset.get("source_id")
-    source = _source_object(source_type, source_id)
+    source = _source_object(source_type, source_id, user_id)
     upstream = {}
     if source_type == "feedback" and source_id:
-        feedback = get_feedback_item(source_id)
+        feedback = get_feedback_item(source_id, user_id)
         upstream["feedback"] = _brief_feedback(feedback)
         if feedback:
             related_type = feedback.get("related_type") or ""
             related_id = feedback.get("related_id")
             if related_type == "experiment":
-                experiment = get_experiment(related_id)
+                experiment = get_experiment(related_id, user_id)
                 upstream["experiment"] = _brief_experiment(experiment)
                 if experiment and experiment.get("opportunity_id"):
                     upstream["opportunity"] = _brief_opportunity(
-                        get_opportunity(experiment.get("opportunity_id"))
+                        get_opportunity(experiment.get("opportunity_id"), user_id)
                     )
             elif related_type == "opportunity":
-                upstream["opportunity"] = _brief_opportunity(get_opportunity(related_id))
+                upstream["opportunity"] = _brief_opportunity(
+                    get_opportunity(related_id, user_id)
+                )
     elif source_type == "experiment" and source_id:
-        experiment = get_experiment(source_id)
+        experiment = get_experiment(source_id, user_id)
         upstream["experiment"] = _brief_experiment(experiment)
         if experiment and experiment.get("opportunity_id"):
             upstream["opportunity"] = _brief_opportunity(
-                get_opportunity(experiment.get("opportunity_id"))
+                get_opportunity(experiment.get("opportunity_id"), user_id)
             )
     elif source_type == "opportunity" and source_id:
-        upstream["opportunity"] = _brief_opportunity(get_opportunity(source_id))
+        upstream["opportunity"] = _brief_opportunity(
+            get_opportunity(source_id, user_id)
+        )
     return {
         "asset": _brief_asset(asset),
         "source_type": source_type,
@@ -5144,15 +5911,15 @@ def _build_value_chains(opportunities, experiments, feedback, assets):
     )
 
 
-def get_value_dashboard():
+def get_value_dashboard(user_id):
     opportunities = [
-        item for item in list_opportunities()
+        item for item in list_opportunities(user_id)
         if item.get("status") != "删除"
     ]
-    experiments = list_experiments()
-    feedback = list_feedback_items()
-    assets = list_assets()
-    projects = list_projects()
+    experiments = list_experiments(user_id)
+    feedback = list_feedback_items(user_id)
+    assets = list_assets(user_id)
+    projects = list_projects(user_id)
     experiment_opportunity_ids = {
         item.get("opportunity_id") for item in experiments if item.get("opportunity_id")
     }
@@ -5252,7 +6019,7 @@ def _suggestion_row(row):
     return data
 
 
-def create_inbox_entry(raw_text, source_type="manual", user_id=None):
+def create_inbox_entry(raw_text, source_type="manual", *, user_id):
     text = (raw_text or "").strip()
     if not text:
         raise ValueError("输入文本不能为空")
@@ -5272,47 +6039,54 @@ def create_inbox_entry(raw_text, source_type="manual", user_id=None):
     conn.commit()
     entry_id = cur.lastrowid
     row = conn.execute(
-        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+        "SELECT * FROM inbox_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def update_inbox_entry_status(entry_id, status):
+def update_inbox_entry_status(entry_id, status, user_id):
     if status not in INBOX_ENTRY_STATUSES:
         raise ValueError("无效的 inbox 状态")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT id FROM inbox_entries WHERE id = ?", (entry_id,)
+        "SELECT id FROM inbox_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
         raise ValueError("inbox 记录不存在")
 
     conn.execute(
-        "UPDATE inbox_entries SET status = ? WHERE id = ?",
-        (status, entry_id),
+        "UPDATE inbox_entries SET status = ? WHERE id = ? AND user_id = ?",
+        (status, entry_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+        "SELECT * FROM inbox_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def get_inbox_entry(entry_id):
+def get_inbox_entry(entry_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM inbox_entries WHERE id = ?", (entry_id,)
+        "SELECT * FROM inbox_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_inbox_entries(limit=20):
+def list_inbox_entries(user_id, limit=20):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT
@@ -5329,12 +6103,14 @@ def list_inbox_entries(limit=20):
             COALESCE(SUM(CASE WHEN s.status = 'rejected' THEN 1 ELSE 0 END), 0)
                 AS rejected_count
         FROM inbox_entries e
-        LEFT JOIN inbox_suggestions s ON s.inbox_entry_id = e.id
+        LEFT JOIN inbox_suggestions s
+          ON s.inbox_entry_id = e.id AND s.user_id = e.user_id
+        WHERE e.user_id = ?
         GROUP BY e.id
         ORDER BY e.created_at DESC, e.id DESC
         LIMIT ?
         """,
-        (limit,),
+        (owner_id, limit),
     ).fetchall()
     conn.close()
     result = []
@@ -5346,15 +6122,16 @@ def list_inbox_entries(limit=20):
     return result
 
 
-def create_inbox_suggestions(entry_id, items):
+def create_inbox_suggestions(entry_id, items, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     entry = conn.execute(
-        "SELECT id, user_id FROM inbox_entries WHERE id = ?", (entry_id,)
+        "SELECT id FROM inbox_entries WHERE id = ? AND user_id = ?",
+        (entry_id, owner_id),
     ).fetchone()
     if not entry:
         conn.close()
         raise ValueError("inbox 记录不存在")
-    owner_id = int(entry["user_id"])
     created = []
     try:
         for item in items:
@@ -5369,6 +6146,9 @@ def create_inbox_suggestions(entry_id, items):
             payload = item.get("suggested_payload") or {}
             if not isinstance(payload, dict):
                 payload = {}
+            else:
+                payload = dict(payload)
+                payload.pop("user_id", None)
             cur = conn.execute(
                 """
                 INSERT INTO inbox_suggestions (
@@ -5389,8 +6169,8 @@ def create_inbox_suggestions(entry_id, items):
                 ),
             )
             row = conn.execute(
-                "SELECT * FROM inbox_suggestions WHERE id = ?",
-                (cur.lastrowid,),
+                "SELECT * FROM inbox_suggestions WHERE id = ? AND user_id = ?",
+                (cur.lastrowid, owner_id),
             ).fetchone()
             created.append(_suggestion_row(row))
         conn.commit()
@@ -5402,33 +6182,38 @@ def create_inbox_suggestions(entry_id, items):
         conn.close()
 
 
-def list_inbox_suggestions(entry_id):
+def list_inbox_suggestions(entry_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM inbox_suggestions
-        WHERE inbox_entry_id = ?
+        WHERE inbox_entry_id = ? AND user_id = ?
         ORDER BY id ASC
         """,
-        (entry_id,),
+        (entry_id, owner_id),
     ).fetchall()
     conn.close()
     return [_suggestion_row(r) for r in rows]
 
 
-def get_inbox_suggestion(suggestion_id):
+def get_inbox_suggestion(suggestion_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+        "SELECT * FROM inbox_suggestions WHERE id = ? AND user_id = ?",
+        (suggestion_id, owner_id),
     ).fetchone()
     conn.close()
     return _suggestion_row(row)
 
 
-def reject_inbox_suggestion(suggestion_id):
+def reject_inbox_suggestion(suggestion_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+        "SELECT * FROM inbox_suggestions WHERE id = ? AND user_id = ?",
+        (suggestion_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
@@ -5438,12 +6223,16 @@ def reject_inbox_suggestion(suggestion_id):
         raise ValueError("已入库的建议无法拒绝")
 
     conn.execute(
-        "UPDATE inbox_suggestions SET status = 'rejected' WHERE id = ?",
-        (suggestion_id,),
+        """
+        UPDATE inbox_suggestions SET status = 'rejected'
+        WHERE id = ? AND user_id = ?
+        """,
+        (suggestion_id, owner_id),
     )
     conn.commit()
     updated = conn.execute(
-        "SELECT * FROM inbox_suggestions WHERE id = ?", (suggestion_id,)
+        "SELECT * FROM inbox_suggestions WHERE id = ? AND user_id = ?",
+        (suggestion_id, owner_id),
     ).fetchone()
     conn.close()
     return _suggestion_row(updated)
@@ -5609,14 +6398,18 @@ def _resolve_task_project_id(payload, ref_map):
     return None
 
 
-def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
+def _validate_suggestion_for_commit(
+    conn, suggestion, user_id, batch_project_refs=None
+):
     batch_project_refs = batch_project_refs or set()
     sid = suggestion["id"]
     target_type = suggestion["target_type"]
     title = suggestion.get("title") or ""
     content = suggestion.get("content") or ""
     payload = suggestion["suggested_payload"]
-    owner_id = int(suggestion["user_id"])
+    owner_id = int(user_id)
+    if int(suggestion["user_id"]) != owner_id:
+        return f"建议 #{sid} 不存在"
 
     if target_type == "goal":
         name = (payload.get("name") or title).strip()
@@ -5695,6 +6488,14 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
             )
         if not asset_title or not asset_schemas.asset_content_valid(asset_type, fields, content):
             return f"建议 #{sid}（资产）：需要标题与内容"
+        source_review_id = _coerce_positive_int(payload.get("source_review_id"))
+        if payload.get("source_review_id") not in (None, "") and not source_review_id:
+            return f"建议 #{sid}（资产）：source_review_id 需为数字 ID"
+        if source_review_id and not conn.execute(
+            "SELECT id FROM reviews WHERE id = ? AND user_id = ?",
+            (source_review_id, owner_id),
+        ).fetchone():
+            return f"建议 #{sid}（资产）：来源复盘不存在"
         return None
 
     if target_type == "capability_entry":
@@ -5751,13 +6552,15 @@ def _validate_suggestion_for_commit(conn, suggestion, batch_project_refs=None):
     return f"建议 #{sid} 类型为 {target_type}，不可入库"
 
 
-def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
+def _commit_suggestion_in_tx(conn, suggestion, user_id, ref_map=None):
     ref_map = ref_map or {}
     target_type = suggestion["target_type"]
     title = suggestion["title"]
     content = suggestion["content"]
     payload = dict(suggestion["suggested_payload"])
-    owner_id = int(suggestion["user_id"])
+    owner_id = int(user_id)
+    if int(suggestion["user_id"]) != owner_id:
+        raise ValueError("建议不存在")
 
     if target_type == "goal":
         name = (payload.get("name") or title).strip()
@@ -6039,7 +6842,7 @@ def _commit_suggestion_in_tx(conn, suggestion, ref_map=None):
     raise ValueError(f"类型 {target_type} 不可入库")
 
 
-def commit_inbox_suggestions(suggestion_ids, override_payload=None):
+def commit_inbox_suggestions(suggestion_ids, user_id, override_payload=None):
     if not suggestion_ids:
         raise ValueError("未选择任何建议")
 
@@ -6068,12 +6871,13 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
 
     override_map = _parse_override_payloads(override_payload)
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     candidates = []
     try:
         for suggestion_id in unique_ids:
             row = conn.execute(
-                "SELECT * FROM inbox_suggestions WHERE id = ?",
-                (suggestion_id,),
+                "SELECT * FROM inbox_suggestions WHERE id = ? AND user_id = ?",
+                (suggestion_id, owner_id),
             ).fetchone()
             if not row:
                 errors.append(f"建议 #{suggestion_id} 不存在")
@@ -6092,15 +6896,11 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
                 continue
             candidates.append(suggestion)
 
-        owner_ids = {int(item["user_id"]) for item in candidates}
-        if len(owner_ids) > 1:
-            raise ValueError("不能跨用户批量提交 inbox 建议")
-
         batch_project_refs = _batch_project_local_refs(candidates)
         to_commit = []
         for suggestion in candidates:
             validation_error = _validate_suggestion_for_commit(
-                conn, suggestion, batch_project_refs
+                conn, suggestion, owner_id, batch_project_refs
             )
             if validation_error:
                 errors.append(validation_error)
@@ -6114,7 +6914,9 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
         entry_ids = set()
         ref_map = {}
         for suggestion in _sort_suggestions_for_commit(to_commit):
-            table_key, entity_id = _commit_suggestion_in_tx(conn, suggestion, ref_map)
+            table_key, entity_id = _commit_suggestion_in_tx(
+                conn, suggestion, owner_id, ref_map
+            )
             created[table_key] += 1
             payload = suggestion["suggested_payload"]
             if suggestion["target_type"] == "project":
@@ -6122,8 +6924,11 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
                 if local_ref:
                     ref_map[local_ref] = entity_id
             conn.execute(
-                "UPDATE inbox_suggestions SET status = 'committed' WHERE id = ?",
-                (suggestion["id"],),
+                """
+                UPDATE inbox_suggestions SET status = 'committed'
+                WHERE id = ? AND user_id = ?
+                """,
+                (suggestion["id"], owner_id),
             )
             entry_ids.add(suggestion["inbox_entry_id"])
 
@@ -6131,14 +6936,17 @@ def commit_inbox_suggestions(suggestion_ids, override_payload=None):
             pending = conn.execute(
                 """
                 SELECT COUNT(*) AS cnt FROM inbox_suggestions
-                WHERE inbox_entry_id = ? AND status = 'pending'
+                WHERE inbox_entry_id = ? AND user_id = ? AND status = 'pending'
                 """,
-                (entry_id,),
+                (entry_id, owner_id),
             ).fetchone()["cnt"]
             if pending == 0:
                 conn.execute(
-                    "UPDATE inbox_entries SET status = 'committed' WHERE id = ?",
-                    (entry_id,),
+                    """
+                    UPDATE inbox_entries SET status = 'committed'
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (entry_id, owner_id),
                 )
 
         conn.commit()
@@ -6178,7 +6986,7 @@ def _positioning_action_row(row):
     return data
 
 
-def get_positioning_anchor(user_id=None):
+def get_positioning_anchor(user_id):
     conn = get_connection()
     owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
@@ -6189,7 +6997,7 @@ def get_positioning_anchor(user_id=None):
     return _row_to_dict(row)
 
 
-def upsert_positioning_anchor(payload, user_id=None):
+def upsert_positioning_anchor(payload, user_id):
     payload = payload or {}
     field_names = (
         "first_principle",
@@ -6217,7 +7025,7 @@ def upsert_positioning_anchor(payload, user_id=None):
             UPDATE positioning_anchor
             SET first_principle = ?, identity_core = ?, flywheel_def = ?,
                 current_stage = ?, north_star = ?, updated_at = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 fields["first_principle"],
@@ -6227,6 +7035,7 @@ def upsert_positioning_anchor(payload, user_id=None):
                 fields["north_star"],
                 now,
                 existing["id"],
+                owner_id,
             ),
         )
         anchor_id = existing["id"]
@@ -6252,13 +7061,14 @@ def upsert_positioning_anchor(payload, user_id=None):
         anchor_id = cur.lastrowid
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM positioning_anchor WHERE id = ?", (anchor_id,)
+        "SELECT * FROM positioning_anchor WHERE id = ? AND user_id = ?",
+        (anchor_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def create_positioning_calibration(payload, user_id=None):
+def create_positioning_calibration(payload, user_id):
     payload = payload or {}
     calibrated_at = _as_text(payload.get("calibrated_at"))
     if not calibrated_at:
@@ -6292,19 +7102,20 @@ def create_positioning_calibration(payload, user_id=None):
     conn.commit()
     calibration_id = cur.lastrowid
     row = conn.execute(
-        "SELECT * FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "SELECT * FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def update_positioning_calibration(calibration_id, payload):
+def update_positioning_calibration(calibration_id, payload, user_id):
     payload = payload or {}
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     existing = conn.execute(
-        "SELECT * FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "SELECT * FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     ).fetchone()
     if not existing:
         conn.close()
@@ -6334,7 +7145,7 @@ def update_positioning_calibration(calibration_id, payload):
         SET calibrated_at = ?, cycle = ?, primary_contradiction = ?,
             doing_but_shouldnt = ?, should_but_not_doing = ?,
             alignment_review = ?, conclusion = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
         (
             calibrated_at,
@@ -6355,87 +7166,94 @@ def update_positioning_calibration(calibration_id, payload):
             if "conclusion" in payload
             else existing["conclusion"],
             calibration_id,
+            owner_id,
         ),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "SELECT * FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def delete_positioning_calibration(calibration_id):
+def delete_positioning_calibration(calibration_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT id FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "SELECT id FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
         raise ValueError("校准记录不存在")
     conn.execute(
-        "DELETE FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "DELETE FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     )
     conn.commit()
     conn.close()
     return True
 
 
-def list_positioning_calibrations(limit=50):
+def list_positioning_calibrations(user_id, limit=50):
     limit = max(1, min(int(limit or 50), 100))
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM positioning_calibration
+        WHERE user_id = ?
         ORDER BY calibrated_at DESC, id DESC
         LIMIT ?
         """,
-        (limit,),
+        (owner_id, limit),
     ).fetchall()
     conn.close()
     return [_row_to_dict(r) for r in rows]
 
 
-def get_positioning_calibration(calibration_id):
+def get_positioning_calibration(calibration_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM positioning_calibration WHERE id = ?",
-        (calibration_id,),
+        "SELECT * FROM positioning_calibration WHERE id = ? AND user_id = ?",
+        (calibration_id, owner_id),
     ).fetchone()
     conn.close()
     return _row_to_dict(row)
 
 
-def list_positioning_goal_actions(calibration_id):
+def list_positioning_goal_actions(calibration_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     rows = conn.execute(
         """
         SELECT * FROM positioning_goal_action
-        WHERE calibration_id = ?
+        WHERE calibration_id = ? AND user_id = ?
         ORDER BY created_at DESC, id DESC
         """,
-        (calibration_id,),
+        (calibration_id, owner_id),
     ).fetchall()
     conn.close()
     return [_positioning_action_row(r) for r in rows]
 
 
-def get_positioning_goal_action(action_id):
+def get_positioning_goal_action(action_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT * FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "SELECT * FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     conn.close()
     return _positioning_action_row(row)
 
 
-def update_positioning_goal_action(action_id, payload):
+def update_positioning_goal_action(action_id, payload, user_id):
     payload = payload or {}
-    existing = get_positioning_goal_action(action_id)
+    existing = get_positioning_goal_action(action_id, user_id)
     if not existing:
         raise ValueError("变更记录不存在")
 
@@ -6448,7 +7266,7 @@ def update_positioning_goal_action(action_id, payload):
         payload.get("payload")
         if "payload" in payload
         else existing.get("payload"),
-        existing["user_id"],
+        user_id,
     )
 
     reason = (
@@ -6460,11 +7278,12 @@ def update_positioning_goal_action(action_id, payload):
         raise ValueError("变更理由不能为空")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     conn.execute(
         """
         UPDATE positioning_goal_action
         SET action_type = ?, target_goal_id = ?, payload = ?, reason = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
         """,
         (
             action_type,
@@ -6472,64 +7291,70 @@ def update_positioning_goal_action(action_id, payload):
             json.dumps(action_payload, ensure_ascii=False),
             reason,
             action_id,
+            owner_id,
         ),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "SELECT * FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     conn.close()
     return _positioning_action_row(row)
 
 
-def delete_positioning_goal_action(action_id):
+def delete_positioning_goal_action(action_id, user_id):
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT id FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "SELECT id FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
         raise ValueError("变更记录不存在")
     conn.execute(
-        "DELETE FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "DELETE FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     )
     conn.commit()
     conn.close()
     return True
 
 
-def update_positioning_goal_action_status(action_id, status):
+def update_positioning_goal_action_status(action_id, status, user_id):
     status = _as_text(status)
     if status not in POSITIONING_ACTION_STATUSES:
         raise ValueError("无效的 status")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     row = conn.execute(
-        "SELECT id FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "SELECT id FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     if not row:
         conn.close()
         raise ValueError("变更记录不存在")
 
     conn.execute(
-        "UPDATE positioning_goal_action SET status = ? WHERE id = ?",
-        (status, action_id),
+        """
+        UPDATE positioning_goal_action SET status = ?
+        WHERE id = ? AND user_id = ?
+        """,
+        (status, action_id, owner_id),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM positioning_goal_action WHERE id = ?",
-        (action_id,),
+        "SELECT * FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     conn.close()
     return _positioning_action_row(row)
 
 
 def _validate_positioning_goal_action_fields(
-    action_type, target_goal_id, action_payload, user_id=None
+    action_type, target_goal_id, action_payload, user_id
 ):
     if action_type not in POSITIONING_ACTION_TYPES:
         raise ValueError("无效的目标变更类型")
@@ -6539,11 +7364,9 @@ def _validate_positioning_goal_action_fields(
             target_goal_id = int(target_goal_id)
         except (TypeError, ValueError):
             raise ValueError("无效的目标 id")
-        goal = get_goal(target_goal_id)
+        goal = get_goal(target_goal_id, user_id)
         if not goal:
             raise ValueError("目标不存在")
-        if user_id is not None and int(goal["user_id"]) != int(user_id):
-            raise ValueError("目标不属于当前数据所有者")
     else:
         target_goal_id = None
 
@@ -6569,9 +7392,9 @@ def _validate_positioning_goal_action_fields(
     return target_goal_id, action_payload
 
 
-def create_positioning_goal_action(calibration_id, payload):
+def create_positioning_goal_action(calibration_id, payload, user_id):
     payload = payload or {}
-    calibration = get_positioning_calibration(calibration_id)
+    calibration = get_positioning_calibration(calibration_id, user_id)
     if not calibration:
         raise ValueError("校准记录不存在")
 
@@ -6580,7 +7403,7 @@ def create_positioning_goal_action(calibration_id, payload):
         action_type,
         payload.get("target_goal_id"),
         payload.get("payload"),
-        calibration["user_id"],
+        user_id,
     )
 
     reason = _as_text(payload.get("reason"))
@@ -6588,6 +7411,7 @@ def create_positioning_goal_action(calibration_id, payload):
         raise ValueError("变更理由不能为空")
 
     conn = get_connection()
+    owner_id = _resolve_owner_id(conn, user_id)
     cur = conn.execute(
         """
         INSERT INTO positioning_goal_action (
@@ -6596,7 +7420,7 @@ def create_positioning_goal_action(calibration_id, payload):
         ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
         """,
         (
-            calibration["user_id"],
+            owner_id,
             calibration_id,
             action_type,
             target_goal_id,
@@ -6608,7 +7432,8 @@ def create_positioning_goal_action(calibration_id, payload):
     conn.commit()
     action_id = cur.lastrowid
     row = conn.execute(
-        "SELECT * FROM positioning_goal_action WHERE id = ?", (action_id,)
+        "SELECT * FROM positioning_goal_action WHERE id = ? AND user_id = ?",
+        (action_id, owner_id),
     ).fetchone()
     conn.close()
     return _positioning_action_row(row)

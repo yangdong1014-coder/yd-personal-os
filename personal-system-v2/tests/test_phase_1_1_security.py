@@ -76,40 +76,25 @@ def _concrete_path(rule):
     return path
 
 
-def test_standard_user_is_centrally_denied_every_non_identity_route(test_app):
-    client, _ = _login_standard_user(test_app)
-    csrf_token = extract_csrf_token(client.get("/change-password"))
-    denied = []
+def test_standard_user_business_access_opens_after_phase_3(test_app):
+    client, user = _login_standard_user(test_app)
+    home = client.get("/")
+    assert home.status_code == 200
+    assert client.get("/api/goals").get_json()["data"] == []
+    assert client.get("/api/export").status_code == 200
 
-    for rule in test_app.url_map.iter_rules():
-        if rule.endpoint in PUBLIC_ENDPOINTS | IDENTITY_ENDPOINTS:
-            continue
-        path = _concrete_path(rule)
-        for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
-            headers = {"X-CSRFToken": csrf_token} if method != "GET" else {}
-            response = client.open(path, method=method, headers=headers)
-            assert response.status_code == 403, (
-                f"ordinary user unexpectedly reached {method} {path} "
-                f"({rule.endpoint}): {response.status_code}"
-            )
-            if path.startswith("/api/"):
-                expected_code = (
-                    "admin_required"
-                    if rule.endpoint == "admin_users_page"
-                    or rule.endpoint.startswith("api_admin_")
-                    else "business_access_pending"
-                )
-                assert response.get_json()["code"] == expected_code
-            else:
-                markup = response.get_data(as_text=True)
-                assert "无权访问" in markup or "业务功能暂未开放" in markup
-            denied.append((method, path))
+    created = client.post(
+        "/api/goals",
+        json={"name": "普通用户目标", "type": "年度", "user_id": 1},
+        headers={"X-CSRFToken": extract_csrf_token(home)},
+    )
+    assert created.status_code == 200
+    assert created.get_json()["data"]["user_id"] == user["id"]
 
-    assert ("GET", "/") in denied
-    assert ("GET", "/api/goals") in denied
-    assert ("POST", "/api/goals") in denied
-    assert ("GET", "/api/export") in denied
-    assert len(denied) >= 40
+    api_denied = client.get("/api/admin/users")
+    assert api_denied.status_code == 403
+    assert api_denied.get_json()["code"] == "admin_required"
+    assert client.get("/admin/users").status_code == 403
 
 
 def test_standard_user_identity_surface_and_required_static_remain_available(test_app):

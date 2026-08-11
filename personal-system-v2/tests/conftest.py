@@ -28,9 +28,10 @@ def extract_csrf_token(response):
 class AuthenticatedClient:
     """Test helper that uses a real login and supplies that session's CSRF token."""
 
-    def __init__(self, raw_client, csrf_token):
+    def __init__(self, raw_client, csrf_token, user_id):
         self.raw_client = raw_client
         self.csrf_token = csrf_token
+        self.user_id = user_id
 
     def _write(self, method, *args, **kwargs):
         headers = dict(kwargs.pop("headers", {}) or {})
@@ -78,7 +79,9 @@ def unauthenticated_client(test_app):
 @pytest.fixture
 def client(test_app):
     password = "test admin password"
-    auth_service.bootstrap_admin("testadmin", "testadmin@example.com", password)
+    admin = auth_service.bootstrap_admin(
+        "testadmin", "testadmin@example.com", password
+    )
 
     with test_app.test_client() as test_client:
         login_page = test_client.get("/login")
@@ -94,4 +97,4 @@ def client(test_app):
         )
         assert response.status_code == 200
         csrf_token = extract_csrf_token(response)
-        yield AuthenticatedClient(test_client, csrf_token)
+        yield AuthenticatedClient(test_client, csrf_token, admin["id"])

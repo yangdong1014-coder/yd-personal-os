@@ -25,19 +25,21 @@ def test_positioning_anchor_upsert_and_persist(client):
             "identity_core": "创造者",
             "north_star": "完成一次真实校准闭环",
             "current_stage": "自我验证",
-        }
+        },
+        client.user_id,
     )
     assert first["first_principle"] == "研究并构建稳定系统"
     assert first["north_star"] == "完成一次真实校准闭环"
 
     second = database.upsert_positioning_anchor(
-        {"north_star": "北极星已更新", "current_stage": "外化企业"}
+        {"north_star": "北极星已更新", "current_stage": "外化企业"},
+        client.user_id,
     )
     assert second["id"] == first["id"]
     assert second["north_star"] == "北极星已更新"
     assert second["first_principle"] == "研究并构建稳定系统"
 
-    stored = database.get_positioning_anchor()
+    stored = database.get_positioning_anchor(client.user_id)
     assert stored["north_star"] == "北极星已更新"
 
 
@@ -48,7 +50,8 @@ def test_positioning_calibration_create_and_list(client):
             "cycle": "月度",
             "primary_contradiction": "执行太多，方向太少",
             "conclusion": "先砍低价值目标",
-        }
+        },
+        client.user_id,
     )
     newer = database.create_positioning_calibration(
         {
@@ -57,21 +60,23 @@ def test_positioning_calibration_create_and_list(client):
             "primary_contradiction": "主线目标过多",
             "alignment_review": "两条主线未对齐北极星",
             "conclusion": "保留一条主线",
-        }
+        },
+        client.user_id,
     )
 
-    rows = database.list_positioning_calibrations()
+    rows = database.list_positioning_calibrations(client.user_id)
     assert rows[0]["id"] == newer["id"]
     assert rows[1]["id"] == older["id"]
 
 
 def test_positioning_goal_action_create_pending(client):
-    goal = database.create_goal("旧主线", "当前主线")
+    goal = database.create_goal("旧主线", "当前主线", client.user_id)
     calibration = database.create_positioning_calibration(
         {
             "calibrated_at": "2026-06-26",
             "conclusion": "降级一条主线",
-        }
+        },
+        client.user_id,
     )
 
     action = database.create_positioning_goal_action(
@@ -82,12 +87,15 @@ def test_positioning_goal_action_create_pending(client):
             "payload": {"type": "月度"},
             "reason": "与北极星不对齐，应降为月度观察",
         },
+        client.user_id,
     )
 
     assert action["status"] == "pending"
     assert action["payload"]["type"] == "月度"
 
-    detail_actions = database.list_positioning_goal_actions(calibration["id"])
+    detail_actions = database.list_positioning_goal_actions(
+        calibration["id"], client.user_id
+    )
     assert len(detail_actions) == 1
     assert detail_actions[0]["action_type"] == "降级目标"
 
@@ -153,9 +161,12 @@ def test_positioning_page_loads(client):
 
 def test_api_create_positioning_action(client):
     calibration = database.create_positioning_calibration(
-        {"calibrated_at": "2026-06-26", "conclusion": "测试"}
+        {"calibrated_at": "2026-06-26", "conclusion": "测试"},
+        client.user_id,
     )
-    goal = database.create_goal("待降级目标", "当前主线")
+    goal = database.create_goal(
+        "待降级目标", "当前主线", client.user_id
+    )
 
     response = client.post(
         f"/api/positioning/calibrations/{calibration['id']}/actions",
@@ -178,15 +189,18 @@ def test_positioning_calibration_update_and_delete(client):
             "calibrated_at": "2026-06-10",
             "primary_contradiction": "旧矛盾",
             "conclusion": "旧结论",
-        }
+        },
+        client.user_id,
     )
+    doomed_goal = database.create_goal("待淘汰", "月度", client.user_id)
     database.create_positioning_goal_action(
         calibration["id"],
         {
             "action_type": "淘汰目标",
-            "target_goal_id": database.create_goal("待淘汰", "月度")["id"],
+            "target_goal_id": doomed_goal["id"],
             "reason": "不对齐",
         },
+        client.user_id,
     )
 
     updated = database.update_positioning_calibration(
@@ -196,19 +210,25 @@ def test_positioning_calibration_update_and_delete(client):
             "primary_contradiction": "新矛盾",
             "conclusion": "新结论",
         },
+        client.user_id,
     )
     assert updated["primary_contradiction"] == "新矛盾"
     assert updated["conclusion"] == "新结论"
 
-    database.delete_positioning_calibration(calibration["id"])
-    assert database.get_positioning_calibration(calibration["id"]) is None
-    assert database.list_positioning_goal_actions(calibration["id"]) == []
+    database.delete_positioning_calibration(calibration["id"], client.user_id)
+    assert database.get_positioning_calibration(
+        calibration["id"], client.user_id
+    ) is None
+    assert database.list_positioning_goal_actions(
+        calibration["id"], client.user_id
+    ) == []
 
 
 def test_positioning_goal_action_update_delete_and_status(client):
-    goal = database.create_goal("主线 A", "当前主线")
+    goal = database.create_goal("主线 A", "当前主线", client.user_id)
     calibration = database.create_positioning_calibration(
-        {"calibrated_at": "2026-06-26", "conclusion": "调整主线"}
+        {"calibrated_at": "2026-06-26", "conclusion": "调整主线"},
+        client.user_id,
     )
     action = database.create_positioning_goal_action(
         calibration["id"],
@@ -218,6 +238,7 @@ def test_positioning_goal_action_update_delete_and_status(client):
             "payload": {"type": "月度"},
             "reason": "先观察",
         },
+        client.user_id,
     )
 
     updated = database.update_positioning_goal_action(
@@ -228,20 +249,23 @@ def test_positioning_goal_action_update_delete_and_status(client):
             "payload": {"type": "季度"},
             "reason": "改为季度观察",
         },
+        client.user_id,
     )
     assert updated["reason"] == "改为季度观察"
     assert updated["payload"]["type"] == "季度"
 
     confirmed = database.update_positioning_goal_action_status(
-        action["id"], "confirmed"
+        action["id"], "confirmed", client.user_id
     )
     assert confirmed["status"] == "confirmed"
 
-    stored_goal = database.get_goal(goal["id"])
+    stored_goal = database.get_goal(goal["id"], client.user_id)
     assert stored_goal["type"] == "当前主线"
 
-    database.delete_positioning_goal_action(action["id"])
-    assert database.get_positioning_goal_action(action["id"]) is None
+    database.delete_positioning_goal_action(action["id"], client.user_id)
+    assert database.get_positioning_goal_action(
+        action["id"], client.user_id
+    ) is None
     assert stored_goal["type"] == "当前主线"
 
 
@@ -275,9 +299,10 @@ def test_api_positioning_calibration_update_delete(client):
 
 
 def test_api_positioning_action_update_delete_status(client):
-    goal = database.create_goal("关联目标", "季度")
+    goal = database.create_goal("关联目标", "季度", client.user_id)
     calibration = database.create_positioning_calibration(
-        {"calibrated_at": "2026-06-26", "conclusion": "测试"}
+        {"calibrated_at": "2026-06-26", "conclusion": "测试"},
+        client.user_id,
     )
     create_response = client.post(
         f"/api/positioning/calibrations/{calibration['id']}/actions",
@@ -309,4 +334,4 @@ def test_api_positioning_action_update_delete_status(client):
 
     delete_response = client.delete(f"/api/positioning/actions/{action_id}")
     assert delete_response.status_code == 200
-    assert database.get_goal(goal["id"])["name"] == "关联目标"
+    assert database.get_goal(goal["id"], client.user_id)["name"] == "关联目标"

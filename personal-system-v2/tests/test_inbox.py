@@ -54,7 +54,7 @@ def test_inbox_analyze_creates_entry_and_suggestions(client, monkeypatch):
     assert suggestions[0]["target_type"] == "goal"
     assert suggestions[0]["confidence"] == 0.82
 
-    entry = database.get_inbox_entry(entry_id)
+    entry = database.get_inbox_entry(entry_id, client.user_id)
     assert entry["status"] == "analyzed"
     assert "AI 项目推进" in entry["raw_text"]
 
@@ -200,7 +200,7 @@ def test_inbox_commit_task_suggestion(client, monkeypatch):
     tasks = client.get("/api/tasks").get_json()["data"]
     assert any(task["name"] == "梳理 MVP" for task in tasks)
 
-    updated = database.get_inbox_suggestion(suggestion_id)
+    updated = database.get_inbox_suggestion(suggestion_id, client.user_id)
     assert updated["status"] == "committed"
 
 
@@ -310,7 +310,7 @@ def test_inbox_commit_opportunity_suggestion(client, monkeypatch):
     data = response.get_json()["data"]
     assert data["created"]["opportunities"] == 1
 
-    opportunities = database.list_opportunities()
+    opportunities = database.list_opportunities(client.user_id)
     opportunity = next(item for item in opportunities if item["name"] == "AI 周报机会")
     assert opportunity["target_user"] == "团队负责人"
     assert opportunity["next_action"] == "做一个 7 天 MVP"
@@ -346,13 +346,19 @@ def test_inbox_commit_experiment_without_opportunity_id(client, monkeypatch):
     data = response.get_json()["data"]
     assert data["created"]["experiments"] == 1
 
-    experiment = next(item for item in database.list_experiments() if item["name"] == "AI 周报 MVP")
+    experiment = next(
+        item
+        for item in database.list_experiments(client.user_id)
+        if item["name"] == "AI 周报 MVP"
+    )
     assert experiment["opportunity_id"] is None
     assert experiment["hypothesis"] == "AI 可以减少周报整理时间"
 
 
 def test_inbox_commit_experiment_with_opportunity_id(client, monkeypatch):
-    opportunity = database.create_opportunity({"name": "已有机会"})
+    opportunity = database.create_opportunity(
+        {"name": "已有机会"}, client.user_id
+    )
     monkeypatch.setattr(
         ai_service,
         "analyze_inbox_text",
@@ -379,7 +385,11 @@ def test_inbox_commit_experiment_with_opportunity_id(client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json()["data"]["created"]["experiments"] == 1
 
-    experiment = next(item for item in database.list_experiments() if item["name"] == "关联机会实验")
+    experiment = next(
+        item
+        for item in database.list_experiments(client.user_id)
+        if item["name"] == "关联机会实验"
+    )
     assert experiment["opportunity_id"] == opportunity["id"]
     assert experiment["opportunity_name"] == "已有机会"
 
@@ -413,7 +423,11 @@ def test_inbox_commit_feedback_without_relation(client, monkeypatch):
     data = response.get_json()["data"]
     assert data["created"]["feedback_items"] == 1
 
-    feedback = next(item for item in database.list_feedback_items() if item["title"] == "周报反馈")
+    feedback = next(
+        item
+        for item in database.list_feedback_items(client.user_id)
+        if item["title"] == "周报反馈"
+    )
     assert feedback["related_type"] == ""
     assert feedback["related_id"] is None
     assert feedback["source"] == "使用者反馈"
@@ -453,7 +467,10 @@ def test_inbox_commit_manual_target_type_override_to_opportunity(client, monkeyp
     assert data["created"]["opportunities"] == 1
     assert not data["errors"]
 
-    assert any(item["name"] == "人工机会" for item in database.list_opportunities())
+    assert any(
+        item["name"] == "人工机会"
+        for item in database.list_opportunities(client.user_id)
+    )
 
 
 def test_inbox_reject_suggestion(client, monkeypatch):
@@ -468,7 +485,7 @@ def test_inbox_reject_suggestion(client, monkeypatch):
     assert response.status_code == 200
     assert response.get_json()["data"]["status"] == "rejected"
 
-    updated = database.get_inbox_suggestion(suggestion_id)
+    updated = database.get_inbox_suggestion(suggestion_id, client.user_id)
     assert updated["status"] == "rejected"
 
 

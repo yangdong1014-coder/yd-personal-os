@@ -2,7 +2,7 @@
 
 ## 当前边界
 
-v2.2 Phase 1 只在本地开发账户与认证骨架。正式生产仍为 v2.1.4，本阶段不得部署、迁移生产数据库或向普通用户开放真实业务使用。
+v2.2 Phase 3 已在本地开发完成账户、所有权 schema、Repository/Service/AI 隔离和普通用户业务入口。正式生产仍为 v2.1.4；本阶段不得部署或迁移生产数据库，本文的远程拓扑仍只是后续发布建议。
 
 远程拓扑仍建议为：
 
@@ -20,7 +20,7 @@ v2.2 Phase 1 只在本地开发账户与认证骨架。正式生产仍为 v2.1.4
 | 持久密钥 | 生产、远程或非 loopback 运行必须设置至少 32 字节强随机 `SECRET_KEY` |
 | 显式绑定 | `PERSONAL_OS_BIND_HOST` 非 localhost 时必须同时设置 `PERSONAL_OS_REMOTE=1` |
 | 运行加固 | 上述任一暴露信号都会强制 Secure cookie、`debug=False` 与关闭 reloader |
-| 数据边界 | Phase 1 业务表没有 `user_id`；中央门禁暂时禁止普通用户访问业务系统 |
+| 数据边界 | 16 张业务表按 `user_id` 隔离；admin 与 user 都只能访问自己的私人业务数据 |
 
 `PERSONAL_OS_REMOTE` 标记远程可达运行并许可显式非 localhost 绑定，不参与身份认证。通过反向代理远程访问时，即使 Flask 仍绑定 loopback，也必须设置该信号或生产信号。旧共享访问凭据及其 URL、Header、Cookie、localStorage 路径已从 Phase 1 代码删除。
 
@@ -59,7 +59,7 @@ PERSONAL_OS_BIND_HOST=受控内网地址
 | 未登录访问业务 HTML | 跳转 `/login` |
 | 未登录访问 JSON API | `401` |
 | 普通用户访问 admin API | `403 admin_required` |
-| 普通用户访问任意业务 HTML/API | 权限拒绝页 / `403 business_access_pending` |
+| 普通用户首次改密后访问业务 HTML/API | 正常进入本人 owner-scoped 业务空间 |
 | 用户被禁用 | 现有 session 下一请求立即失效 |
 | 密码重置或 `auth_version` 变化 | 旧 session 下一请求失效 |
 | 退出 | 递增 `auth_version`，撤销该账户全部现有 session |

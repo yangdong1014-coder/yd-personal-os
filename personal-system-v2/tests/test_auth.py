@@ -200,11 +200,11 @@ def test_must_change_password_blocks_business_until_password_is_changed(test_app
         },
         follow_redirects=True,
     )
-    assert changed.status_code == 403
+    assert changed.status_code == 200
     assert changed.request.path == "/"
-    blocked_after_change = user_client.get("/api/goals")
-    assert blocked_after_change.status_code == 403
-    assert blocked_after_change.get_json()["code"] == "business_access_pending"
+    allowed_after_change = user_client.get("/api/goals")
+    assert allowed_after_change.status_code == 200
+    assert allowed_after_change.get_json()["data"] == []
     assert auth_repository.get_user_by_identifier("person")["must_change_password"] is False
 
 
@@ -216,7 +216,7 @@ def test_standard_user_receives_403_for_admin_page_and_api(test_app):
         temporary_password,
         "a brand new secure password",
     )
-    assert changed.status_code == 403
+    assert changed.status_code == 200
 
     api = user_client.get("/api/admin/users")
     assert api.status_code == 403

@@ -134,6 +134,12 @@ def _error(message, status=400, code=None):
     return jsonify(payload), status
 
 
+def _business_value_error(exc, default_status=400):
+    message = str(exc) or "参数无效"
+    status = 404 if "不存在" in message else default_status
+    return _error(message, status)
+
+
 def _request_wants_json():
     if request.path.startswith("/api/"):
         return True
@@ -203,20 +209,6 @@ def _is_admin_endpoint(endpoint):
     )
 
 
-def _business_access_pending_response():
-    message = "业务数据完成用户隔离前，普通用户暂不能访问业务功能。"
-    if _request_wants_json():
-        return _error(message, 403, "business_access_pending")
-    return (
-        render_template(
-            "access_denied.html",
-            error_title="业务功能暂未开放",
-            error_message=message,
-        ),
-        403,
-    )
-
-
 @app.before_request
 def enforce_authenticated_user():
     if request.endpoint in PUBLIC_ENDPOINTS:
@@ -233,11 +225,7 @@ def enforce_authenticated_user():
                     "password_change_required",
                 )
             return redirect(url_for("change_password"))
-        if current_user.is_admin or request.endpoint in IDENTITY_ONLY_ENDPOINTS:
-            return None
-        if _is_admin_endpoint(request.endpoint):
-            return None
-        return _business_access_pending_response()
+        return None
     if session.get("_user_id") is not None:
         session.clear()
     return _unauthorized_response()
@@ -676,14 +664,16 @@ def changelog_page():
 
 @app.route("/api/goals", methods=["GET"])
 def api_list_goals():
-    return jsonify({"ok": True, "data": database.list_goals()})
+    return jsonify({"ok": True, "data": database.list_goals(current_user.id)})
 
 
 @app.route("/api/goals", methods=["POST"])
 def api_create_goal():
     payload = request.get_json(silent=True) or {}
     try:
-        goal = database.create_goal(payload.get("name", ""), payload.get("type", ""))
+        goal = database.create_goal(
+            payload.get("name", ""), payload.get("type", ""), current_user.id
+        )
         return jsonify({"ok": True, "data": goal})
     except ValueError as exc:
         return _error(str(exc))
@@ -693,16 +683,16 @@ def api_create_goal():
 def api_update_goal(goal_id):
     payload = request.get_json(silent=True) or {}
     try:
-        goal = database.update_goal(goal_id, payload)
+        goal = database.update_goal(goal_id, payload, current_user.id)
         return jsonify({"ok": True, "data": goal})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/goals/<int:goal_id>", methods=["DELETE"])
 def api_delete_goal(goal_id):
     try:
-        result = database.delete_goal(goal_id)
+        result = database.delete_goal(goal_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -712,14 +702,17 @@ def api_delete_goal(goal_id):
 
 @app.route("/api/deliberations", methods=["GET"])
 def api_list_deliberations():
-    return jsonify({"ok": True, "data": database.list_deliberations()})
+    return jsonify({
+        "ok": True,
+        "data": database.list_deliberations(current_user.id),
+    })
 
 
 @app.route("/api/deliberations", methods=["POST"])
 def api_create_deliberation():
     payload = request.get_json(silent=True) or {}
     try:
-        deliberation = database.create_deliberation(payload)
+        deliberation = database.create_deliberation(payload, current_user.id)
         return jsonify({"ok": True, "data": deliberation})
     except (ValueError, TypeError) as exc:
         return _error(str(exc) if str(exc) else "参数无效")
@@ -727,7 +720,7 @@ def api_create_deliberation():
 
 @app.route("/api/deliberations/<int:deliberation_id>", methods=["GET"])
 def api_get_deliberation(deliberation_id):
-    deliberation = database.get_deliberation(deliberation_id)
+    deliberation = database.get_deliberation(deliberation_id, current_user.id)
     if not deliberation:
         return _error("推演不存在", 404)
     return jsonify({"ok": True, "data": deliberation})
@@ -737,7 +730,9 @@ def api_get_deliberation(deliberation_id):
 def api_update_deliberation(deliberation_id):
     payload = request.get_json(silent=True) or {}
     try:
-        deliberation = database.update_deliberation(deliberation_id, payload)
+        deliberation = database.update_deliberation(
+            deliberation_id, payload, current_user.id
+        )
         return jsonify({"ok": True, "data": deliberation})
     except ValueError as exc:
         status = 404 if str(exc) == "推演不存在" else 400
@@ -750,7 +745,9 @@ def api_update_deliberation(deliberation_id):
 )
 def api_analyze_deliberation(deliberation_id):
     try:
-        deliberation = deliberation_service.analyze(deliberation_id)
+        deliberation = deliberation_service.analyze(
+            deliberation_id, current_user.id
+        )
         return jsonify({"ok": True, "data": deliberation})
     except deliberation_service.DeliberationServiceError as exc:
         status = 404 if str(exc) == "推演不存在" else 400
@@ -767,6 +764,7 @@ def api_save_deliberation_decision(deliberation_id):
         deliberation = database.save_deliberation_decision(
             deliberation_id,
             payload,
+            current_user.id,
         )
         return jsonify({"ok": True, "data": deliberation})
     except ValueError as exc:
@@ -784,6 +782,7 @@ def api_save_deliberation_review(deliberation_id):
         deliberation = database.save_deliberation_review(
             deliberation_id,
             payload,
+            current_user.id,
         )
         return jsonify({"ok": True, "data": deliberation})
     except ValueError as exc:
@@ -794,7 +793,7 @@ def api_save_deliberation_review(deliberation_id):
 @app.route("/api/deliberations/<int:deliberation_id>", methods=["DELETE"])
 def api_delete_deliberation(deliberation_id):
     try:
-        result = database.delete_deliberation(deliberation_id)
+        result = database.delete_deliberation(deliberation_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -805,7 +804,10 @@ def api_delete_deliberation(deliberation_id):
 @app.route("/api/projects", methods=["GET"])
 def api_list_projects():
     goal_id = request.args.get("goal_id", type=int)
-    return jsonify({"ok": True, "data": database.list_projects(goal_id)})
+    return jsonify({
+        "ok": True,
+        "data": database.list_projects(current_user.id, goal_id),
+    })
 
 
 @app.route("/api/projects", methods=["POST"])
@@ -813,7 +815,10 @@ def api_create_project():
     payload = request.get_json(silent=True) or {}
     try:
         project = database.create_project(
-            payload.get("goal_id"), payload.get("name", ""), payload.get("priority")
+            payload.get("goal_id"),
+            payload.get("name", ""),
+            payload.get("priority"),
+            user_id=current_user.id,
         )
         return jsonify({"ok": True, "data": project})
     except (ValueError, TypeError) as exc:
@@ -823,7 +828,7 @@ def api_create_project():
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
 def api_delete_project(project_id):
     try:
-        result = database.delete_project(project_id)
+        result = database.delete_project(project_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -835,15 +840,19 @@ def api_delete_project(project_id):
 def api_update_project(project_id):
     payload = request.get_json(silent=True) or {}
     try:
-        project = database.update_project(project_id, payload)
+        project = database.update_project(project_id, payload, current_user.id)
         return jsonify({"ok": True, "data": project})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/tasks", methods=["GET"])
 def api_list_tasks():
-    return jsonify({"ok": True, "data": database.list_tasks()})
+    project_id = request.args.get("project_id", type=int)
+    return jsonify({
+        "ok": True,
+        "data": database.list_tasks(current_user.id, project_id),
+    })
 
 
 @app.route("/api/tasks", methods=["POST"])
@@ -851,7 +860,10 @@ def api_create_task():
     payload = request.get_json(silent=True) or {}
     try:
         task = database.create_task(
-            payload.get("project_id"), payload.get("name", ""), payload.get("priority")
+            payload.get("project_id"),
+            payload.get("name", ""),
+            payload.get("priority"),
+            user_id=current_user.id,
         )
         return jsonify({"ok": True, "data": task})
     except (ValueError, TypeError) as exc:
@@ -862,10 +874,12 @@ def api_create_task():
 def api_update_task_status(task_id):
     payload = request.get_json(silent=True) or {}
     try:
-        task = database.update_task_status(task_id, payload.get("status", ""))
+        task = database.update_task_status(
+            task_id, payload.get("status", ""), current_user.id
+        )
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/tasks/<int:task_id>/today-progress", methods=["PATCH"])
@@ -873,27 +887,27 @@ def api_update_task_today_progress(task_id):
     payload = request.get_json(silent=True) or {}
     try:
         task = database.update_task_today_progress(
-            task_id, bool(payload.get("enabled"))
+            task_id, bool(payload.get("enabled")), current_user.id
         )
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/tasks/<int:task_id>", methods=["PATCH"])
 def api_update_task(task_id):
     payload = request.get_json(silent=True) or {}
     try:
-        task = database.update_task(task_id, payload)
+        task = database.update_task(task_id, payload, current_user.id)
         return jsonify({"ok": True, "data": task})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/tasks/<int:task_id>", methods=["DELETE"])
 def api_delete_task(task_id):
     try:
-        result = database.delete_task(task_id)
+        result = database.delete_task(task_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -903,24 +917,33 @@ def api_delete_task(task_id):
 
 @app.route("/api/dashboard", methods=["GET"])
 def api_dashboard():
-    return jsonify({"ok": True, "data": database.get_dashboard()})
+    return jsonify({"ok": True, "data": database.get_dashboard(current_user.id)})
 
 
 @app.route("/api/value-dashboard", methods=["GET"])
 def api_value_dashboard():
-    return jsonify({"ok": True, "data": database.get_value_dashboard()})
+    return jsonify({
+        "ok": True,
+        "data": database.get_value_dashboard(current_user.id),
+    })
 
 
 @app.route("/api/opportunities", methods=["GET"])
 def api_list_opportunities():
-    return jsonify({"ok": True, "data": database.list_opportunities()})
+    return jsonify({
+        "ok": True,
+        "data": database.list_opportunities(current_user.id),
+    })
 
 
 @app.route("/api/opportunities", methods=["POST"])
 def api_create_opportunity():
     payload = request.get_json(silent=True) or {}
     try:
-        return jsonify({"ok": True, "data": database.create_opportunity(payload)})
+        return jsonify({
+            "ok": True,
+            "data": database.create_opportunity(payload, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc))
 
@@ -931,7 +954,9 @@ def api_update_opportunity(opportunity_id):
     try:
         return jsonify({
             "ok": True,
-            "data": database.update_opportunity(opportunity_id, payload),
+            "data": database.update_opportunity(
+                opportunity_id, payload, current_user.id
+            ),
         })
     except ValueError as exc:
         status = 404 if "不存在" in str(exc) else 400
@@ -941,7 +966,10 @@ def api_update_opportunity(opportunity_id):
 @app.route("/api/opportunities/<int:opportunity_id>", methods=["DELETE"])
 def api_delete_opportunity(opportunity_id):
     try:
-        return jsonify({"ok": True, "data": database.delete_opportunity(opportunity_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.delete_opportunity(opportunity_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
     except database.DeleteError as exc:
@@ -951,21 +979,32 @@ def api_delete_opportunity(opportunity_id):
 @app.route("/api/opportunities/<int:opportunity_id>/links", methods=["GET"])
 def api_opportunity_links(opportunity_id):
     try:
-        return jsonify({"ok": True, "data": database.get_opportunity_links(opportunity_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.get_opportunity_links(
+                opportunity_id, current_user.id
+            ),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
 
 
 @app.route("/api/experiments", methods=["GET"])
 def api_list_experiments():
-    return jsonify({"ok": True, "data": database.list_experiments()})
+    return jsonify({
+        "ok": True,
+        "data": database.list_experiments(current_user.id),
+    })
 
 
 @app.route("/api/experiments", methods=["POST"])
 def api_create_experiment():
     payload = request.get_json(silent=True) or {}
     try:
-        return jsonify({"ok": True, "data": database.create_experiment(payload)})
+        return jsonify({
+            "ok": True,
+            "data": database.create_experiment(payload, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc))
 
@@ -976,7 +1015,9 @@ def api_update_experiment(experiment_id):
     try:
         return jsonify({
             "ok": True,
-            "data": database.update_experiment(experiment_id, payload),
+            "data": database.update_experiment(
+                experiment_id, payload, current_user.id
+            ),
         })
     except ValueError as exc:
         status = 404 if "不存在" in str(exc) else 400
@@ -986,7 +1027,10 @@ def api_update_experiment(experiment_id):
 @app.route("/api/experiments/<int:experiment_id>", methods=["DELETE"])
 def api_delete_experiment(experiment_id):
     try:
-        return jsonify({"ok": True, "data": database.delete_experiment(experiment_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.delete_experiment(experiment_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
     except database.DeleteError as exc:
@@ -996,21 +1040,30 @@ def api_delete_experiment(experiment_id):
 @app.route("/api/experiments/<int:experiment_id>/links", methods=["GET"])
 def api_experiment_links(experiment_id):
     try:
-        return jsonify({"ok": True, "data": database.get_experiment_links(experiment_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.get_experiment_links(experiment_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
 
 
 @app.route("/api/feedback", methods=["GET"])
 def api_list_feedback():
-    return jsonify({"ok": True, "data": database.list_feedback_items()})
+    return jsonify({
+        "ok": True,
+        "data": database.list_feedback_items(current_user.id),
+    })
 
 
 @app.route("/api/feedback", methods=["POST"])
 def api_create_feedback():
     payload = request.get_json(silent=True) or {}
     try:
-        return jsonify({"ok": True, "data": database.create_feedback_item(payload)})
+        return jsonify({
+            "ok": True,
+            "data": database.create_feedback_item(payload, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc))
 
@@ -1021,7 +1074,9 @@ def api_update_feedback(feedback_id):
     try:
         return jsonify({
             "ok": True,
-            "data": database.update_feedback_item(feedback_id, payload),
+            "data": database.update_feedback_item(
+                feedback_id, payload, current_user.id
+            ),
         })
     except ValueError as exc:
         status = 404 if "不存在" in str(exc) else 400
@@ -1031,7 +1086,10 @@ def api_update_feedback(feedback_id):
 @app.route("/api/feedback/<int:feedback_id>", methods=["DELETE"])
 def api_delete_feedback(feedback_id):
     try:
-        return jsonify({"ok": True, "data": database.delete_feedback_item(feedback_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.delete_feedback_item(feedback_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
     except database.DeleteError as exc:
@@ -1043,7 +1101,9 @@ def api_create_asset_from_feedback(feedback_id):
     try:
         return jsonify({
             "ok": True,
-            "data": database.create_asset_from_feedback(feedback_id),
+            "data": database.create_asset_from_feedback(
+                feedback_id, current_user.id
+            ),
         })
     except ValueError as exc:
         status = 404 if "不存在" in str(exc) else 400
@@ -1055,7 +1115,10 @@ def api_create_asset_from_feedback(feedback_id):
 @app.route("/api/feedback/<int:feedback_id>/links", methods=["GET"])
 def api_feedback_links(feedback_id):
     try:
-        return jsonify({"ok": True, "data": database.get_feedback_links(feedback_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.get_feedback_links(feedback_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
 
@@ -1063,7 +1126,7 @@ def api_feedback_links(feedback_id):
 @app.route("/api/export", methods=["GET"])
 def api_export():
     try:
-        payload = database.export_all_data()
+        payload = database.export_all_data(current_user.id)
         filename = database.backup_filename()
         body = json.dumps(payload, ensure_ascii=False, indent=2)
         return Response(
@@ -1080,7 +1143,7 @@ def api_export():
 @app.route("/api/export/obsidian.zip", methods=["GET"])
 def api_export_obsidian():
     try:
-        body = obsidian_export.build_obsidian_zip()
+        body = obsidian_export.build_obsidian_zip(current_user.id)
         filename = obsidian_export.zip_filename()
         return Response(
             body,
@@ -1099,7 +1162,7 @@ def api_import_preview():
     if payload is None:
         return _error("请求体必须是有效的 JSON")
     try:
-        stats = database.preview_import_data(payload)
+        stats = database.preview_import_data(payload, current_user.id)
         return jsonify({"ok": True, "data": stats})
     except database.DataImportError as exc:
         return _error(str(exc), 400)
@@ -1111,7 +1174,7 @@ def api_import():
     if payload is None:
         return _error("请求体必须是有效的 JSON")
     try:
-        stats = database.import_all_data(payload)
+        stats = database.import_all_data(payload, current_user.id)
         return jsonify({"ok": True, "data": stats})
     except database.DataImportError as exc:
         body = {"ok": False, "error": str(exc)}
@@ -1123,7 +1186,7 @@ def api_import():
 
 @app.route("/api/reviews", methods=["GET"])
 def api_list_reviews():
-    return jsonify({"ok": True, "data": database.list_reviews()})
+    return jsonify({"ok": True, "data": database.list_reviews(current_user.id)})
 
 
 @app.route("/api/reviews", methods=["POST"])
@@ -1137,6 +1200,7 @@ def api_create_review():
             payload.get("stuck", ""),
             payload.get("next_adjust", ""),
             payload.get("depositable", ""),
+            current_user.id,
         )
         return jsonify({"ok": True, "data": review})
     except ValueError as exc:
@@ -1145,7 +1209,7 @@ def api_create_review():
 
 @app.route("/api/reviews/<int:review_id>", methods=["GET"])
 def api_get_review(review_id):
-    review = database.get_review(review_id)
+    review = database.get_review(review_id, current_user.id)
     if not review:
         return _error("复盘不存在", 404)
     return jsonify({"ok": True, "data": review})
@@ -1154,7 +1218,7 @@ def api_get_review(review_id):
 @app.route("/api/reviews/<int:review_id>", methods=["DELETE"])
 def api_delete_review(review_id):
     try:
-        result = database.delete_review(review_id)
+        result = database.delete_review(review_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -1169,7 +1233,9 @@ def api_list_assets():
     try:
         return jsonify({
             "ok": True,
-            "data": database.list_assets(tag, asset_type=asset_type),
+            "data": database.list_assets(
+                current_user.id, tag, asset_type=asset_type
+            ),
         })
     except ValueError as exc:
         return _error(str(exc))
@@ -1195,6 +1261,7 @@ def api_create_asset():
             external_expression=payload.get("external_expression", ""),
             transferable_scene=payload.get("transferable_scene", ""),
             productization_next_step=payload.get("productization_next_step", ""),
+            user_id=current_user.id,
         )
         return jsonify({"ok": True, "data": asset})
     except (ValueError, TypeError) as exc:
@@ -1224,16 +1291,21 @@ def api_update_asset(asset_id):
         key: value for key, value in payload.items() if key in allowed_fields
     }
     try:
-        asset = database.update_asset(asset_id, **update_payload)
+        asset = database.update_asset(
+            asset_id, user_id=current_user.id, **update_payload
+        )
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/assets/<int:asset_id>/links", methods=["GET"])
 def api_asset_links(asset_id):
     try:
-        return jsonify({"ok": True, "data": database.get_asset_links(asset_id)})
+        return jsonify({
+            "ok": True,
+            "data": database.get_asset_links(asset_id, current_user.id),
+        })
     except ValueError as exc:
         return _error(str(exc), 404)
 
@@ -1241,7 +1313,7 @@ def api_asset_links(asset_id):
 @app.route("/api/assets/<int:asset_id>/reuse", methods=["POST"])
 def api_increment_asset_reuse(asset_id):
     try:
-        asset = database.increment_asset_reuse(asset_id)
+        asset = database.increment_asset_reuse(asset_id, current_user.id)
         return jsonify({"ok": True, "data": asset})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -1250,7 +1322,7 @@ def api_increment_asset_reuse(asset_id):
 @app.route("/api/assets/<int:asset_id>", methods=["DELETE"])
 def api_delete_asset(asset_id):
     try:
-        result = database.delete_asset(asset_id)
+        result = database.delete_asset(asset_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -1265,7 +1337,7 @@ def api_ai_refine_review():
     if not review_id:
         return _error("缺少 review_id")
     try:
-        draft = ai_service.refine_review_to_asset(review_id)
+        draft = ai_service.refine_review_to_asset(review_id, current_user.id)
         return jsonify({"ok": True, "data": draft})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1278,7 +1350,7 @@ def api_ai_optimize_asset():
     if not asset_id:
         return _error("缺少 asset_id")
     try:
-        result = ai_service.optimize_asset(asset_id)
+        result = ai_service.optimize_asset(asset_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1287,7 +1359,7 @@ def api_ai_optimize_asset():
 @app.route("/api/ai/dashboard-briefing", methods=["POST"])
 def api_ai_dashboard_briefing():
     try:
-        result = ai_service.dashboard_briefing()
+        result = ai_service.dashboard_briefing(current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1300,7 +1372,7 @@ def api_ai_decompose_goal():
     if not goal_id:
         return _error("缺少 goal_id")
     try:
-        result = ai_service.decompose_goal_projects(goal_id)
+        result = ai_service.decompose_goal_projects(goal_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1313,7 +1385,7 @@ def api_ai_decompose_project():
     if not project_id:
         return _error("缺少 project_id")
     try:
-        result = ai_service.decompose_project_tasks(project_id)
+        result = ai_service.decompose_project_tasks(project_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1322,7 +1394,7 @@ def api_ai_decompose_project():
 @app.route("/api/ai/recommend-today-tasks", methods=["POST"])
 def api_ai_recommend_today_tasks():
     try:
-        result = ai_service.recommend_today_tasks()
+        result = ai_service.recommend_today_tasks(current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1348,7 +1420,7 @@ def api_ai_classify_asset():
     if not asset_id:
         return _error("缺少 asset_id")
     try:
-        result = ai_service.classify_asset(asset_id)
+        result = ai_service.classify_asset(asset_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1364,7 +1436,9 @@ def api_ai_template_asset():
     if not target_type:
         return _error("缺少 target_type")
     try:
-        result = ai_service.template_asset(asset_id, target_type)
+        result = ai_service.template_asset(
+            asset_id, target_type, current_user.id
+        )
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1377,7 +1451,7 @@ def api_ai_attribute_capability():
     if not module:
         return _error("缺少 module")
     try:
-        result = ai_service.attribute_capability(module)
+        result = ai_service.attribute_capability(module, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1386,7 +1460,7 @@ def api_ai_attribute_capability():
 @app.route("/api/ai/diagnose-capabilities", methods=["POST"])
 def api_ai_diagnose_capabilities():
     try:
-        result = ai_service.diagnose_capabilities()
+        result = ai_service.diagnose_capabilities(current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1399,7 +1473,9 @@ def api_ai_aggregate_weekly_reviews():
     if not review_ids:
         return _error("缺少 review_ids")
     try:
-        result = ai_service.aggregate_weekly_reviews(review_ids)
+        result = ai_service.aggregate_weekly_reviews(
+            review_ids, current_user.id
+        )
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1408,7 +1484,7 @@ def api_ai_aggregate_weekly_reviews():
 @app.route("/api/ai/dispatch-actions", methods=["POST"])
 def api_ai_dispatch_actions():
     try:
-        result = ai_service.dispatch_dashboard_actions()
+        result = ai_service.dispatch_dashboard_actions(current_user.id)
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1420,7 +1496,9 @@ def _value_chain_ai_response(object_type, action):
     if not entity_id:
         return _error("缺少 id")
     try:
-        result = ai_service.value_chain_ai_advice(object_type, action, entity_id)
+        result = ai_service.value_chain_ai_advice(
+            object_type, action, entity_id, current_user.id
+        )
         return jsonify({"ok": True, "data": result})
     except ai_service.AIServiceError as exc:
         return _error(str(exc))
@@ -1478,6 +1556,7 @@ def api_inbox_analyze():
         result = inbox_service.analyze_text(
             payload.get("text", ""),
             ai_service.analyze_inbox_text,
+            current_user.id,
         )
         return jsonify({
             "ok": True,
@@ -1495,13 +1574,16 @@ def api_inbox_analyze():
 def api_list_inbox():
     limit = request.args.get("limit", default=20, type=int)
     limit = max(1, min(limit, 50))
-    return jsonify({"ok": True, "data": database.list_inbox_entries(limit)})
+    return jsonify({
+        "ok": True,
+        "data": database.list_inbox_entries(current_user.id, limit),
+    })
 
 
 @app.route("/api/inbox/<int:entry_id>", methods=["GET"])
 def api_get_inbox(entry_id):
     try:
-        result = inbox_service.get_inbox_detail(entry_id)
+        result = inbox_service.get_inbox_detail(entry_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except inbox_service.InboxServiceError as exc:
         return _error(str(exc), 404)
@@ -1518,7 +1600,9 @@ def api_inbox_commit():
         return _error("override_payload 必须为数组")
     try:
         result = inbox_service.commit_suggestions(
-            suggestion_ids, override_payload=override_payload
+            suggestion_ids,
+            current_user.id,
+            override_payload=override_payload,
         )
         return jsonify({"ok": True, "data": result})
     except inbox_service.InboxServiceError as exc:
@@ -1528,15 +1612,17 @@ def api_inbox_commit():
 @app.route("/api/inbox/suggestions/<int:suggestion_id>/reject", methods=["POST"])
 def api_inbox_reject_suggestion(suggestion_id):
     try:
-        suggestion = inbox_service.reject_suggestion(suggestion_id)
+        suggestion = inbox_service.reject_suggestion(
+            suggestion_id, current_user.id
+        )
         return jsonify({"ok": True, "data": suggestion})
     except inbox_service.InboxServiceError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/positioning/anchor", methods=["GET"])
 def api_get_positioning_anchor():
-    anchor = positioning_service.get_anchor()
+    anchor = positioning_service.get_anchor(current_user.id)
     return jsonify({"ok": True, "data": anchor})
 
 
@@ -1544,7 +1630,7 @@ def api_get_positioning_anchor():
 def api_update_positioning_anchor():
     payload = request.get_json(silent=True) or {}
     try:
-        anchor = positioning_service.update_anchor(payload)
+        anchor = positioning_service.update_anchor(payload, current_user.id)
         return jsonify({"ok": True, "data": anchor})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc))
@@ -1555,7 +1641,7 @@ def api_list_positioning_calibrations():
     limit = request.args.get("limit", default=50, type=int)
     return jsonify({
         "ok": True,
-        "data": positioning_service.list_calibrations(limit),
+        "data": positioning_service.list_calibrations(current_user.id, limit),
     })
 
 
@@ -1563,7 +1649,9 @@ def api_list_positioning_calibrations():
 def api_create_positioning_calibration():
     payload = request.get_json(silent=True) or {}
     try:
-        calibration = positioning_service.create_calibration(payload)
+        calibration = positioning_service.create_calibration(
+            payload, current_user.id
+        )
         return jsonify({"ok": True, "data": calibration})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc))
@@ -1572,7 +1660,9 @@ def api_create_positioning_calibration():
 @app.route("/api/positioning/calibrations/<int:calibration_id>", methods=["GET"])
 def api_get_positioning_calibration(calibration_id):
     try:
-        detail = positioning_service.get_calibration_detail(calibration_id)
+        detail = positioning_service.get_calibration_detail(
+            calibration_id, current_user.id
+        )
         return jsonify({"ok": True, "data": detail})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc), 404)
@@ -1582,16 +1672,18 @@ def api_get_positioning_calibration(calibration_id):
 def api_update_positioning_calibration(calibration_id):
     payload = request.get_json(silent=True) or {}
     try:
-        calibration = positioning_service.update_calibration(calibration_id, payload)
+        calibration = positioning_service.update_calibration(
+            calibration_id, payload, current_user.id
+        )
         return jsonify({"ok": True, "data": calibration})
     except positioning_service.PositioningServiceError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/positioning/calibrations/<int:calibration_id>", methods=["DELETE"])
 def api_delete_positioning_calibration(calibration_id):
     try:
-        positioning_service.delete_calibration(calibration_id)
+        positioning_service.delete_calibration(calibration_id, current_user.id)
         return jsonify({"ok": True, "data": None})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc), 404)
@@ -1601,7 +1693,9 @@ def api_delete_positioning_calibration(calibration_id):
 def api_create_positioning_action(calibration_id):
     payload = request.get_json(silent=True) or {}
     try:
-        action = positioning_service.create_goal_action(calibration_id, payload)
+        action = positioning_service.create_goal_action(
+            calibration_id, payload, current_user.id
+        )
         return jsonify({"ok": True, "data": action})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc))
@@ -1611,16 +1705,18 @@ def api_create_positioning_action(calibration_id):
 def api_update_positioning_action(action_id):
     payload = request.get_json(silent=True) or {}
     try:
-        action = positioning_service.update_goal_action(action_id, payload)
+        action = positioning_service.update_goal_action(
+            action_id, payload, current_user.id
+        )
         return jsonify({"ok": True, "data": action})
     except positioning_service.PositioningServiceError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/positioning/actions/<int:action_id>", methods=["DELETE"])
 def api_delete_positioning_action(action_id):
     try:
-        positioning_service.delete_goal_action(action_id)
+        positioning_service.delete_goal_action(action_id, current_user.id)
         return jsonify({"ok": True, "data": None})
     except positioning_service.PositioningServiceError as exc:
         return _error(str(exc), 404)
@@ -1633,10 +1729,11 @@ def api_update_positioning_action_status(action_id):
         action = positioning_service.update_goal_action_status(
             action_id,
             payload.get("status"),
+            current_user.id,
         )
         return jsonify({"ok": True, "data": action})
     except positioning_service.PositioningServiceError as exc:
-        return _error(str(exc))
+        return _business_value_error(exc)
 
 
 @app.route("/api/changelog", methods=["GET"])
@@ -1753,7 +1850,10 @@ def api_save_prompt(module, scene):
 
 @app.route("/api/capabilities/practice-paths", methods=["GET"])
 def api_list_capability_practice_paths():
-    return jsonify({"ok": True, "data": database.list_capability_practice_paths()})
+    return jsonify({
+        "ok": True,
+        "data": database.list_capability_practice_paths(current_user.id),
+    })
 
 
 @app.route("/api/capabilities/<module>/practice-path", methods=["GET"])
@@ -1761,7 +1861,9 @@ def api_get_capability_practice_path(module):
     try:
         return jsonify({
             "ok": True,
-            "data": database.get_capability_practice_path(module),
+            "data": database.get_capability_practice_path(
+                module, current_user.id
+            ),
         })
     except ValueError as exc:
         return _error(str(exc))
@@ -1777,6 +1879,7 @@ def api_create_capability_practice_step(module):
             payload.get("description", ""),
             payload.get("detail", ""),
             payload.get("step_order"),
+            user_id=current_user.id,
         )
         return jsonify({"ok": True, "data": step})
     except ValueError as exc:
@@ -1789,7 +1892,9 @@ def api_update_capability_practice_step(step_id):
     allowed = {"title", "description", "detail", "step_order"}
     update_payload = {key: value for key, value in payload.items() if key in allowed}
     try:
-        step = database.update_capability_practice_step(step_id, **update_payload)
+        step = database.update_capability_practice_step(
+            step_id, user_id=current_user.id, **update_payload
+        )
         return jsonify({"ok": True, "data": step})
     except ValueError as exc:
         status = 404 if "不存在" in str(exc) else 400
@@ -1799,7 +1904,7 @@ def api_update_capability_practice_step(step_id):
 @app.route("/api/capabilities/practice-steps/<int:step_id>", methods=["DELETE"])
 def api_delete_capability_practice_step(step_id):
     try:
-        result = database.delete_capability_practice_step(step_id)
+        result = database.delete_capability_practice_step(step_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)
@@ -1807,14 +1912,20 @@ def api_delete_capability_practice_step(step_id):
 
 @app.route("/api/capabilities/summary", methods=["GET"])
 def api_capabilities_summary():
-    return jsonify({"ok": True, "data": database.get_capability_summary()})
+    return jsonify({
+        "ok": True,
+        "data": database.get_capability_summary(current_user.id),
+    })
 
 
 @app.route("/api/capability-entries", methods=["GET"])
 def api_list_capability_entries():
     module = request.args.get("module") or None
     try:
-        return jsonify({"ok": True, "data": database.list_capability_entries(module)})
+        return jsonify({
+            "ok": True,
+            "data": database.list_capability_entries(current_user.id, module),
+        })
     except ValueError as exc:
         return _error(str(exc))
 
@@ -1829,6 +1940,7 @@ def api_create_capability_entry():
             payload.get("content", ""),
             payload.get("source_project", ""),
             payload.get("level_type", ""),
+            current_user.id,
         )
         return jsonify({"ok": True, "data": entry})
     except ValueError as exc:
@@ -1838,7 +1950,7 @@ def api_create_capability_entry():
 @app.route("/api/capability-entries/<int:entry_id>", methods=["DELETE"])
 def api_delete_capability_entry(entry_id):
     try:
-        result = database.delete_capability_entry(entry_id)
+        result = database.delete_capability_entry(entry_id, current_user.id)
         return jsonify({"ok": True, "data": result})
     except ValueError as exc:
         return _error(str(exc), 404)

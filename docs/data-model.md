@@ -41,7 +41,7 @@ inbox_entries (1) ──< inbox_suggestions (N)
 | last_login_at | 最近成功登录时间 |
 | created_at / updated_at | UTC 时间戳 |
 
-Phase 1 不删除用户，只禁用，也不把用户凭据纳入现有 JSON 导入导出。Phase 2 已为业务表增加所有权 schema，但业务查询的 Repository 隔离属于 Phase 3；因此 Phase 1.1 的后端中央门禁继续禁止普通用户进入全部业务页面与 API。
+Phase 1 不删除用户，只禁用，也不把用户凭据纳入 JSON 导入导出。Phase 3 已完成 Repository owner 隔离；普通用户完成首次改密后可进入本人业务空间，管理 API 仍仅 admin 可用。
 
 ## Phase 2 数据所有权边界
 
@@ -49,7 +49,7 @@ Phase 1 不删除用户，只禁用，也不把用户凭据纳入现有 JSON 导
 
 `goals`、`projects`、`tasks`、`reviews`、`assets`、`capability_entries`、`capability_practice_steps`、`opportunities`、`experiments`、`feedback_items`、`deliberations`、`positioning_anchor`、`positioning_calibration`、`positioning_goal_action`、`inbox_entries`、`inbox_suggestions`。
 
-所有业务行的 owner 创建后由触发器禁止修改。当前阶段管理员仍是唯一业务使用者；普通用户继续由中央门禁拒绝。Phase 2 仅保证 schema 与迁移后的归属，不代表读取查询已经完成多用户隔离。
+所有业务行的 owner 创建后由触发器禁止修改。Phase 2 负责 schema 与迁移归属；Phase 3 进一步要求所有运行期 CRUD、lookup、helper 与 aggregate 显式按 owner 工作。admin 与普通 user 的私人业务 owner 规则完全相同。
 
 ### 同用户硬约束
 
@@ -64,7 +64,16 @@ Phase 1 不删除用户，只禁用，也不把用户凭据纳入现有 JSON 导
 | positioning action → target goal | 可空软引用，INSERT/UPDATE 触发器校验同 owner |
 | feedback / deliberation 多态关联 | 已知 target_type 由 INSERT/UPDATE 触发器校验同 owner |
 
-SQLite 不能给 JSON 内的 `suggested_payload` 建立外键；`assets.source_type/source_id` 及多态对象删除后的孤儿清理也不适合用单一 FK 表达。这些关系由 staged migration verifier 执行孤儿检查，运行期 Repository 校验与删除策略留给 Phase 3。
+SQLite 不能给 JSON 内的 `suggested_payload` 建立外键；`assets.source_type/source_id` 及多态对象删除后的孤儿清理也不适合用单一 FK 表达。staged migration verifier 负责离线孤儿检查；运行期 Repository 会按 owner 校验这些引用，删除目标对象时只清理同 owner 软引用。直接删除 goal 前先清理其级联 projects 的 feedback/deliberation 软引用。
+
+## Phase 3 运行期所有权规则
+
+- `current_user.id` 是请求进入业务层后的唯一 owner 来源；请求 JSON 中的 `user_id` 不参与授权或落库。
+- Repository 的业务 API 必须显式接收 `user_id`，不得提供默认值或由角色推断 owner。
+- Create 写入当前 owner；list/filter/count/recent/ranking/summary/dashboard/normalization 只处理当前 owner；get/update/delete 使用 `id AND user_id`。
+- 父子复合外键之外的 review/source、多态 target、Positioning goal 与 Inbox payload 引用也必须属于当前 owner。
+- JSON Export 覆盖 16 张业务表但移除行级 `user_id`，不包含 `users` 或认证字段。
+- JSON Import 以当前 owner 强制写入；与其他 owner 的全局主键冲突会分配新 ID，父子与软引用按同一 preview/import 映射计划重写，不会覆盖冲突记录。
 
 ### 初始化与启动
 

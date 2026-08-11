@@ -259,16 +259,16 @@ def _add_structure_files(files, export_time, folder_basenames):
         )
 
 
-def build_obsidian_zip():
+def build_obsidian_zip(user_id):
     try:
         export_time = _export_timestamp()
 
-        goals = database.list_goals()
-        projects = database.list_projects()
-        tasks = database.list_tasks()
-        reviews = database.list_reviews()
-        assets = database.list_assets()
-        entries = database.list_capability_entries()
+        goals = database.list_goals(user_id)
+        projects = database.list_projects(user_id)
+        tasks = database.list_tasks(user_id)
+        reviews = database.list_reviews(user_id)
+        assets = database.list_assets(user_id)
+        entries = database.list_capability_entries(user_id)
 
         registry = _NameRegistry()
         goal_map, project_map, task_map, review_map, asset_map, entry_map = (

@@ -178,13 +178,13 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 
 ## v2.2 Phase 1（已关账）：账户与认证骨架
 
-**定位**：先建立“当前用户是谁”的身份层。Phase 1 当时业务表尚无 `user_id`；Phase 2 已增加所有权 schema，但 Phase 3 查询隔离未完成，因此普通用户仍不能进入业务系统。
+**定位**：先建立“当前用户是谁”的身份层。Phase 1 当时业务表尚无 `user_id`；Phase 2 增加所有权 schema，Phase 3 已完成运行期查询隔离并开放普通用户业务入口。
 
 ```
 浏览器 → Flask session + CSRF → 每请求加载 users
                                ├── is_active=false：立即失效
                                ├── auth_version 不匹配：旧 session 失效
-                               └── role=user：中央门禁仅放行认证/改密表面
+                               └── role=user：改密后进入本人 owner-scoped 业务空间
 ```
 
 | 组件 | 职责 |
@@ -198,7 +198,7 @@ POST /api/inbox/commit → 写入 goals/projects/tasks/reviews/assets/capability
 
 旧 `access_control.py` 与 `access-token.js` 已从 Phase 1 代码删除；URL、Header、Cookie token 均不再构成认证路径。`PERSONAL_OS_REMOTE` 是远程部署安全信号和非 localhost 绑定许可，所有来源（包括本机）都必须登录。管理员只能通过本地交互式 `bootstrap-admin` 命令原子初始化；管理 API 只能创建 `user`。
 
-Phase 1.1 期间，普通用户只可访问登录、退出、当前账户查询、修改密码与必需静态资源；业务 HTML 使用权限拒绝页，业务 API 返回 `403 business_access_pending`。退出会递增当前账户 `auth_version`，因此等价于撤销该账户全部现有 session。PWA 在 bfcache 恢复认证页面时会先隐藏文档并向服务器重新校验 session，失败或离线时不重新展示私人页面。
+Phase 1.1 曾在 Repository 隔离完成前以 `403 business_access_pending` 对普通用户 fail closed。Phase 3 关账后该临时业务门禁已移除；首次临时密码仍必须修改，普通用户访问管理端点仍返回 `403 admin_required`。退出会递增当前账户 `auth_version`，因此等价于撤销该账户全部现有 session。PWA 在 bfcache 恢复认证页面时会先隐藏文档并向服务器重新校验 session，失败或离线时不重新展示私人页面。
 
 运行模式采用显式开发、默认加固：只有 `PERSONAL_OS_ENV=development`、loopback 且非远程时允许临时密钥与本地 debug；环境缺失/未知、production、remote 或非 loopback 任一情况都进入统一生产安全校验。
 
@@ -210,6 +210,16 @@ Phase 1.1 期间，普通用户只可访问登录、退出、当前账户查询�
 
 普通应用启动不会把 legacy 行绑定管理员。`v22_migration.py` 只读打开 v2.1.4 源库，在目标目录创建临时 staged DB，创建唯一 admin 后逐表原样复制 16 表并赋予该 admin；字段、ID、时间、JSON 与 `sqlite_sequence` 全部通过双向 EXCEPT、integrity/FK/孤儿检查后，才原子发布 staged 文件。源库与目标相同、目标已存在、源 schema 不匹配、单例冲突或任何验证失败都会停止。
 
-Phase 2 仍不实现业务查询的 `WHERE user_id` 隔离，也不改造 JSON/Obsidian/AI/Inbox 的多用户读取链路；Phase 1.1 的普通用户中央门禁继续 fail closed，直至 Phase 3 完成。
+Phase 2 的交付边界止于 schema 与 staged migration；运行期 owner scope 由下方 Phase 3 完成。
+
+## v2.2 Phase 3（本地开发）：运行期多用户隔离
+
+请求认证上下文中的 `current_user.id` 是业务 owner 的唯一来源。`app.py` 将其显式传入 Service 与 Repository；所有业务 Repository API 的 `user_id` 均为必填参数，无默认值。Create 强制写当前 owner，list/lookup/CRUD 使用 `user_id` 条件，跨 owner 的 get/update/delete 统一表现为 not found，admin 不绕过私人业务数据 owner。
+
+Dashboard、价值链、能力汇总、recent/ranking/count、主线与训练路径 normalization 均从 owner-scoped 列表或 SQL 构建。所有硬关联、软关联、Inbox `suggested_payload` 引用和 Positioning 目标引用都校验同 owner；删除 goal 前会先清理其级联 projects 的同 owner 多态软引用，避免 feedback/deliberation 孤儿。
+
+JSON Export 只输出当前用户的 16 张业务表，不输出 `users`、认证字段或内部 `user_id`。Import 忽略输入 owner，以当前用户强制落库；preview 与实际导入共用映射计划，主键命中其他用户时改用新 ID，并同步重映射父子、多态、Positioning 和 Inbox payload 引用，绝不更新冲突 owner 的记录。Obsidian、Inbox、Deliberation、Positioning 与全部读取业务数据的 AI context 同样显式接收 `user_id`。
+
+普通用户在完成首次改密后使用与 admin 相同的 PSY 业务结构，但只看到自己的个人空间；新账户的业务数据为空，仅拥有本人的默认 capability practice steps。生产仍保持 v2.1.4，Phase 3 不包含生产 migration、发布或部署。
 
 详见 [home-server.md](home-server.md) 与 [development-guide.md](development-guide.md)。

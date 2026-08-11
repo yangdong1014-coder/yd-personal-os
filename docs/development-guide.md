@@ -69,6 +69,15 @@ python scripts/verify-v2.2-migration.py \
 
 开发与测试 MUST 使用 fixture、临时库或数据库副本。不要把 `data/yd_os.db` 作为命令参数；Phase 2 不执行生产切换，staged DB 也不得提交 Git。迁移 admin 只承接 legacy 原有训练路径，不额外 seed，以保证旧表 row count 完全相等；之后新建的账户会在各自事务中获得独立默认训练路径。
 
+## v2.2 Phase 3 多用户运行期
+
+- 业务路由只能把 `current_user.id` 传入 Service / Repository；不要读取请求体中的 `user_id`。
+- 新增或修改业务 Repository API 时，`user_id` 必须显式且无默认值；get/update/delete 使用 `id AND user_id`，JOIN 同时约束两侧 owner。
+- 新增 count、recent、search、summary、ranking、dashboard、normalization 或 aggregation helper 时，必须加入三账户不同标记/数量的负向隔离测试。
+- AI、Inbox、Deliberation、Positioning 与 Obsidian Service 不得通过裸 ID 全局加载对象；最终 provider context 必须用三账户唯一标记测试无串线。
+- JSON Export 只导出当前用户 16 张业务表且不包含 `users`/认证信息/行级 `user_id`。Import preview 与实际导入必须共用映射逻辑；输入 owner 被忽略，跨 owner ID 冲突只能 remap，不能 UPDATE 冲突记录。
+- 普通用户完成首次改密后可以使用业务功能；`must_change_password` 和 `admin_required` 门禁继续生效。
+
 ## 运行测试
 
 ```bash
@@ -76,6 +85,8 @@ cd personal-system-v2
 pytest
 pytest -v tests/test_obsidian_export.py   # 单文件
 pytest -v tests/test_phase_2_schema.py tests/test_phase_2_migration.py
+pytest -v tests/test_phase_3_repository_isolation.py tests/test_phase_3_import_export_isolation.py
+pytest -v tests/test_phase_3_service_ai_isolation.py tests/test_phase_3_business_access.py
 ```
 
 - 使用临时数据库，**不要**指向生产 `data/yd_os.db`
@@ -122,7 +133,7 @@ def test_inbox_analyze(client, monkeypatch):
 ## 常见风险
 
 1. **外键**：删除 goal/project 会级联；测试库也需 `foreign_keys=ON`（已默认）
-2. **导入**：合并模式，失败会 `rolled_back: true`，不会部分写入
+2. **导入**：当前用户合并模式；跨 owner 主键冲突会重映射，失败会 `rolled_back: true`，不会部分写入
 3. **提示词路径**：scene 仅允许 `[a-z0-9-]+`，防止路径穿越
 4. **版本号**：只改 `changelog.json`，勿在 README 写死版本
 5. **Obsidian**：v1.10 仅 zip 下载，不写入用户 vault

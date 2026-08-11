@@ -119,9 +119,9 @@ VALUE_CHAIN_AI_ACTIONS = {
 }
 
 
-def _safe_links(loader, entity_id):
+def _safe_links(loader, entity_id, user_id):
     try:
-        return loader(entity_id)
+        return loader(entity_id, user_id)
     except ValueError:
         return {}
 
@@ -166,17 +166,17 @@ def _normalize_value_chain_ai_result(data, object_label, action_label):
     }
 
 
-def value_chain_ai_advice(object_type, action, entity_id):
+def value_chain_ai_advice(object_type, action, entity_id, user_id):
     object_config = VALUE_CHAIN_OBJECTS.get(object_type)
     action_config = VALUE_CHAIN_AI_ACTIONS.get(action)
     if not object_config or not action_config:
         raise AIServiceError("未知的价值链 AI 能力")
 
-    entity = object_config["getter"](entity_id)
+    entity = object_config["getter"](entity_id, user_id)
     if not entity:
         raise AIServiceError(f"{object_config['label']}不存在")
 
-    links = _safe_links(object_config["links"], entity_id)
+    links = _safe_links(object_config["links"], entity_id, user_id)
     context = {
         "object_type": object_type,
         "object_label": object_config["label"],
@@ -210,8 +210,8 @@ def value_chain_ai_advice(object_type, action, entity_id):
     )
 
 
-def refine_review_to_asset(review_id):
-    review = database.get_review(review_id)
+def refine_review_to_asset(review_id, user_id):
+    review = database.get_review(review_id, user_id)
     if not review:
         raise AIServiceError("复盘记录不存在")
 
@@ -271,8 +271,8 @@ def _asset_prompt_context(asset):
     }
 
 
-def optimize_asset(asset_id):
-    asset = database.get_asset(asset_id)
+def optimize_asset(asset_id, user_id):
+    asset = database.get_asset(asset_id, user_id)
     if not asset:
         raise AIServiceError("资产不存在")
 
@@ -313,8 +313,8 @@ def optimize_asset(asset_id):
     }
 
 
-def _format_dashboard_context():
-    dashboard = database.get_dashboard()
+def _format_dashboard_context(user_id):
+    dashboard = database.get_dashboard(user_id)
     lines = []
 
     goal = dashboard.get("mainline_goal")
@@ -339,7 +339,7 @@ def _format_dashboard_context():
     else:
         lines.append("今日推进任务：无")
 
-    reviews = database.list_reviews()[:3]
+    reviews = database.list_reviews(user_id)[:3]
     if reviews:
         lines.append("最近复盘：")
         for r in reviews:
@@ -350,8 +350,8 @@ def _format_dashboard_context():
     return "\n".join(lines)
 
 
-def dashboard_briefing():
-    context = _format_dashboard_context()
+def dashboard_briefing(user_id):
+    context = _format_dashboard_context(user_id)
     system_prompt = load_prompt("dashboard", "briefing")
     data = _chat_json(system_prompt, context)
 
@@ -373,12 +373,12 @@ def dashboard_briefing():
     }
 
 
-def decompose_goal_projects(goal_id):
-    goal = database.get_goal(goal_id)
+def decompose_goal_projects(goal_id, user_id):
+    goal = database.get_goal(goal_id, user_id)
     if not goal:
         raise AIServiceError("目标不存在")
 
-    existing = database.list_projects(goal_id)
+    existing = database.list_projects(user_id, goal_id)
     existing_names = [p["name"] for p in existing]
 
     system_prompt = load_prompt("goals", "decompose-projects")
@@ -420,12 +420,12 @@ def decompose_goal_projects(goal_id):
     }
 
 
-def decompose_project_tasks(project_id):
-    project = database.get_project(project_id)
+def decompose_project_tasks(project_id, user_id):
+    project = database.get_project(project_id, user_id)
     if not project:
         raise AIServiceError("项目不存在")
 
-    existing = database.list_tasks(project_id)
+    existing = database.list_tasks(user_id, project_id)
     existing_names = [t["name"] for t in existing]
 
     system_prompt = load_prompt("tasks", "decompose-tasks")
@@ -473,9 +473,13 @@ def decompose_project_tasks(project_id):
     }
 
 
-def recommend_today_tasks():
-    dashboard = database.get_dashboard()
-    open_tasks = [t for t in database.list_tasks() if t.get("status") != "完成"]
+def recommend_today_tasks(user_id):
+    dashboard = database.get_dashboard(user_id)
+    open_tasks = [
+        task
+        for task in database.list_tasks(user_id)
+        if task.get("status") != "完成"
+    ]
     if not open_tasks:
         raise AIServiceError("暂无未完成任务可推荐")
 
@@ -581,10 +585,10 @@ def complete_review_fields(what_done, review_type="每日"):
     }
 
 
-def _format_capability_context():
+def _format_capability_context(user_id):
     lines = []
 
-    tasks = database.list_tasks()[:10]
+    tasks = database.list_tasks(user_id)[:10]
     if tasks:
         lines.append("近期任务：")
         for t in tasks:
@@ -594,7 +598,7 @@ def _format_capability_context():
     else:
         lines.append("近期任务：无")
 
-    reviews = database.list_reviews()[:5]
+    reviews = database.list_reviews(user_id)[:5]
     if reviews:
         lines.append("近期复盘：")
         for r in reviews:
@@ -604,7 +608,7 @@ def _format_capability_context():
     else:
         lines.append("近期复盘：无")
 
-    assets = database.list_assets()[:5]
+    assets = database.list_assets(user_id)[:5]
     if assets:
         lines.append("近期资产：")
         for a in assets:
@@ -615,8 +619,8 @@ def _format_capability_context():
     return "\n".join(lines)
 
 
-def classify_asset(asset_id):
-    asset = database.get_asset(asset_id)
+def classify_asset(asset_id, user_id):
+    asset = database.get_asset(asset_id, user_id)
     if not asset:
         raise AIServiceError("资产不存在")
 
@@ -657,8 +661,8 @@ def classify_asset(asset_id):
     }
 
 
-def template_asset(asset_id, target_type):
-    asset = database.get_asset(asset_id)
+def template_asset(asset_id, target_type, user_id):
+    asset = database.get_asset(asset_id, user_id)
     if not asset:
         raise AIServiceError("资产不存在")
 
@@ -710,12 +714,14 @@ def template_asset(asset_id, target_type):
     }
 
 
-def attribute_capability(module):
+def attribute_capability(module, user_id):
     if module not in database.CAPABILITY_MODULES:
         raise AIServiceError("无效的能力模块")
 
-    context = _format_capability_context()
-    system_prompt = load_prompt("capabilities", "attribute", module=module)
+    context = _format_capability_context(user_id)
+    system_prompt = load_prompt("capabilities", "attribute").format(
+        module=module
+    )
     data = _chat_json(system_prompt, context)
 
     content = (data.get("content") or "").strip()
@@ -793,8 +799,8 @@ def _string_list(data, key, limit=3):
     return [str(item).strip() for item in values if str(item).strip()][:limit]
 
 
-def diagnose_capabilities():
-    capability_summary = database.get_capability_summary()
+def diagnose_capabilities(user_id):
+    capability_summary = database.get_capability_summary(user_id)
     stats = {
         item["module"]: item["entry_level_counts"]
         for item in capability_summary.get("modules", [])
@@ -843,7 +849,7 @@ def diagnose_capabilities():
     }
 
 
-def aggregate_weekly_reviews(review_ids):
+def aggregate_weekly_reviews(review_ids, user_id):
     if not review_ids or not isinstance(review_ids, list):
         raise AIServiceError("请选择至少两条日复盘")
 
@@ -853,7 +859,7 @@ def aggregate_weekly_reviews(review_ids):
             review_id = int(raw_id)
         except (TypeError, ValueError):
             continue
-        review = database.get_review(review_id)
+        review = database.get_review(review_id, user_id)
         if review and review.get("type") == "每日":
             reviews.append(review)
 
@@ -890,10 +896,14 @@ def aggregate_weekly_reviews(review_ids):
     }
 
 
-def dispatch_dashboard_actions():
-    context = _format_dashboard_context()
-    projects = database.list_projects()
-    open_tasks = [t for t in database.list_tasks() if t.get("status") != "完成"]
+def dispatch_dashboard_actions(user_id):
+    context = _format_dashboard_context(user_id)
+    projects = database.list_projects(user_id)
+    open_tasks = [
+        task
+        for task in database.list_tasks(user_id)
+        if task.get("status") != "完成"
+    ]
 
     if not projects and not open_tasks:
         raise AIServiceError("暂无项目或任务可分发行动")

@@ -173,50 +173,50 @@ def _suggestion_response(suggestion):
     }
 
 
-def analyze_text(text, analyze_fn):
+def analyze_text(text, analyze_fn, user_id):
     raw_text = (text or "").strip()
     if not raw_text:
         raise InboxServiceError("输入文本不能为空")
 
-    entry = database.create_inbox_entry(raw_text)
+    entry = database.create_inbox_entry(raw_text, user_id=user_id)
     entry_id = entry["id"]
     try:
         ai_data = analyze_fn(raw_text)
         items = _normalize_ai_items(ai_data.get("items", []))
-        suggestions = database.create_inbox_suggestions(entry_id, items)
-        database.update_inbox_entry_status(entry_id, "analyzed")
+        suggestions = database.create_inbox_suggestions(entry_id, items, user_id)
+        database.update_inbox_entry_status(entry_id, "analyzed", user_id)
         return {
             "inbox_entry_id": entry_id,
-            "entry": database.get_inbox_entry(entry_id),
+            "entry": database.get_inbox_entry(entry_id, user_id),
             "suggestions": [_suggestion_response(s) for s in suggestions],
         }
     except InboxServiceError:
-        database.update_inbox_entry_status(entry_id, "failed")
+        database.update_inbox_entry_status(entry_id, "failed", user_id)
         raise
     except ai_service.AIServiceError as exc:
-        database.update_inbox_entry_status(entry_id, "failed")
+        database.update_inbox_entry_status(entry_id, "failed", user_id)
         raise InboxServiceError(str(exc)) from exc
     except Exception as exc:
-        database.update_inbox_entry_status(entry_id, "failed")
+        database.update_inbox_entry_status(entry_id, "failed", user_id)
         message = str(exc) or "AI 解析失败"
         raise InboxServiceError(message) from exc
 
 
-def get_inbox_detail(entry_id):
-    entry = database.get_inbox_entry(entry_id)
+def get_inbox_detail(entry_id, user_id):
+    entry = database.get_inbox_entry(entry_id, user_id)
     if not entry:
         raise InboxServiceError("inbox 记录不存在")
-    suggestions = database.list_inbox_suggestions(entry_id)
+    suggestions = database.list_inbox_suggestions(entry_id, user_id)
     return {
         "entry": entry,
         "suggestions": [_suggestion_response(s) for s in suggestions],
     }
 
 
-def commit_suggestions(suggestion_ids, override_payload=None):
+def commit_suggestions(suggestion_ids, user_id, override_payload=None):
     try:
         return database.commit_inbox_suggestions(
-            suggestion_ids, override_payload=override_payload
+            suggestion_ids, user_id, override_payload=override_payload
         )
     except database.InboxError as exc:
         raise InboxServiceError(str(exc), getattr(exc, "stats", None)) from exc
@@ -224,9 +224,9 @@ def commit_suggestions(suggestion_ids, override_payload=None):
         raise InboxServiceError(str(exc)) from exc
 
 
-def reject_suggestion(suggestion_id):
+def reject_suggestion(suggestion_id, user_id):
     try:
-        suggestion = database.reject_inbox_suggestion(suggestion_id)
+        suggestion = database.reject_inbox_suggestion(suggestion_id, user_id)
         return _suggestion_response(suggestion)
     except ValueError as exc:
         raise InboxServiceError(str(exc)) from exc

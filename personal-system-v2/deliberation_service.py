@@ -40,8 +40,8 @@ def _normalize_analysis(data):
     return normalized
 
 
-def analyze(deliberation_id):
-    deliberation = database.get_deliberation(deliberation_id)
+def analyze(deliberation_id, user_id):
+    deliberation = database.get_deliberation(deliberation_id, user_id)
     if not deliberation:
         raise DeliberationServiceError("推演不存在")
     if deliberation["status"] != "draft":
@@ -76,4 +76,6 @@ def analyze(deliberation_id):
         raise DeliberationServiceError(str(exc)) from exc
 
     analysis = _normalize_analysis(raw_analysis)
-    return database.save_deliberation_analysis(deliberation_id, analysis)
+    return database.save_deliberation_analysis(
+        deliberation_id, analysis, user_id
+    )
