@@ -253,7 +253,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.POSITIONING_GOAL_TYPES = {{ goal_types | tojson }};
   window.POSITIONING_ACTION_TYPES = {{ positioning_action_types | tojson }};
 </script>

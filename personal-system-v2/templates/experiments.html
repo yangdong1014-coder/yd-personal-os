@@ -77,7 +77,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.EXPERIMENT_TYPES = {{ experiment_types | tojson }};
   window.EXPERIMENT_STATUSES = {{ experiment_statuses | tojson }};
 </script>

@@ -93,7 +93,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.DELIBERATION_AI_ENABLED = {{ ai_enabled | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>

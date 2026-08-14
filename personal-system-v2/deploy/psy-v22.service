@@ -1,0 +1,41 @@
+[Unit]
+Description=PSY v2.2 active-release service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=psy
+Group=psy
+WorkingDirectory=/opt/psy/launcher
+EnvironmentFile=/etc/psy/launcher.env
+ExecStartPre=/usr/bin/test -f /var/lib/psy/releases/active-release.json
+ExecStart=/opt/psy/venv/bin/python /opt/psy/launcher/production_launcher.py --active-pointer /var/lib/psy/releases/active-release.json --descriptor-root /var/lib/psy/releases --release-root /opt/psy/releases --config-root /etc/psy/releases --database-root /var/lib/psy/databases --expected-app-version ${PSY_APPROVED_APP_VERSION} --expected-git-commit ${PSY_APPROVED_GIT_COMMIT}
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=90s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/psy/launcher /opt/psy/releases /etc/psy /var/lib/psy/releases
+ReadWritePaths=/var/lib/psy/databases
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=psy-v22
+
+[Install]
+WantedBy=multi-user.target

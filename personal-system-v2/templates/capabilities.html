@@ -100,7 +100,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.LEVEL_TYPES = {{ level_types | tojson }};</script>
+<script nonce="{{ csp_nonce }}">window.LEVEL_TYPES = {{ level_types | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/capabilities.js') }}"></script>

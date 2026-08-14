@@ -8,6 +8,8 @@ import auth_repository
 import auth_service
 import config
 
+STRONG_TEST_SECRET = "K9vQ2mL7xR4cT8pN5wD3jH6sF1zB0yG8uC4aE7rM2kP9nV5q"
+
 _CSRF_PATTERNS = (
     re.compile(r'name="csrf-token" content="([^"]+)"'),
     re.compile(r'name="csrf_token" value="([^"]+)"'),
@@ -206,6 +208,8 @@ def test_must_change_password_blocks_business_until_password_is_changed(test_app
     assert allowed_after_change.status_code == 200
     assert allowed_after_change.get_json()["data"] == []
     assert auth_repository.get_user_by_identifier("person")["must_change_password"] is False
+    with user_client.session_transaction() as session_state:
+        assert session_state.permanent is True
 
 
 def test_standard_user_receives_403_for_admin_page_and_api(test_app):
@@ -322,14 +326,24 @@ def test_login_rebuilds_session_and_does_not_store_credentials(test_app):
         assert admin["username"] not in serialized
 
 
-def test_production_requires_secret_key_and_uses_secure_cookie(monkeypatch):
+def test_production_requires_secret_key_and_uses_secure_cookie(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "_PRODUCTION_PREFLIGHT_PATH", None)
     monkeypatch.setenv("PERSONAL_OS_ENV", "production")
     monkeypatch.delenv("PERSONAL_OS_REMOTE", raising=False)
     monkeypatch.delenv("SECRET_KEY", raising=False)
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         config.configure_flask_app(Flask("missing-secret"))
 
-    monkeypatch.setenv("SECRET_KEY", "x" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "secure.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv(
+        "PERSONAL_OS_PROXY_TOKEN",
+        "R7wK4nT9pL2xV6cH1mQ8sD5fJ3zB0yG9uN4aE7rM2kP6vC8q",
+    )
+    config.mark_production_preflight_complete(tmp_path / "secure.db")
     production_app = Flask("secure-secret")
     config.configure_flask_app(production_app)
     assert production_app.config["SESSION_COOKIE_SECURE"] is True

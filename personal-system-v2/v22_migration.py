@@ -653,14 +653,19 @@ def verify_migration(source_path, staged_path):
         issues.extend(validate_legacy_source_attached)
 
         users = conn.execute(
-            "SELECT id, role FROM users ORDER BY id"
+            "SELECT id, role, is_active FROM users ORDER BY id"
         ).fetchall()
         admins = [row for row in users if row["role"] == "admin"]
-        if len(users) != 1 or len(admins) != 1:
-            issues.append("staged users 必须且只能包含唯一 admin")
+        active_admins = [
+            row for row in admins if int(row["is_active"]) == 1
+        ]
+        if len(users) != 1 or len(admins) != 1 or len(active_admins) != 1:
+            issues.append("staged users 必须且只能包含唯一启用的 admin")
             admin_id = int(admins[0]["id"]) if admins else -1
         else:
             admin_id = int(admins[0]["id"])
+        report["users_total"] = len(users)
+        report["active_admins"] = len(active_admins)
         report["admin_id"] = admin_id
         users_sequence = _sequence_value(conn, "users", "main")
         report["users_sequence"] = users_sequence

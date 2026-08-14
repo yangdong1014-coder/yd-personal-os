@@ -65,7 +65,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.AI_ENABLED = {{ ai_enabled | tojson }};</script>
+<script nonce="{{ csp_nonce }}">window.AI_ENABLED = {{ ai_enabled | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/prompts.js') }}"></script>
 {% endblock %}

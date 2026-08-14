@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ error_title or '无权访问' }} · 个人能力操作系统</title>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function () {
       var saved = localStorage.getItem("personal-os-ui-theme");
       var allowed = ["theme-dark-warm", "theme-dark-cool", "theme-light-warm", "theme-light-cool"];

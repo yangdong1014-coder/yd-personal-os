@@ -38,7 +38,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.TASK_STATUSES = {{ task_statuses | tojson }};</script>
+<script nonce="{{ csp_nonce }}">window.TASK_STATUSES = {{ task_statuses | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/tasks.js') }}"></script>

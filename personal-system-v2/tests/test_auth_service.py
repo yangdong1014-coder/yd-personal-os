@@ -10,6 +10,7 @@ import database
 
 @pytest.fixture
 def auth_db(tmp_path, monkeypatch):
+    auth_service._account_failure_guard.reset()
     db_path = tmp_path / "auth.db"
     monkeypatch.setattr(database, "DB_PATH", str(db_path))
     database.init_db()
@@ -75,7 +76,7 @@ def test_username_and_email_login_are_case_normalized_and_password_is_hashed(aut
     assert by_email.id == stored["id"]
 
 
-def test_invalid_credentials_are_generic_and_failures_lock_account(auth_db):
+def test_invalid_credentials_are_generic_and_distributed_failures_lock_account(auth_db):
     auth_service.bootstrap_admin(
         "admin", "admin@example.com", "correct horse battery"
     )
@@ -84,9 +85,13 @@ def test_invalid_credentials_are_generic_and_failures_lock_account(auth_db):
         auth_service.authenticate("missing", "wrong password value")
     assert str(missing.value) == "用户名、邮箱或密码不正确"
 
-    for _ in range(auth_service.MAX_FAILED_LOGINS):
+    for source_number in range(auth_service.MAX_FAILED_LOGINS):
         with pytest.raises(auth_service.AuthenticationError) as invalid:
-            auth_service.authenticate("admin", "wrong password value")
+            auth_service.authenticate(
+                "admin",
+                "wrong password value",
+                failure_source=f"source-{source_number}",
+            )
         assert str(invalid.value) == "用户名、邮箱或密码不正确"
 
     stored = auth_repository.get_user_by_username("admin")

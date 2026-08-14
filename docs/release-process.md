@@ -20,6 +20,19 @@ git pull --ff-only  # 与 origin/main 同步
 
 确认 `changelog.json` 已更新目标版本条目，且 `current` 指向新版本。
 
+## v2.2 Phase 5 部署门禁
+
+Phase 4 commit、tag 或 CI 通过不等于允许切换真实数据库。v2.2 必须按以下顺序推进：
+
+```text
+Phase 5A 独立 ECS shadow
+→ 公网 HTTPS / 正常域名 / 真实浏览器验收
+→ 人工批准
+→ Phase 5B 停写、备份、迁移与正式切换
+```
+
+Phase 5A 使用独立 code/config/descriptor/pointer、批准的独立数据库副本、独立 Gunicorn 端口、shadow systemd unit 与 Nginx 路由；不得停止现有生产、替换正式 active pointer、读取或迁移真实 `personal-system-v2/data/yd_os.db`。未获得明确人工批准时，流程必须停留在 Phase 5A。
+
 ## 发布步骤
 
 1. **开发与测试**：功能完成 → pytest 全绿
@@ -36,7 +49,7 @@ git pull --ff-only  # 与 origin/main 同步
    ```
 6. **验证 CI**：GitHub Actions `Test` workflow 绿灯
 7. **创建 GitHub Release**：绑定已经存在的 tag，不重新创建或移动 tag
-8. **生产收口**：按部署规范更新、重启、健康检查、smoke test，并核对 commit 一致性
+8. **生产收口**：先按上述门禁完成 Phase 5A；仅在人工批准后按 Runbook 执行 Phase 5B，随后健康检查、smoke test 并核对 commit 一致性
 
 ## 标签策略
 
@@ -49,7 +62,8 @@ git pull --ff-only  # 与 origin/main 同步
 
 ## 回滚与热修
 
-- 数据：用 JSON 备份 `GET /api/export` 恢复
+- v2.2 多用户 schema 切换、SQLite 备份验证、code/DB 原子配对和完整 v2.1.4 回滚必须遵循 [Phase 5 数据库切换与回滚 Runbook](phase-5-database-cutover-runbook.md)。JSON 导出不能替代正式 SQLite backup/restore。
+- 数据库升级回滚必须同时恢复匹配的旧 code、旧 DB 和旧配置，不能只回滚代码。
 - 代码：`git revert` 或修复后新版本（如 v1.10.1）
 - **禁止**对 `main` 使用 `git push --force`（除非团队明确约定）
 

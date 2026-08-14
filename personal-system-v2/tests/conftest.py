@@ -65,8 +65,11 @@ def test_app(tmp_path, monkeypatch):
     database.init_db()
 
     from app import app
+    import app as app_module
 
     app.config.update(TESTING=True, WTF_CSRF_ENABLED=True)
+    app_module._login_rate_limiter.reset()
+    auth_service._account_failure_guard.reset()
     return app
 
 

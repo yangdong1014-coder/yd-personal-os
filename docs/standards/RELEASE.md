@@ -48,6 +48,12 @@ local main
 
 ## Production
 
+### v2.2 release 权限契约
+
+- `/var/lib/psy/releases` 推荐 `root:root` + `0755`：`psy` 可 traverse/read，但不得 create、rename、delete 或 write。
+- active pointer 与 release descriptor 必须为 `root:root` + `0644`：`psy` 可读但不可写，且不得包含 group/world write 位。
+- descriptor-bound runtime config 含 `SECRET_KEY`、proxy token 与可选 API key，必须为 `root:psy` + `0640`，不得使用 `0644`；`/etc/psy/releases` 必须允许 `psy` traverse/read 但不得允许其写入，可使用 `root:root` + `0755`、`root:psy` + `0750` 或等价 ACL。
+
 部署前 MUST：
 
 - 检查生产 branch、HEAD 与 `git status`；

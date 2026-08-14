@@ -77,7 +77,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.FEEDBACK_SOURCES = {{ feedback_sources | tojson }};
   window.FEEDBACK_LEVELS = {{ feedback_levels | tojson }};
   window.FEEDBACK_RELATED_TYPES = {{ feedback_related_types | tojson }};

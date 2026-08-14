@@ -6,6 +6,9 @@ import auth_service
 import config
 from conftest import extract_csrf_token
 
+STRONG_TEST_SECRET = "K9vQ2mL7xR4cT8pN5wD3jH6sF1zB0yG8uC4aE7rM2kP9nV5q"
+STRONG_PROXY_TOKEN = "R7wK4nT9pL2xV6cH1mQ8sD5fJ3zB0yG9uN4aE7rM2kP6vC8q"
+
 
 def test_health_endpoint(client):
     response = client.get("/api/health")
@@ -13,7 +16,7 @@ def test_health_endpoint(client):
     payload = response.get_json()
     assert payload["ok"] is True
     assert payload["data"]["status"] == "up"
-    assert "version" in payload["data"]
+    assert payload["data"] == {"status": "up"}
 
 
 def test_authenticated_local_access_when_remote_off(client, monkeypatch):
@@ -78,23 +81,32 @@ def test_local_request_without_session_also_requires_login(unauthenticated_clien
     assert response.status_code == 401
 
 
-def test_remote_mode_requires_persistent_secret_key(monkeypatch):
+def test_remote_mode_requires_persistent_secret_key(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "_PRODUCTION_PREFLIGHT_PATH", None)
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
     monkeypatch.delenv("SECRET_KEY", raising=False)
     with pytest.raises(SystemExit, match="SECRET_KEY"):
         config.validate_server_config()
 
-    monkeypatch.setenv("SECRET_KEY", "x" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("YD_OS_DB_PATH", str((tmp_path / "remote.db").resolve()))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
     config.validate_server_config()
 
 
-def test_backup_db_does_not_modify_source(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    app_dir = tmp_path / "personal-system-v2"
-    data_dir = app_dir / "data"
-    data_dir.mkdir(parents=True)
-    db_path = data_dir / "yd_os.db"
-    db_path.write_bytes(b"sqlite-test-content-v1")
+def test_backup_db_does_not_modify_source(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    fixture = Path(__file__).parent / "fixtures" / "legacy_v214.sql"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(fixture.read_text(encoding="utf-8"))
+    connection.close()
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
 
     import importlib.util
 
@@ -102,17 +114,20 @@ def test_backup_db_does_not_modify_source(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("backup_db", script)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(module, "APP_DIR", app_dir)
-    monkeypatch.setattr(module, "DB_PATH", db_path)
-    monkeypatch.setattr(module, "BACKUP_DIR", app_dir / "backups")
-
     before = db_path.read_bytes()
-    dest = module.backup_database(keep=5)
+    report = module.backup_database(
+        db_path.resolve(),
+        backup_dir.resolve(),
+        expected_profile="legacy_v214",
+        git_commit="a" * 40,
+        application_version="v2.1.4",
+    )
     after = db_path.read_bytes()
 
     assert before == after
-    assert dest.is_file()
-    assert dest.read_bytes() == before
+    assert report["ok"] is True
+    assert Path(report["database"]).is_file()
+    assert Path(report["manifest"]).is_file()
 
 
 def test_backups_gitignored():

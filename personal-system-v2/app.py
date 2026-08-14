@@ -1,5 +1,12 @@
+import hashlib
+import hmac
 import json
+import logging
 import os
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -7,6 +14,8 @@ import click
 from flask import (
     Flask,
     Response,
+    current_app,
+    g,
     jsonify,
     redirect,
     render_template,
@@ -23,6 +32,7 @@ from flask_login import (
     logout_user,
 )
 from flask_wtf.csrf import CSRFError, CSRFProtect
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 import ai_service
 import asset_schemas
@@ -40,11 +50,75 @@ from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save a
 
 app = Flask(__name__)
 config.configure_flask_app(app)
+config.register_request_security(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.session_protection = "strong"
 csrf = CSRFProtect()
+
+_access_logger = logging.getLogger("psy.access")
+
+
+class LoginRateLimiter:
+    """Bounded in-process login-attempt limiter for the single WSGI process."""
+
+    def __init__(self, *, attempts, window_seconds, max_sources=4096):
+        self.attempts = attempts
+        self.window_seconds = window_seconds
+        self.max_sources = max_sources
+        self._failures = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def _prune(self, failures, now):
+        cutoff = now - self.window_seconds
+        while failures and failures[0] <= cutoff:
+            failures.popleft()
+
+    def consume_attempt(self, source, *, now=None):
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            failures = self._failures[source]
+            self._prune(failures, current)
+            if len(failures) >= self.attempts:
+                return max(
+                    1,
+                    int(self.window_seconds - (current - failures[0]) + 0.999),
+                )
+            failures.append(current)
+            if len(self._failures) > self.max_sources:
+                stale_sources = [
+                    key
+                    for key, values in self._failures.items()
+                    if not values or values[-1] <= current - self.window_seconds
+                ]
+                for key in stale_sources:
+                    self._failures.pop(key, None)
+                while len(self._failures) > self.max_sources:
+                    self._failures.pop(next(iter(self._failures)))
+            return 0
+
+    def release_success(self, source):
+        """Refund only the current successful attempt, never prior failures."""
+        with self._lock:
+            failures = self._failures.get(source)
+            if failures:
+                failures.pop()
+                if not failures:
+                    self._failures.pop(source, None)
+
+    def reset(self, source=None):
+        with self._lock:
+            if source is None:
+                self._failures.clear()
+            else:
+                self._failures.pop(source, None)
+
+
+_login_rate_limiter = LoginRateLimiter(
+    attempts=config.LOGIN_RATE_LIMIT_ATTEMPTS,
+    window_seconds=config.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+)
 
 
 @app.context_processor
@@ -138,6 +212,71 @@ def _business_value_error(exc, default_status=400):
     message = str(exc) or "参数无效"
     status = 404 if "不存在" in message else default_status
     return _error(message, status)
+
+
+def _source_address():
+    value = str(request.remote_addr or "").strip().strip("[]")
+    try:
+        from ipaddress import ip_address
+
+        return str(ip_address(value))
+    except ValueError:
+        return "invalid"
+
+
+def _source_fingerprint():
+    return hmac.new(
+        current_app.config["SECRET_KEY"].encode("utf-8"),
+        _source_address().encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+@app.before_request
+def prepare_private_access_log():
+    g.request_started_at = time.monotonic()
+    g.request_id = secrets.token_hex(8)
+    g.source_fingerprint = _source_fingerprint()
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(_error_detail):
+    message = "请求体过大"
+    if _request_wants_json():
+        return _error(message, 413, "request_too_large")
+    return (
+        render_template(
+            "access_denied.html",
+            error_title="请求过大",
+            error_message=message,
+        ),
+        413,
+    )
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(exc):
+    if isinstance(exc, RequestEntityTooLarge):
+        return handle_request_entity_too_large(exc)
+    if isinstance(exc, HTTPException):
+        return exc
+    current_app.logger.error(
+        "request_failed request_id=%s endpoint=%s error_type=%s",
+        getattr(g, "request_id", "unavailable"),
+        request.endpoint or "unmatched",
+        type(exc).__name__,
+        exc_info=not current_app.config.get("PSY_HARDENED", False),
+    )
+    if _request_wants_json():
+        return _error("服务器内部错误", 500, "internal_error")
+    return (
+        render_template(
+            "access_denied.html",
+            error_title="服务器内部错误",
+            error_message="请求未能完成，请稍后重试。",
+        ),
+        500,
+    )
 
 
 def _request_wants_json():
@@ -251,13 +390,67 @@ def handle_csrf_error(_error_detail):
 
 @app.after_request
 def apply_security_headers(response):
+    nonce = getattr(g, "csp_nonce", "")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # Keep same-origin referrers so Flask-WTF can enforce its HTTPS origin
+    # check, while never disclosing a private path to another origin.
     response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-    if request.endpoint not in {"static", "service_worker", "api_health"}:
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-XSS-Protection", "0")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    )
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+    if nonce:
+        csp_directives = [
+            "default-src 'self'",
+            f"script-src 'self' 'nonce-{nonce}'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "img-src 'self' data: blob:",
+            "connect-src 'self'",
+            "worker-src 'self'",
+            "manifest-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]
+        if current_app.config.get("PSY_HARDENED") is True:
+            csp_directives.append("upgrade-insecure-requests")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "; ".join(csp_directives),
+        )
+    if current_app.config.get("PSY_HARDENED") is True and request.is_secure:
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000"
+        )
+    if request.endpoint == "api_health":
+        response.headers["Cache-Control"] = "no-store"
+    elif request.endpoint not in {"static", "service_worker"}:
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
         response.headers.add("Vary", "Cookie")
+    response.headers.setdefault("X-Request-ID", getattr(g, "request_id", ""))
+    started_at = getattr(g, "request_started_at", None)
+    duration_ms = (
+        round((time.monotonic() - started_at) * 1000)
+        if started_at is not None
+        else -1
+    )
+    _access_logger.info(
+        "request_complete request_id=%s endpoint=%s method=%s status=%s duration_ms=%s source=%s",
+        getattr(g, "request_id", "unavailable"),
+        request.endpoint or "unmatched",
+        request.method,
+        response.status_code,
+        duration_ms,
+        getattr(g, "source_fingerprint", "unavailable"),
+    )
     return response
 
 
@@ -286,17 +479,30 @@ def login():
     next_path = request.values.get("next", "")
     identifier = ""
     if request.method == "POST":
+        source = _source_fingerprint()
+        retry_after = _login_rate_limiter.consume_attempt(source)
+        if retry_after:
+            response = render_template(
+                "login.html",
+                error="登录尝试过多，请稍后重试",
+                identifier="",
+                next_path=next_path,
+            )
+            return response, 429, {"Retry-After": str(retry_after)}
         identifier = request.form.get("identifier", "").strip()
         try:
             user = auth_service.authenticate(
                 identifier,
                 request.form.get("password", ""),
+                failure_source=source,
             )
         except auth_service.AuthenticationError as exc:
             error = str(exc)
         else:
+            _login_rate_limiter.release_success(source)
             session.clear()
             login_user(user, remember=False, fresh=True)
+            session.permanent = True
             session["auth_version"] = user.auth_version
             destination = (
                 url_for("change_password")
@@ -345,6 +551,7 @@ def change_password():
                 logout_user()
                 session.clear()
                 login_user(user, remember=False, fresh=True)
+                session.permanent = True
                 session["auth_version"] = user.auth_version
                 return redirect(url_for("index"))
     return render_template(
@@ -469,8 +676,6 @@ def api_health():
             "ok": True,
             "data": {
                 "status": "up",
-                "version": changelog.get_current_version(),
-                "remote_mode": config.is_remote_mode(),
             },
         }
     )

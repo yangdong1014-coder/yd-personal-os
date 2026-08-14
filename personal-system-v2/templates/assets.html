@@ -185,7 +185,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.ASSET_TYPES = {{ asset_types | tojson }};
   window.ASSET_LEVELS = {{ asset_levels | tojson }};
   window.ASSET_FIELD_SCHEMAS = {{ asset_field_schemas | tojson }};

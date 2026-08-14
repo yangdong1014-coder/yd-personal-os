@@ -1,0 +1,4 @@
+# Install as /etc/nginx/snippets/psy-proxy-auth.conf, root-owned and mode 0640
+# or stricter. The value must exactly match descriptor-bound
+# PERSONAL_OS_PROXY_TOKEN. Nginx overwrites, never appends, the client header.
+proxy_set_header X-PSY-Proxy-Token "replace_with_the_runtime_proxy_token";

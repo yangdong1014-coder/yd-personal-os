@@ -17,8 +17,15 @@ RUNTIME_ENV_KEYS = (
     "PERSONAL_OS_REMOTE",
     "PERSONAL_OS_BIND_HOST",
     "PERSONAL_OS_BG",
+    "PERSONAL_OS_TRUSTED_HOSTS",
+    "PERSONAL_OS_TRUSTED_PROXY",
+    "PERSONAL_OS_PROXY_TOKEN",
+    "YD_OS_DB_PATH",
+    "FLASK_DEBUG",
     "SECRET_KEY",
 )
+STRONG_TEST_SECRET = "K9vQ2mL7xR4cT8pN5wD3jH6sF1zB0yG8uC4aE7rM2kP9nV5q"
+STRONG_PROXY_TOKEN = "R7wK4nT9pL2xV6cH1mQ8sD5fJ3zB0yG9uN4aE7rM2kP6vC8q"
 PUBLIC_ENDPOINTS = {"login", "api_health", "service_worker", "static"}
 IDENTITY_ENDPOINTS = {"change_password", "logout", "api_current_user"}
 
@@ -26,6 +33,7 @@ IDENTITY_ENDPOINTS = {"change_password", "logout", "api_current_user"}
 def _clear_runtime_environment(monkeypatch):
     for key in RUNTIME_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(config, "_PRODUCTION_PREFLIGHT_PATH", None)
 
 
 def _login(client, identifier, password):
@@ -106,7 +114,7 @@ def test_standard_user_identity_surface_and_required_static_remain_available(tes
     assert client.get("/static/css/main.css").status_code == 200
     health = client.get("/api/health")
     assert health.status_code == 200
-    assert set(health.get_json()["data"]) == {"status", "version", "remote_mode"}
+    assert health.get_json()["data"] == {"status": "up"}
 
 
 def test_admin_keeps_current_business_access(client):
@@ -156,41 +164,41 @@ def test_production_missing_secret_key_fails_closed(monkeypatch):
 
 def test_remote_missing_secret_key_fails_closed(monkeypatch):
     _clear_runtime_environment(monkeypatch)
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
 
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         config.configure_flask_app(Flask("remote-missing-secret"))
 
 
-def test_unlabelled_runtime_cannot_silently_fall_back_to_development(monkeypatch):
+def test_unlabelled_runtime_cannot_silently_fall_back_to_development(
+    monkeypatch, tmp_path
+):
     _clear_runtime_environment(monkeypatch)
 
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         config.configure_flask_app(Flask("unlabelled-runtime"))
 
-    monkeypatch.setenv("SECRET_KEY", "u" * 48)
-    unlabelled_app = Flask("unlabelled-with-secret")
-    config.configure_flask_app(unlabelled_app)
-    options = config.get_server_run_options(unlabelled_app)
-    assert unlabelled_app.config["SESSION_COOKIE_SECURE"] is True
-    assert options["debug"] is False
-    assert options["use_reloader"] is False
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "unlabelled.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
+    with pytest.raises(RuntimeError, match="PERSONAL_OS_ENV=production"):
+        config.configure_flask_app(Flask("unlabelled-with-secret"))
 
 
-def test_remote_with_secret_is_hardened_without_production_label(monkeypatch):
+def test_remote_with_secret_is_hardened_without_production_label(monkeypatch, tmp_path):
     _clear_runtime_environment(monkeypatch)
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
-    monkeypatch.setenv("SECRET_KEY", "r" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "remote.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
     monkeypatch.setenv("PERSONAL_OS_BG", "0")
-    remote_app = Flask("remote-with-secret")
-
-    config.configure_flask_app(remote_app)
-    options = config.get_server_run_options(remote_app)
-
-    assert remote_app.config["SESSION_COOKIE_SECURE"] is True
-    assert remote_app.debug is False
-    assert options["debug"] is False
-    assert options["use_reloader"] is False
+    with pytest.raises(RuntimeError, match="PERSONAL_OS_ENV=production"):
+        config.configure_flask_app(Flask("remote-with-secret"))
 
 
 def test_non_loopback_is_hardened_and_requires_explicit_remote_opt_in(monkeypatch):
@@ -200,17 +208,13 @@ def test_non_loopback_is_hardened_and_requires_explicit_remote_opt_in(monkeypatc
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         config.configure_flask_app(Flask("non-loopback-missing-secret"))
 
-    monkeypatch.setenv("SECRET_KEY", "n" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
     with pytest.raises(RuntimeError, match="PERSONAL_OS_REMOTE"):
         config.configure_flask_app(Flask("non-loopback-no-opt-in"))
 
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
-    exposed_app = Flask("non-loopback-hardened")
-    config.configure_flask_app(exposed_app)
-    options = config.get_server_run_options(exposed_app)
-    assert exposed_app.config["SESSION_COOKIE_SECURE"] is True
-    assert options["debug"] is False
-    assert options["use_reloader"] is False
+    with pytest.raises(RuntimeError, match="loopback"):
+        config.configure_flask_app(Flask("non-loopback-hardened"))
 
 
 def test_normal_local_development_keeps_ephemeral_local_mode(monkeypatch):
@@ -233,54 +237,69 @@ def test_normal_local_development_keeps_ephemeral_local_mode(monkeypatch):
     assert background_options["use_reloader"] is False
 
 
-def test_normal_production_configuration_is_secure(monkeypatch):
+def test_normal_production_configuration_is_secure(monkeypatch, tmp_path):
     _clear_runtime_environment(monkeypatch)
     monkeypatch.setenv("PERSONAL_OS_ENV", "production")
-    monkeypatch.setenv("SECRET_KEY", "p" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "production.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
     monkeypatch.setenv("PERSONAL_OS_BG", "0")
+    config.mark_production_preflight_complete(tmp_path / "production.db")
     production_app = Flask("normal-production")
 
     config.configure_flask_app(production_app)
-    options = config.get_server_run_options(production_app)
 
     assert production_app.config["SESSION_COOKIE_SECURE"] is True
     assert production_app.config["SESSION_COOKIE_HTTPONLY"] is True
     assert production_app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
     assert production_app.debug is False
-    assert options["debug"] is False
-    assert options["use_reloader"] is False
+    with pytest.raises(SystemExit, match="active-release launcher"):
+        config.get_server_run_options(production_app)
 
 
 @pytest.mark.parametrize("background", ["0", "1"])
-def test_python_app_run_path_never_enables_remote_debug(
-    test_app, monkeypatch, background
+def test_python_app_run_path_rejects_hardened_development_server(
+    test_app, monkeypatch, tmp_path, background
 ):
     _clear_runtime_environment(monkeypatch)
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
-    monkeypatch.setenv("SECRET_KEY", "s" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "server.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
     monkeypatch.setenv("PERSONAL_OS_BG", background)
 
     import app as app_module
 
+    config.mark_production_preflight_complete(tmp_path / "server.db")
     server_app = Flask(f"server-entry-{background}")
     config.configure_flask_app(server_app)
-    run_options = {}
     initialized = []
     monkeypatch.setattr(app_module, "app", server_app)
     monkeypatch.setattr(app_module.database, "init_db", lambda: initialized.append(True))
-    monkeypatch.setattr(server_app, "run", lambda **kwargs: run_options.update(kwargs))
+    monkeypatch.setattr(server_app, "run", lambda **kwargs: pytest.fail("must not run"))
 
-    app_module.run_server()
+    with pytest.raises(SystemExit, match="active-release launcher"):
+        app_module.run_server()
 
-    assert initialized == [True]
-    assert run_options["debug"] is False
-    assert run_options["use_reloader"] is False
+    assert initialized == []
 
 
-def test_hardened_app_rejects_late_cookie_or_debug_downgrade(monkeypatch):
+def test_hardened_app_rejects_late_cookie_or_debug_downgrade(monkeypatch, tmp_path):
     _clear_runtime_environment(monkeypatch)
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
     monkeypatch.setenv("PERSONAL_OS_REMOTE", "1")
-    monkeypatch.setenv("SECRET_KEY", "h" * 48)
+    monkeypatch.setenv("SECRET_KEY", STRONG_TEST_SECRET)
+    monkeypatch.setenv("YD_OS_DB_PATH", str(tmp_path / "hardened.db"))
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_HOSTS", "psy.example.test")
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    monkeypatch.setenv("PERSONAL_OS_PROXY_TOKEN", STRONG_PROXY_TOKEN)
+    config.mark_production_preflight_complete(tmp_path / "hardened.db")
     hardened_app = Flask("downgrade-detection")
     config.configure_flask_app(hardened_app)
 

@@ -46,7 +46,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.INITIAL_ADMIN_USERS = {{ users | tojson }};</script>
+<script nonce="{{ csp_nonce }}">window.INITIAL_ADMIN_USERS = {{ users | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/admin-users.js') }}"></script>
 {% endblock %}

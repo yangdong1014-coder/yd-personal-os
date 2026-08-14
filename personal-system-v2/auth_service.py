@@ -3,6 +3,8 @@
 import re
 import secrets
 import sqlite3
+import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 
 from flask_login import UserMixin
@@ -17,6 +19,38 @@ MAX_FAILED_LOGINS = 5
 LOCKOUT_MINUTES = 15
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
+
+
+class AccountFailureContributionGuard:
+    """Bound one account failure contribution to one source per worker lifetime."""
+
+    def __init__(self, *, max_entries=16384):
+        self.max_entries = max_entries
+        self._entries = OrderedDict()
+        self._lock = threading.Lock()
+
+    def should_contribute(self, user_id, source):
+        key = (int(user_id), str(source or "unattributed"))
+        with self._lock:
+            if key in self._entries:
+                return False
+            self._entries[key] = None
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+            return True
+
+    def reset_user(self, user_id):
+        target = int(user_id)
+        with self._lock:
+            for key in [key for key in self._entries if key[0] == target]:
+                self._entries.pop(key, None)
+
+    def reset(self):
+        with self._lock:
+            self._entries.clear()
+
+
+_account_failure_guard = AccountFailureContributionGuard()
 
 
 class AuthError(ValueError):
@@ -191,13 +225,19 @@ def _parse_timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
-def authenticate(identifier, password):
+def authenticate(identifier, password, *, failure_source="unattributed"):
     normalized = str(identifier or "").strip().casefold()
     record = auth_repository.get_user_by_identifier(normalized) if normalized else None
+    password_candidate = (
+        password
+        if isinstance(password, str) and len(password) <= MAX_PASSWORD_LENGTH
+        else ""
+    )
     if record is None:
-        check_password_hash(_DUMMY_PASSWORD_HASH, str(password or ""))
+        check_password_hash(_DUMMY_PASSWORD_HASH, password_candidate)
         raise AuthenticationError("用户名、邮箱或密码不正确")
 
+    password_matches = check_password_hash(record["password_hash"], password_candidate)
     if not record["is_active"]:
         raise AuthenticationError("用户名、邮箱或密码不正确")
 
@@ -207,17 +247,22 @@ def authenticate(identifier, password):
         raise AuthenticationError("用户名、邮箱或密码不正确")
     if locked_until:
         auth_repository.clear_login_failures(record["id"])
+        _account_failure_guard.reset_user(record["id"])
         record = auth_repository.get_user_by_id(record["id"])
 
-    if not check_password_hash(record["password_hash"], str(password or "")):
-        auth_repository.record_login_failure(
-            record["id"],
-            MAX_FAILED_LOGINS,
-            (now + timedelta(minutes=LOCKOUT_MINUTES)).isoformat(timespec="seconds"),
-        )
+    if not password_matches:
+        if _account_failure_guard.should_contribute(record["id"], failure_source):
+            auth_repository.record_login_failure(
+                record["id"],
+                MAX_FAILED_LOGINS,
+                (now + timedelta(minutes=LOCKOUT_MINUTES)).isoformat(
+                    timespec="seconds"
+                ),
+            )
         raise AuthenticationError("用户名、邮箱或密码不正确")
 
     record = auth_repository.record_login_success(record["id"])
+    _account_failure_guard.reset_user(record["id"])
     return AuthenticatedUser(record)
 
 

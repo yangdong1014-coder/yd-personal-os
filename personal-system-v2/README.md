@@ -1,6 +1,6 @@
 # 个人能力操作系统 v2
 
-本地优先的个人操作系统。Flask + SQLite + 原生 HTML/CSS/JS，可选接入 DeepSeek API。
+低成本、低维护的个人操作系统。Flask + SQLite + 原生 HTML/CSS/JS，可选接入 DeepSeek API；当前正式部署方向是复用阿里云 ECS，通过正常域名与公网 HTTPS 从任意联网设备访问。
 
 **当前版本以 `changelog.json` 的 `current` 字段与页面版本徽章为准**（无需在 README 手动维护具体版号）。
 
@@ -29,7 +29,19 @@ python app.py
 
 浏览器访问 http://127.0.0.1:5000
 
-本机开发的 `.env` 必须显式设置 `PERSONAL_OS_ENV=development`。缺失或未知环境值默认进入加固模式，不能隐式退化为 debug 开发运行。
+本机开发的 `.env` 必须显式设置 `PERSONAL_OS_ENV=development`。缺失或未知环境值不能隐式退化为 debug；远程/加固运行还必须精确声明 `PERSONAL_OS_ENV=production`，否则拒绝启动。
+
+### v2.2 Phase 4.1 生产入口（仅本地完成，尚未部署）
+
+```text
+联网设备 → 正常域名 / 公网 HTTPS → Nginx → loopback Gunicorn → Flask → SQLite
+```
+
+生产或远程运行禁止使用 `python app.py` 或直接调用 Gunicorn。必须由 active release launcher 以批准的版本、commit 和路径根进入；只读诊断示例见 `docs/development-guide.md`。
+
+`production_launcher.py` 是正式稳定入口：它只从 active release pointer 解析 descriptor 绑定的 code/config/DB，校验 hash/manifest 后运行所选 `production.py --check`，再无 shell 地 exec 固定 Gunicorn 命令。`production.py` 不创建或迁移数据库；Gunicorn 通过零参数 `production:create_production_app()` 在同一进程、监听前复验 release context、当前 v2.2 schema、integrity、外键和唯一启用管理员，失败即退出。`gunicorn.conf.py` 将 MVP 固定为 loopback、1 worker、gthread/4 threads 与 preload；应用只接受精确一跳代理覆盖提供的 `X-Forwarded-For`、`X-Forwarded-Proto=https`、白名单 `X-Forwarded-Host` 和独立强随机 `X-PSY-Proxy-Token`。除本机最小健康检查外，直连应用或伪造/多跳转发头都会拒绝。
+
+本步骤只建立本地生产运行时门禁，尚未执行真实 Nginx/systemd/ECS、数据库切换、发布或部署。Phase 5A 必须先做独立 ECS shadow 并完成公网 HTTPS 与真实浏览器验收，获得人工批准后才可进入 Phase 5B 正式切换。MFA 不在当前 P0 范围。
 
 首次使用前设置持久 `SECRET_KEY`，并通过本地交互式命令初始化唯一管理员：
 
@@ -75,29 +87,23 @@ python scripts/create_desktop_shortcut.py
 
 **健康检查**：`scripts/check-health.bat` 或访问 `GET /api/health`。
 
-### 家庭服务器与手机远程访问（v1.13+）
+### 历史方案：家庭服务器与 Tailscale（v1.13+）
 
-将家里常开电脑作为 PSY-1 服务器，手机通过 **Tailscale** 访问（**不推荐公网端口转发**）。
+旧版本曾把家里常开电脑作为服务器并通过 Tailscale 访问。该路线只保留为历史资料，不是 v2.2 当前部署方案，也不再要求 VPN、本地 CA 或本地 TLS 模拟环境。
 
-完整步骤见 [docs/home-server.md](../docs/home-server.md)。
+历史细节见 [docs/home-server.md](../docs/home-server.md)。当前执行方向以 [架构说明](../docs/architecture.md) 与 [Phase 5 Runbook](../docs/phase-5-database-cutover-runbook.md) 为准。
 
-简要流程：
-
-1. 家里电脑与手机安装 Tailscale，登录同一账号。
-2. 在 `.env` 设置强随机 `SECRET_KEY`；受控远程运行同时设置 `PERSONAL_OS_ENV=production` 与 `PERSONAL_OS_REMOTE=1`。
-3. 桌面快捷方式或开机自启启动 PSY-1（默认仍监听 `127.0.0.1`）。
-4. 推荐通过受控 HTTPS 反向代理将本机服务暴露给 tailnet。
-5. 手机访问服务地址并使用个人账户登录。
-
-旧共享 token 的 URL、Header、Cookie 与 localStorage 路径已移除；无论本机或远程都只接受用户 session。`PERSONAL_OS_REMOTE` 是远程部署安全信号，也是非 localhost 绑定的显式许可，不是第二套鉴权。
+旧共享 token 的 URL、Header、Cookie 与 localStorage 路径已移除；无论本机或远程都只接受账号密码建立的用户 session。`PERSONAL_OS_REMOTE` 是远程可达的显式安全信号，不是第二套鉴权。`PERSONAL_OS_PROXY_TOKEN` 只保护 Nginx→Flask 的内部代理信任边界，也不是用户登录凭据。
 
 **数据库备份**：
 
 ```bash
-python scripts/backup-db.py
+python ../scripts/backup-db.py --help
 ```
 
-备份至 `personal-system-v2/backups/`，默认保留 30 份。
+数据库备份命令不再含指向真实数据库的默认路径。生产备份、manifest 验证、staged migration、release pointer 与完整回滚顺序见 [`docs/phase-5-database-cutover-runbook.md`](../docs/phase-5-database-cutover-runbook.md)；Phase 4.2 只在 fixture/临时数据库演练，不执行真实切换。
+
+备份目录必须通过 `--backup-dir` 显式指定且预先存在；工具不自动裁剪历史备份。
 
 **v2.2 Phase 2 staged migration（仅本地开发/发布准备，不切生产）**：
 
@@ -109,9 +115,16 @@ python scripts/verify-v2.2-migration.py LEGACY.db STAGED.db
 
 源库只读、目标必须是不存在的新文件；16 张业务表的 ID、字段、时间、JSON、外键与 `sqlite_sequence` 均逐表校验。普通 `init_db()` 遇到 legacy schema 会停止，不会自动绑定管理员。完整安全流程见 [开发指南](../docs/development-guide.md#v22-离线-staged-migration)。
 
-## 环境变量
+## 配置职责与环境变量
 
-在项目根目录创建 `.env`（参考 `.env.example`）：
+项目根目录 `.env`（参考 `.env.example`）只用于本机开发。生产必须按职责分离：
+
+- `deploy/launcher.env.example`：只承载获批准的 app version 与 git commit 元数据；
+- `deploy/runtime.env.example`：承载生产安全变量，禁止包含 `YD_OS_DB_PATH` 或 Gunicorn 覆盖项；
+- release descriptor：绑定 code/config/DB/manifest，`production_launcher.py` 校验后注入生产 `YD_OS_DB_PATH`；
+- `deploy/psy-v22.service`：调用 launcher，不能绕过它直接运行 `production.py` 或 Gunicorn。
+
+下表是变量职责总览，不表示所有变量都应写入项目 `.env`：
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
@@ -119,21 +132,25 @@ python scripts/verify-v2.2-migration.py LEGACY.db STAGED.db
 | `DEEPSEEK_BASE_URL` | 否 | API 地址，默认 `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | 否 | 锁定模型；设置后 AI管理页不可改 |
 | `DEEPSEEK_TIMEOUT` | 否 | 超时秒数，默认 60 |
-| `SECRET_KEY` | 生产/远程/非 loopback 必填 | Flask session 签名密钥，至少 32 字节强随机值 |
-| `PERSONAL_OS_ENV` | 是 | 本机开发显式设 `development`；缺失/未知值与 `production` 均按加固模式处理 |
-| `PERSONAL_OS_REMOTE` | 远程运行必填 | 远程部署安全信号；也许可非 localhost 绑定，不承担鉴权 |
-| `PERSONAL_OS_BIND_HOST` | 否 | 显式绑定地址，默认 `127.0.0.1`；仅 REMOTE=1 时允许非 localhost |
+| `SECRET_KEY` | 加固运行必填 | Flask session 签名密钥，至少 32 字节并通过弱值/熵校验 |
+| `PERSONAL_OS_ENV` | 是 | 本机开发精确设 `development`，生产/远程精确设 `production`；缺失/未知值拒绝运行 |
+| `PERSONAL_OS_REMOTE` | 远程运行必填 | 远程可达安全信号，不承担鉴权或放宽监听地址 |
+| `PERSONAL_OS_BIND_HOST` | 否 | 默认 `127.0.0.1`；加固运行禁止非 loopback 绑定 |
+| `YD_OS_DB_PATH` | launcher 注入 | 本地开发/测试可指向临时库；生产禁止写入 runtime env，由 descriptor 绑定 |
+| `PERSONAL_OS_TRUSTED_HOSTS` | 生产必填 | 逗号分隔的精确公网 DNS 名/IP；禁止通配符、URL 与端口 |
+| `PERSONAL_OS_TRUSTED_PROXY` | 生产必填 | 直接连接应用的唯一精确 loopback 代理 IP |
+| `PERSONAL_OS_PROXY_TOKEN` | 生产必填 | Nginx→Flask 内部强随机 token，必须与 `SECRET_KEY` 不同；不是用户认证凭据 |
 | `PERSONAL_OS_BG` | 否 | 仅关闭正常本地开发的 debug/reloader，不能降低生产安全配置 |
 
 未配置 `DEEPSEEK_API_KEY` 时，CRUD 功能正常，AI 按钮不可用。
 
-> **安全提示**：远程使用必须设置远程/生产信号、强 `SECRET_KEY` 并使用 HTTPS；不要将 Flask 5000 端口直接暴露到公网。未标注环境不会进入本地开发模式；反向代理仍须显式设置远程/生产信号，以表达部署意图。Phase 2 只完成 schema 所有权与 staged migration，Phase 3 Repository 查询隔离尚未完成；中央门禁仍只允许普通用户访问认证与改密表面，管理员继续作为唯一业务使用者。
+> **安全提示**：远程使用必须设置生产/远程信号、强 `SECRET_KEY`、精确 Host/代理信任并使用 HTTPS；不要将 5000 端口直接暴露。Phase 3 已完成 owner-scoped Repository/Service/AI 隔离并开放普通用户个人空间；Phase 4.1 的代码仍未部署，正式生产状态不因本地实现而改变。
 
 ## 数据文件
 
 | 路径 | 说明 |
 |------|------|
-| `data/yd_os.db` | SQLite 主数据库（git 忽略） |
+| `data/yd_os.db` | 既有真实数据库路径（git 忽略）；开发、测试和 shadow 禁止访问，v2.2 生产使用 descriptor 绑定的外置数据库路径 |
 | `data/settings.json` | AI 模型选择（git 忽略） |
 | `prompts/` | AI 场景提示词（可经 AI管理页编辑） |
 | `changelog.json` | 版本日志数据源 |

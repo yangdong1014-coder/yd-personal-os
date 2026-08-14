@@ -77,7 +77,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   window.OPPORTUNITY_STATUSES = {{ opportunity_statuses | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>

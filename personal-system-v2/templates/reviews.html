@@ -85,7 +85,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>window.CAPABILITY_MODULES = {{ capability_modules | tojson }};</script>
+<script nonce="{{ csp_nonce }}">window.CAPABILITY_MODULES = {{ capability_modules | tojson }};</script>
 <script src="{{ url_for('static', filename='js/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai-modal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/reviews.js') }}"></script>

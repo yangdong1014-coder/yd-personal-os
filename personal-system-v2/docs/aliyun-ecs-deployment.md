@@ -1,5 +1,7 @@
 # PSY-1 Aliyun ECS Deployment MVP
 
+> **历史归档，不是 v2.2 部署手册。** 本文只记录 2026-06-19 的 v1.14.0 状态。Gunicorn 继续作为 v2.2 正式 WSGI Server，但本文中的旧启动参数、Tailscale HTTP Serve 和共享 access token 均不构成 v2.2 Phase 4 安全契约。v2.2 的候选启动链和配置仅见 `deploy/psy-v22.service`、`deploy/nginx-psy-v22.conf` 与 `production_launcher.py`，仍须 Phase 5 单独审批和真实 Ubuntu smoke；禁止据此文执行 v2.2 部署。当前任务也未操作 ECS、Tailscale、Nginx、systemd 或真实数据库。
+
 Date: 2026-06-19
 Version: v1.14.0
 
@@ -70,7 +72,7 @@ Never commit:
 - .env
 - .env backups
 - DeepSeek API keys
-- PERSONAL_OS_ACCESS_TOKEN
+- historical shared access credentials
 - yd_os.db
 - database backups
 - .venv/
@@ -80,16 +82,17 @@ Never commit:
 - ECS deployment: done
 - systemd service: running
 - Tailscale HTTP access: working
-- Token login: working
+- Historical shared-token login: retired in v2.2
 - DeepSeek API call: working
 - Real database migration: pending
 - Automatic backup: pending
+- v2.2 backup/cutover/rollback 工具已仅在临时数据库验证；正式操作必须使用 [`../../docs/phase-5-database-cutover-runbook.md`](../../docs/phase-5-database-cutover-runbook.md)，本文旧部署命令不得替代该门禁
 - Domain and ICP filing plan: pending
 
 ## Next Steps
 
 - Rotate exposed DeepSeek API Key
-- Rotate PERSONAL_OS_ACCESS_TOKEN
+- Remove any remaining historical shared access credentials
 - Migrate real yd_os.db
 - Add automatic database backup
 - Evaluate domain, ICP filing, and public personal website access
