@@ -1,6 +1,17 @@
 {
-  "current": "v2.1.4",
+  "current": "v2.2.0-shadow",
   "entries": [
+    {
+      "version": "v2.2.0-shadow",
+      "date": "2026-08-14",
+      "title": "PSY v2.2.0 Shadow Candidate",
+      "type": "candidate",
+      "items": [
+        "标识当前代码为待验收的 v2.2 Shadow candidate，不代表正式发布或生产切换。",
+        "支持经 launcher 严格批准的独立 loopback Gunicorn 端口，同时保留 127.0.0.1:5000 正式默认值。",
+        "增加独立 shadow systemd、Nginx、配置与 staged 数据库部署契约。"
+      ]
+    },
     {
       "version": "v2.1.4",
       "date": "2026-07-27",

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from release_switch import ReleaseSwitchError, resolve_active_release
+from shadow_deployment import ShadowDeploymentError, validate_shadow_identity
 
 
 class ProductionLaunchError(RuntimeError):
@@ -65,11 +66,17 @@ _FORBIDDEN_PARENT_ENV_KEYS = frozenset(
         "PYTHONHOME",
         "PYTHONINSPECT",
         "PYTHONPATH",
+        "PSY_GUNICORN_BIND_PORT",
     }
 )
 _KEY_RE = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
+_PORT_RE = re.compile(r"[0-9]+\Z")
 _MAX_CONFIG_BYTES = 64 * 1024
+DEFAULT_BIND_PORT = 5000
+MIN_UNPRIVILEGED_PORT = 1024
+MAX_TCP_PORT = 65535
+GUNICORN_BIND_PORT_ENV = "PSY_GUNICORN_BIND_PORT"
 
 
 @dataclass(frozen=True)
@@ -85,8 +92,27 @@ class LaunchPlan:
     gunicorn_config: Path
     config_path: Path
     database_path: Path
+    database_manifest_path: Path
+    separated_database_artifacts: bool
+    shadow_instance: str | None
+    bind_port: int
     runtime_environment: dict[str, str]
     command: tuple[str, ...]
+
+
+def validate_bind_port(value) -> int:
+    """Return one strict, non-privileged TCP port or fail closed."""
+    if isinstance(value, bool):
+        raise ProductionLaunchError("bind port must be a decimal integer")
+    raw = str(value)
+    if len(raw) > 5 or not _PORT_RE.fullmatch(raw):
+        raise ProductionLaunchError("bind port must be a decimal integer")
+    port = int(raw, 10)
+    if not MIN_UNPRIVILEGED_PORT <= port <= MAX_TCP_PORT:
+        raise ProductionLaunchError(
+            f"bind port must be between {MIN_UNPRIVILEGED_PORT} and {MAX_TCP_PORT}"
+        )
+    return port
 
 
 def _canonical_existing(path, *, label: str, directory: bool) -> Path:
@@ -218,6 +244,8 @@ def _validate_posix_permissions(
     config_path: Path,
     database_path: Path,
     manifest_path: Path,
+    database_root: Path | None = None,
+    require_separated_database_artifacts: bool = False,
 ) -> None:
     if os.name == "nt":
         return
@@ -240,6 +268,17 @@ def _validate_posix_permissions(
         "release descriptor directory": descriptor.parent,
         "runtime config directory": config_path.parent,
     }
+    if require_separated_database_artifacts:
+        if database_root is None:
+            raise ProductionLaunchError(
+                "database root is required for separated artifact validation"
+            )
+        root_owned_directories.update(
+            {
+                "database root": database_root,
+                "database manifest directory": manifest_path.parent,
+            }
+        )
     for label, path in root_owned_directories.items():
         details = _validate_mode(
             path,
@@ -281,6 +320,34 @@ def _validate_posix_permissions(
         raise ProductionLaunchError(
             "runtime database must be owned by the non-root service user"
         )
+    if require_separated_database_artifacts:
+        database_directory_details = _validate_mode(
+            database_path.parent,
+            label="runtime database directory",
+            forbidden_bits=stat.S_IRWXG | stat.S_IRWXO,
+        )
+        if (
+            effective_uid == 0
+            or database_directory_details.st_uid != effective_uid
+        ):
+            raise ProductionLaunchError(
+                "runtime database directory must be owned by the non-root "
+                "service user"
+            )
+
+
+def _validate_separated_database_artifacts(
+    *, database_root: Path, database_path: Path, manifest_path: Path
+) -> None:
+    """Require mutable database and immutable evidence to use distinct parents."""
+    if database_path.parent == database_root:
+        raise ProductionLaunchError(
+            "separated runtime database must use a dedicated writable directory"
+        )
+    if database_path.parent == manifest_path.parent:
+        raise ProductionLaunchError(
+            "runtime database and immutable manifest must use separate directories"
+        )
 
 
 def _build_runtime_environment(
@@ -290,6 +357,7 @@ def _build_runtime_environment(
     release: dict,
     code_root: Path,
     database_path: Path,
+    bind_port: int,
 ) -> dict[str, str]:
     present_forbidden = sorted(_FORBIDDEN_PARENT_ENV_KEYS & os.environ.keys())
     if present_forbidden:
@@ -318,6 +386,7 @@ def _build_runtime_environment(
             "PSY_RELEASE_CONFIG_PATH": release["application"]["config_path"],
             "PSY_RELEASE_CONFIG_SHA256": release["application"]["config_sha256"],
             "PSY_RELEASE_DATABASE_PATH": str(database_path),
+            GUNICORN_BIND_PORT_ENV: str(bind_port),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONUNBUFFERED": "1",
         }
@@ -334,8 +403,31 @@ def prepare_launch(
     database_root,
     expected_application_version: str,
     expected_git_commit: str,
+    bind_port=DEFAULT_BIND_PORT,
+    expected_database_path=None,
+    require_separated_database_artifacts: bool = False,
+    shadow_instance=None,
+    expected_release_id=None,
 ) -> LaunchPlan:
     """Resolve and validate the complete selected production launch plan."""
+    bind_port = validate_bind_port(bind_port)
+    approved_shadow_instance = None
+    approved_release_id = None
+    if require_separated_database_artifacts:
+        if expected_database_path is None:
+            raise ProductionLaunchError(
+                "separated database artifacts require an explicitly approved "
+                "database path"
+            )
+        try:
+            approved_shadow_instance = validate_shadow_identity(
+                shadow_instance, label="shadow instance id"
+            )
+            approved_release_id = validate_shadow_identity(
+                expected_release_id, label="shadow release id"
+            )
+        except ShadowDeploymentError as exc:
+            raise ProductionLaunchError(str(exc)) from exc
     if not str(expected_application_version or "").startswith("v2.2"):
         raise ProductionLaunchError("launcher only accepts an approved v2.2 release")
     if not _COMMIT_RE.fullmatch(str(expected_git_commit or "")):
@@ -356,6 +448,18 @@ def prepare_launch(
     database_root = _canonical_existing(
         database_root, label="database root", directory=True
     )
+    approved_database_path = None
+    if expected_database_path is not None:
+        approved_database_path = _canonical_existing(
+            expected_database_path,
+            label="approved runtime database",
+            directory=False,
+        )
+        _require_within(
+            approved_database_path,
+            database_root,
+            label="approved runtime database",
+        )
     _require_within(pointer, descriptor_root, label="active release pointer")
 
     try:
@@ -371,12 +475,31 @@ def prepare_launch(
     except ReleaseSwitchError as exc:
         raise ProductionLaunchError(str(exc)) from exc
 
+    if require_separated_database_artifacts:
+        try:
+            selected_release_id = validate_shadow_identity(
+                release["release_id"], label="selected shadow release id"
+            )
+        except (KeyError, ShadowDeploymentError) as exc:
+            raise ProductionLaunchError("selected shadow release id is invalid") from exc
+        if selected_release_id != approved_release_id:
+            raise ProductionLaunchError(
+                "selected shadow release id does not match the approved release id"
+            )
+
     descriptor = Path(release["descriptor"])
     code_root = Path(release["application"]["code_root"])
     entrypoint = Path(release["application"]["entrypoint"])
     config_path = Path(release["application"]["config_path"])
     database_path = Path(release["database"]["path"])
     manifest_path = Path(release["database"]["manifest_path"])
+    if (
+        approved_database_path is not None
+        and database_path != approved_database_path
+    ):
+        raise ProductionLaunchError(
+            "descriptor database does not match the explicitly approved path"
+        )
     for path, root, label in (
         (descriptor, descriptor_root, "release descriptor"),
         (code_root, release_root, "release code root"),
@@ -385,6 +508,12 @@ def prepare_launch(
         (manifest_path, database_root, "database manifest"),
     ):
         _require_within(path, root, label=label)
+    if require_separated_database_artifacts:
+        _validate_separated_database_artifacts(
+            database_root=database_root,
+            database_path=database_path,
+            manifest_path=manifest_path,
+        )
     try:
         config_path.relative_to(code_root)
     except ValueError:
@@ -409,6 +538,8 @@ def prepare_launch(
         config_path=config_path,
         database_path=database_path,
         manifest_path=manifest_path,
+        database_root=database_root,
+        require_separated_database_artifacts=require_separated_database_artifacts,
     )
     environment = _build_runtime_environment(
         runtime_values,
@@ -416,6 +547,7 @@ def prepare_launch(
         release=release,
         code_root=code_root,
         database_path=database_path,
+        bind_port=bind_port,
     )
     command = (
         sys.executable,
@@ -441,6 +573,10 @@ def prepare_launch(
         gunicorn_config=gunicorn_config,
         config_path=config_path,
         database_path=database_path,
+        database_manifest_path=manifest_path,
+        separated_database_artifacts=require_separated_database_artifacts,
+        shadow_instance=approved_shadow_instance,
+        bind_port=bind_port,
         runtime_environment=environment,
         command=command,
     )
@@ -488,8 +624,11 @@ def _report(plan: LaunchPlan) -> dict:
         "entrypoint": str(plan.entrypoint),
         "config_path": str(plan.config_path),
         "database_path": str(plan.database_path),
+        "database_manifest_path": str(plan.database_manifest_path),
+        "separated_database_artifacts": plan.separated_database_artifacts,
+        "shadow_instance": plan.shadow_instance,
         "gunicorn": {
-            "bind": "127.0.0.1:5000",
+            "bind": f"127.0.0.1:{plan.bind_port}",
             "workers": 1,
             "worker_class": "gthread",
             "threads": 4,
@@ -510,6 +649,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-app-version", required=True)
     parser.add_argument("--expected-git-commit", required=True)
     parser.add_argument(
+        "--bind-port",
+        default=str(DEFAULT_BIND_PORT),
+        help=(
+            "loopback Gunicorn port; defaults to 5000 and must be an "
+            "unprivileged decimal TCP port"
+        ),
+    )
+    parser.add_argument(
+        "--require-separated-database-artifacts",
+        action="store_true",
+        help=(
+            "require the writable database and immutable manifest to live in "
+            "different directories"
+        ),
+    )
+    parser.add_argument(
+        "--expected-database-path",
+        type=Path,
+        help=(
+            "exact runtime database approval; required for separated shadow artifacts"
+        ),
+    )
+    parser.add_argument(
+        "--shadow-instance",
+        help="strict Phase 5A shadow instance id",
+    )
+    parser.add_argument(
+        "--expected-release-id",
+        help="strict, explicitly approved Phase 5A shadow release id",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="resolve the active release and run its preflight without listening",
@@ -528,6 +698,13 @@ def main(argv=None) -> int:
             database_root=args.database_root,
             expected_application_version=args.expected_app_version,
             expected_git_commit=args.expected_git_commit,
+            bind_port=args.bind_port,
+            expected_database_path=args.expected_database_path,
+            require_separated_database_artifacts=(
+                args.require_separated_database_artifacts
+            ),
+            shadow_instance=args.shadow_instance,
+            expected_release_id=args.expected_release_id,
         )
         if args.check:
             run_selected_preflight(plan)

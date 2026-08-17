@@ -126,6 +126,7 @@ def inject_globals():
     return {
         "ai_enabled": config.is_ai_enabled(),
         "current_version": changelog.get_current_version(),
+        "build_identity": changelog.get_build_identity(),
         "nav_groups": NAV_GROUPS,
     }
 
@@ -864,6 +865,7 @@ def changelog_page():
         nav_items=NAV_ITEMS,
         entries=changelog.list_entries(),
         current_version=changelog.get_current_version(),
+        build_identity=changelog.get_build_identity(),
     )
 
 
@@ -1947,6 +1949,7 @@ def api_changelog():
         "ok": True,
         "data": {
             "current": changelog.get_current_version(),
+            "build_identity": changelog.get_build_identity(),
             "entries": changelog.list_entries(),
         },
     })

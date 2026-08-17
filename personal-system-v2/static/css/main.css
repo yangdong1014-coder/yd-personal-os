@@ -7848,6 +7848,8 @@ a:focus-visible,
   font-size: 0.68rem;
   line-height: 1.35;
   letter-spacing: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1023px) {
@@ -9411,6 +9413,21 @@ html.theme-light-cool textarea {
   color: var(--text-muted);
   font-size: 0.88rem;
   line-height: 1.65;
+}
+
+.auth-build-identity {
+  width: fit-content;
+  margin: 0.75rem 0 0;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid var(--nav-version-border);
+  border-radius: 999px;
+  background: var(--nav-version-bg);
+  color: var(--nav-version-color);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .auth-form {

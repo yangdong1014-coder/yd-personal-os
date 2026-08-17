@@ -58,13 +58,13 @@ python production_launcher.py \
   --check
 ```
 
-descriptor 选择 code tree、入口、外置 runtime config 与 staged DB；launcher 校验 pointer/descriptor/code/config/manifest 后，才从 descriptor 注入绝对 `YD_OS_DB_PATH`，先运行所选入口的只读 preflight，再以固定命令 `python -m gunicorn --config <selected>/gunicorn.conf.py 'production:create_production_app()'` 替换自身。这个零参数 Gunicorn 工厂不会暴露可关闭 release context 门禁的参数。runtime config 必须显式提供 `PERSONAL_OS_ENV=production`、`PERSONAL_OS_REMOTE=1`、强随机 `SECRET_KEY`、精确 `PERSONAL_OS_TRUSTED_HOSTS`、唯一 loopback `PERSONAL_OS_TRUSTED_PROXY` 与独立强随机 `PERSONAL_OS_PROXY_TOKEN`；禁止配置 `YD_OS_DB_PATH` 或 Gunicorn 覆盖参数。可用 `python -c "import secrets; print(secrets.token_urlsafe(48))"` 分别生成密钥，不得把生成值写入 Git。
+descriptor 选择 code tree、入口、外置 runtime config 与 staged DB；launcher 校验 pointer/descriptor/code/config/manifest 后，才从 descriptor 注入绝对 `YD_OS_DB_PATH`，先运行所选入口的只读 preflight，再以固定命令 `python -m gunicorn --config <selected>/gunicorn.conf.py 'production:create_production_app()'` 替换自身。这个零参数 Gunicorn 工厂不会暴露可关闭 release context 门禁的参数。正式端口默认仍为 `127.0.0.1:5000`；`--bind-port` 只接受 1024–65535 的十进制端口，launcher 将批准值写入内部 `PSY_GUNICORN_BIND_PORT`，Gunicorn 只消费该值并继续固定 host 为 `127.0.0.1`。父进程若预置内部端口或 Gunicorn 覆盖变量会 fail closed。runtime config 必须显式提供 `PERSONAL_OS_ENV=production`、`PERSONAL_OS_REMOTE=1`、强随机 `SECRET_KEY`、精确 `PERSONAL_OS_TRUSTED_HOSTS`、唯一 loopback `PERSONAL_OS_TRUSTED_PROXY` 与独立强随机 `PERSONAL_OS_PROXY_TOKEN`；禁止配置 `YD_OS_DB_PATH` 或 Gunicorn 覆盖参数。可用 `python -c "import secrets; print(secrets.token_urlsafe(48))"` 分别生成密钥，不得把生成值写入 Git。
 
 门禁顺序为：launcher 解析 active release → selected `production.py --check` → Gunicorn preload → `production:create_production_app()` 同进程复验 release context/config/DB → 导入应用 → loopback 监听。生产入口不会调用 `init_db()`，schema/migration 仍必须在线下 staged 流程完成。每个加固请求只信任一个精确代理跳数，要求代理覆盖而非追加三项转发头并覆盖注入代理 token；应用在 ProxyFix 前校验 peer、头和 token，随后要求外部协议为 HTTPS、Host 在精确白名单内。`GET /api/health` 可由同机探针直连，响应仅包含 `status=up`。
 
 当前限制：登录预算是单个 Gunicorn worker 内、按来源指纹的 10 次失败/60 秒滑动窗口；成功只退回当前尝试，不清既有失败。一个来源在账户成功登录或 worker 重启前最多给同一规范账户贡献一次失败计数，5 个不同来源仍可触发 15 分钟锁定。为使边界精确，`gunicorn.conf.py` 强制 1 worker + 4 threads；扩为多 worker/多实例前必须采用共享限流存储。worker 重启会丢失来源贡献守卫但保留数据库失败计数，属于 MVP 已知边界；Step 4.3 必须核对真实 systemd 未覆盖 worker 数。MFA/OAuth/外部身份平台不在 Phase 4.1 范围。
 
-Phase 5 尚未实施。Phase 5A 必须先在 ECS 使用独立目录、独立配置/descriptor/pointer、批准的独立数据库副本、独立 Gunicorn 端口、shadow systemd unit 与 Nginx HTTPS 路由完成真实浏览器验收；它不得改正式 pointer 或真实生产库。只有验收通过并获得人工批准，才进入 Phase 5B 正式切换。
+Phase 5A.1 已在本地实现参数化 loopback 端口、独立 shadow systemd/Nginx 模板、精确批准 DB 路径和可写 DB/不可变 manifest 分离门禁；尚未安装或操作 ECS。ECS 执行必须按 [Phase 5A Shadow Deployment Runbook](phase-5a-shadow-deployment-runbook.md) 使用独立目录、配置/descriptor/pointer、批准的独立数据库副本和真实 HTTPS 路由完成浏览器验收，不得改正式 pointer 或真实生产库。只有验收通过并获得人工批准，才进入 Phase 5B 正式切换。
 
 ## 管理员初始化
 

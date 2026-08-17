@@ -84,9 +84,9 @@ Phase 5A 设计和执行时至少建立以下独立边界：
 
 shadow 数据库只能来自发布负责人预先批准、置于独立路径并具有来源身份记录的副本。副本必须记录 source identity、SHA-256、manifest、schema profile、app version 和 git commit；任何 migration 都只从该只读副本生成一个不存在的新 staged 文件。如何取得副本属于单独获批的运维动作，本文不授权从真实库复制。
 
-### 当前端口前置项
+### 当前端口与执行前置项
 
-现有 personal-system-v2/gunicorn.conf.py 与 production_launcher.py 将正式 bind 固定为 127.0.0.1:5000，并在启动时校验该值。独立 shadow 端口因此是 Phase 5A 必须先设计、实现和验证的部署能力；当前 Phase 4 不修改 Gunicorn、launcher、systemd 或 Nginx，也不能声称现有正式启动链可直接并行启动 shadow。未解决独立端口前，Phase 5A 不得启动服务。
+Phase 5A.1 在本地代码中保留正式默认 `127.0.0.1:5000`，并增加由 launcher 严格批准、Gunicorn 单一消费的非特权 loopback port；当前 shadow 候选为 5100。该能力、独立 unit/Nginx 模板和权限契约尚未在 ECS 安装或运行，不构成 Phase 5A 部署通过。实际命令、路径与 21 步验收以 [Phase 5A Shadow Deployment Runbook](phase-5a-shadow-deployment-runbook.md) 为准，必须另获执行批准。
 
 ### Phase 5A 执行与验收清单
 

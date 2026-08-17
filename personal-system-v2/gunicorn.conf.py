@@ -2,8 +2,16 @@
 
 import os
 
+from production_launcher import (
+    DEFAULT_BIND_PORT,
+    GUNICORN_BIND_PORT_ENV,
+    validate_bind_port,
+)
 
-bind = "127.0.0.1:5000"
+bind_port = validate_bind_port(
+    os.environ.get(GUNICORN_BIND_PORT_ENV, str(DEFAULT_BIND_PORT))
+)
+bind = f"127.0.0.1:{bind_port}"
 workers = 1
 worker_class = "gthread"
 threads = 4
@@ -28,8 +36,9 @@ limit_request_field_size = 8190
 def on_starting(server):
     """Reject CLI/environment overrides that weaken the in-process guards."""
     configured_bind = list(server.cfg.bind)
-    if configured_bind != ["127.0.0.1:5000"]:
-        raise RuntimeError("PSY production Gunicorn must bind 127.0.0.1:5000")
+    expected_bind = f"127.0.0.1:{bind_port}"
+    if configured_bind != [expected_bind]:
+        raise RuntimeError(f"PSY production Gunicorn must bind {expected_bind}")
     if server.cfg.workers != 1:
         raise RuntimeError("PSY MVP login guards require exactly one Gunicorn worker")
     if server.cfg.worker_class_str != "gthread" or server.cfg.threads != 4:

@@ -1,0 +1,4 @@
+# Render into a root-owned 0640 shadow-only Nginx snippet. Use the exact same
+# value as PERSONAL_OS_PROXY_TOKEN in that shadow instance's runtime.env.
+# Nginx overwrites, never appends, any client-supplied token header.
+proxy_set_header X-PSY-Proxy-Token "replace_with_the_shadow_runtime_proxy_token";

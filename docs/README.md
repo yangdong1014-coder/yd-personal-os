@@ -13,6 +13,7 @@
 | [data-model.md](data-model.md) | 核心数据表、外键与级联关系 |
 | [release-process.md](release-process.md) | 版本发布流程：changelog、标签、推送、Actions |
 | [phase-5-database-cutover-runbook.md](phase-5-database-cutover-runbook.md) | Phase 5A ECS 影子部署验收，以及获人工批准后的 Phase 5B 数据库切换/回滚 SOP（待执行） |
+| [phase-5a-shadow-deployment-runbook.md](phase-5a-shadow-deployment-runbook.md) | Phase 5A 独立 shadow 的 21 步参数化部署、权限、HTTPS、浏览器与非影响验收 SOP（待批准执行） |
 | [home-server.md](home-server.md) | **历史资料**：Windows Home Server、Tailscale 与本地受限验收记录；不是当前部署路线 |
 | [aliyun-ecs-deployment.md](../personal-system-v2/docs/aliyun-ecs-deployment.md) | **历史资料**：旧版阿里云 ECS/Tailscale 部署说明；不是 v2.2 执行 runbook |
 | [obsidian-sync-plan.md](obsidian-sync-plan.md) | Obsidian 联动策略（v1.10 一向导出） |

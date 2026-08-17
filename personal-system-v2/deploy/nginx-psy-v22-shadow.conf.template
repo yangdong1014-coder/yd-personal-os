@@ -1,0 +1,115 @@
+# Render only with shadow_deployment.py after its identity/input validation.
+# Rendering must fail while any deployment placeholder remains.
+# This template is intentionally non-default, IPv4-address-specific, and
+# independent of the existing production and Tailscale configurations.
+map $request_method $psy_shadow_login_limit_key {
+    default "";
+    POST $binary_remote_addr;
+}
+limit_req_zone $psy_shadow_login_limit_key zone=psy_shadow_login_source:10m rate=10r/m;
+
+upstream psy_v22_shadow {
+    server 127.0.0.1:__PSY_SHADOW_PORT__;
+    keepalive 8;
+}
+
+server {
+    listen __PSY_SHADOW_BIND_ADDRESS__:80;
+    server_name __PSY_SHADOW_SERVER_NAME__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __PSY_SHADOW_ACME_ROOT__;
+    }
+
+    location / {
+        return 308 https://__PSY_SHADOW_SERVER_NAME__$request_uri;
+    }
+}
+
+server {
+    listen __PSY_SHADOW_BIND_ADDRESS__:443 ssl http2;
+    server_name __PSY_SHADOW_SERVER_NAME__;
+
+    ssl_certificate __PSY_SHADOW_CERTIFICATE_PATH__;
+    ssl_certificate_key __PSY_SHADOW_CERTIFICATE_KEY_PATH__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+
+    client_max_body_size 16m;
+    client_body_timeout 15s;
+    keepalive_timeout 15s;
+    send_timeout 30s;
+    server_tokens off;
+
+    # Flask remains the sole source for application security/cache headers.
+    location = /api/health {
+        access_log off;
+        proxy_pass http://psy_v22_shadow;
+        proxy_http_version 1.1;
+        proxy_set_header Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-By "";
+        include __PSY_SHADOW_PROXY_AUTH_SNIPPET__;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+    }
+
+    location = /login {
+        limit_req zone=psy_shadow_login_source burst=9 nodelay;
+        limit_req_status 429;
+        proxy_pass http://psy_v22_shadow;
+        proxy_http_version 1.1;
+        proxy_set_header Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-By "";
+        include __PSY_SHADOW_PROXY_AUTH_SNIPPET__;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+    }
+
+    location /static/ {
+        proxy_pass http://psy_v22_shadow;
+        proxy_http_version 1.1;
+        proxy_set_header Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-By "";
+        include __PSY_SHADOW_PROXY_AUTH_SNIPPET__;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+    }
+
+    location / {
+        proxy_pass http://psy_v22_shadow;
+        proxy_http_version 1.1;
+        proxy_set_header Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host __PSY_SHADOW_SERVER_NAME__;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-By "";
+        include __PSY_SHADOW_PROXY_AUTH_SNIPPET__;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+    }
+}

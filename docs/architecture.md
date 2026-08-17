@@ -44,7 +44,7 @@ Gunicorn 不直接暴露公网。Nginx 终止 HTTPS，并通过单一 loopback h
 - JSON API：CRUD、导入/导出、AI 代理、changelog
 - Flask-Login session：每个请求从 `users` 重载账户，并验证 `is_active` 与 `auth_version`
 - Flask-WTF CSRF：覆盖登录、退出、改密、管理 API 与全部既有写请求
-- 全局注入：`current_version`（来自 changelog）、`ai_enabled`、`current_user`
+- 全局注入：`current_version`（来自 changelog）、`build_identity`（candidate version + launcher release id）、`ai_enabled`、`current_user`
 
 ## 数据库（SQLite）
 
@@ -254,6 +254,6 @@ JSON Export 只输出当前用户的 16 张业务表，不输出 `users`、认�
 
 Phase 4.3 已生成 systemd/Nginx 安全模板，并留下本地受限环境的页面布局、登录流程和隔离行为 evidence；这些内容不代表已发布或部署，也不能证明 ECS、公网 HTTPS、真实域名或 Secure Cookie 链路已通过。Windows 本地 TLS、自签证书、本地 CA 与 reverse-proxy harness 仅属于历史模拟验收条件，不再是 Phase 4 收口阻塞项。
 
-Phase 5A 将在 ECS 上以独立 code/config/descriptor/pointer、批准的独立数据库副本、独立 Gunicorn 端口和 shadow systemd/Nginx 路由并行验证，不能停止现有生产、替换正式 active pointer 或接触真实生产库。只有公网 HTTPS 与真实浏览器验收通过并获得人工批准，才可进入 Phase 5B 正式切换。该影子部署尚未实施，不能写成已完成能力。
+Phase 5A.1 已在本地增加受控 shadow 能力：launcher 严格批准非特权端口并把唯一值交给 Gunicorn，HTTP host 始终为 loopback；shadow unit/template 使用独立 code/venv/config/pointer/DB/upstream/server_name，并要求精确批准的 runtime DB 与不可变 manifest 分目录。ECS shadow 仍未安装或运行，不能停止现有生产、替换正式 active pointer 或接触真实生产库。只有按 [Phase 5A Shadow Deployment Runbook](phase-5a-shadow-deployment-runbook.md) 完成公网 HTTPS 与真实浏览器验收并获得人工批准，才可进入 Phase 5B。
 
-当前说明见 [development-guide.md](development-guide.md) 与 [Phase 5 数据库切换与回滚 Runbook](phase-5-database-cutover-runbook.md)；[home-server.md](home-server.md) 仅保留历史参考。
+当前说明见 [development-guide.md](development-guide.md)、[Phase 5A Shadow Deployment Runbook](phase-5a-shadow-deployment-runbook.md) 与 [Phase 5 数据库切换与回滚 Runbook](phase-5-database-cutover-runbook.md)；[home-server.md](home-server.md) 仅保留历史参考。

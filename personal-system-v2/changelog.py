@@ -9,6 +9,7 @@ _TYPE_LABELS = {
     "fix": "修复",
     "refactor": "重构",
     "docs": "文档",
+    "candidate": "候选构建",
 }
 
 
@@ -30,6 +31,21 @@ def _load():
 
 def get_current_version():
     return _load()["current"]
+
+
+def get_build_identity(environ=None):
+    """Return a visible candidate identity without declaring a formal release."""
+    environment = os.environ if environ is None else environ
+    version = get_current_version()
+    release_id = " ".join(str(environment.get("PSY_RELEASE_ID", "")).split())
+    if not release_id:
+        return version
+    approved_version = " ".join(
+        str(environment.get("PSY_EXPECTED_APP_VERSION", "")).split()
+    )
+    if approved_version:
+        version = approved_version
+    return f"{version} · {release_id[:128]}"
 
 
 def list_entries():

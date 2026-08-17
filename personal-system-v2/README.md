@@ -39,9 +39,9 @@ python app.py
 
 生产或远程运行禁止使用 `python app.py` 或直接调用 Gunicorn。必须由 active release launcher 以批准的版本、commit 和路径根进入；只读诊断示例见 `docs/development-guide.md`。
 
-`production_launcher.py` 是正式稳定入口：它只从 active release pointer 解析 descriptor 绑定的 code/config/DB，校验 hash/manifest 后运行所选 `production.py --check`，再无 shell 地 exec 固定 Gunicorn 命令。`production.py` 不创建或迁移数据库；Gunicorn 通过零参数 `production:create_production_app()` 在同一进程、监听前复验 release context、当前 v2.2 schema、integrity、外键和唯一启用管理员，失败即退出。`gunicorn.conf.py` 将 MVP 固定为 loopback、1 worker、gthread/4 threads 与 preload；应用只接受精确一跳代理覆盖提供的 `X-Forwarded-For`、`X-Forwarded-Proto=https`、白名单 `X-Forwarded-Host` 和独立强随机 `X-PSY-Proxy-Token`。除本机最小健康检查外，直连应用或伪造/多跳转发头都会拒绝。
+`production_launcher.py` 是正式稳定入口：它只从 active release pointer 解析 descriptor 绑定的 code/config/DB，校验 hash/manifest 后运行所选 `production.py --check`，再无 shell 地 exec 固定 Gunicorn 命令。`production.py` 不创建或迁移数据库；Gunicorn 通过零参数 `production:create_production_app()` 在同一进程、监听前复验 release context、当前 v2.2 schema、integrity、外键和唯一启用管理员，失败即退出。`gunicorn.conf.py` 将 MVP 固定为 loopback、1 worker、gthread/4 threads 与 preload；正式默认端口仍为 5000，shadow 端口只能由 launcher 的严格非特权端口参数批准并通过内部单一契约交给 Gunicorn。应用只接受精确一跳代理覆盖提供的 `X-Forwarded-For`、`X-Forwarded-Proto=https`、白名单 `X-Forwarded-Host` 和独立强随机 `X-PSY-Proxy-Token`。除本机最小健康检查外，直连应用或伪造/多跳转发头都会拒绝。
 
-本步骤只建立本地生产运行时门禁，尚未执行真实 Nginx/systemd/ECS、数据库切换、发布或部署。Phase 5A 必须先做独立 ECS shadow 并完成公网 HTTPS 与真实浏览器验收，获得人工批准后才可进入 Phase 5B 正式切换。MFA 不在当前 P0 范围。
+Phase 5A.1 只建立本地 shadow 部署能力与 candidate build identity；`deploy/psy-v22-shadow@.service`、shadow Nginx/config 模板和 [21 步 runbook](../docs/phase-5a-shadow-deployment-runbook.md) 尚未在 ECS 安装或执行。Phase 5A 必须另获批准并完成公网 HTTPS 与真实浏览器验收，获得再次人工批准后才可进入 Phase 5B 正式切换。MFA 不在当前 P0 范围。
 
 首次使用前设置持久 `SECRET_KEY`，并通过本地交互式命令初始化唯一管理员：
 

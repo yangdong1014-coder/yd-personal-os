@@ -18,7 +18,7 @@ git status          # 工作区干净
 git pull --ff-only  # 与 origin/main 同步
 ```
 
-确认 `changelog.json` 已更新目标版本条目，且 `current` 指向新版本。
+确认 `changelog.json` 已更新目标版本条目，且 `current` 指向新版本。`-shadow` candidate 只用于 Phase 5A 构建识别，不得创建正式 tag 或 GitHub Release，也不得描述为 Phase 5B 已完成。
 
 ## v2.2 Phase 5 部署门禁
 
