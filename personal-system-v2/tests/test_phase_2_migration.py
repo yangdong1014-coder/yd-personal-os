@@ -260,3 +260,134 @@ def test_multiple_legacy_positioning_anchors_fail_without_data_loss(tmp_path):
 
     assert not staged.exists()
     assert _digest(source) == before_hash
+
+
+def test_migration_preserves_valid_feedback_source_relation(tmp_path):
+    source = _create_legacy(tmp_path / "legacy.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        """
+        UPDATE assets
+        SET source_type = 'feedback', source_id = 100
+        WHERE id = 50
+        """
+    )
+    conn.commit()
+    conn.close()
+    staged = tmp_path / "staged.db"
+
+    result = _migrate(source, staged)
+    assert result["ok"] is True
+    assert result["repaired_orphans"] == []
+    report = result["verification"]
+    assert report["ok"] is True
+    assert report["soft_orphans"]["assets.source_id.feedback"] == 0
+
+    staged_conn = sqlite3.connect(staged)
+    staged_conn.row_factory = sqlite3.Row
+    try:
+        asset = staged_conn.execute("SELECT * FROM assets WHERE id = 50").fetchone()
+        assert asset["source_type"] == "feedback"
+        assert asset["source_id"] == 100
+    finally:
+        staged_conn.close()
+
+
+def test_migration_cleanses_orphan_feedback_source_relation_with_audit(tmp_path):
+    source = _create_legacy(tmp_path / "legacy.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        """
+        UPDATE assets
+        SET source_type = 'feedback', source_id = 99999
+        WHERE id = 50
+        """
+    )
+    conn.commit()
+    conn.close()
+    before_hash = _digest(source)
+    staged = tmp_path / "staged.db"
+
+    result = _migrate(source, staged)
+    assert result["ok"] is True
+    assert _digest(source) == before_hash
+    assert len(result["repaired_orphans"]) == 1
+    assert result["repaired_orphans"][0] == {
+        "table": "assets",
+        "record_id": 50,
+        "original_source_type": "feedback",
+        "original_source_id": 99999,
+        "remediation": "cleared_to_null",
+        "reason": "referenced_feedback_not_found",
+    }
+    report = result["verification"]
+    assert report["ok"] is True
+    assert report["soft_orphans"]["assets.source_id.feedback"] == 0
+    assert report["repaired_orphans"] == result["repaired_orphans"]
+
+    staged_conn = sqlite3.connect(staged)
+    staged_conn.row_factory = sqlite3.Row
+    try:
+        asset = staged_conn.execute("SELECT * FROM assets WHERE id = 50").fetchone()
+        assert asset["source_type"] == ""
+        assert asset["source_id"] is None
+        assert asset["title"] == "JSON/Unicode 资产"
+        assert asset["fields"] == '{"步骤":["一","二"],"score":3}'
+    finally:
+        staged_conn.close()
+
+
+def test_migration_handles_opportunity_experiment_review_sources(tmp_path):
+    source = _create_legacy(tmp_path / "legacy.db")
+    conn = sqlite3.connect(source)
+    # Insert assets pointing to valid and invalid opportunity/experiment/review
+    conn.execute(
+        """
+        INSERT INTO assets (
+            id, title, trigger_context, core_content, asset_type,
+            capability_tags, source_review_id, created_at, summary,
+            fields, reusable_scenario, maturity, reuse_count,
+            source_type, source_id, updated_at, asset_level, evidence,
+            external_expression, transferable_scene, productization_next_step
+        ) VALUES
+        (51, 'Valid Opp Asset', '', '', '案例复盘', '[]', NULL, '2026-01-05', '', '{}', '', '', 0, 'opportunity', 80, '2026-01-05', 'L1', '', '', '', ''),
+        (52, 'Orphan Opp Asset', '', '', '案例复盘', '[]', NULL, '2026-01-05', '', '{}', '', '', 0, 'opportunity', 88888, '2026-01-05', 'L1', '', '', '', ''),
+        (53, 'Valid Exp Asset', '', '', '案例复盘', '[]', NULL, '2026-01-05', '', '{}', '', '', 0, 'experiment', 90, '2026-01-05', 'L1', '', '', '', ''),
+        (54, 'Orphan Exp Asset', '', '', '案例复盘', '[]', NULL, '2026-01-05', '', '{}', '', '', 0, 'experiment', 99999, '2026-01-05', 'L1', '', '', '', ''),
+        (55, 'Valid Rev Asset', '', '', '案例复盘', '[]', 40, '2026-01-05', '', '{}', '', '', 0, 'review', 40, '2026-01-05', 'L1', '', '', '', ''),
+        (56, 'Orphan Rev Asset', '', '', '案例复盘', '[]', NULL, '2026-01-05', '', '{}', '', '', 0, 'review', 44444, '2026-01-05', 'L1', '', '', '', '')
+        """
+    )
+    conn.commit()
+    conn.close()
+    staged = tmp_path / "staged.db"
+
+    result = _migrate(source, staged)
+    assert result["ok"] is True
+    repaired = {r["record_id"]: r for r in result["repaired_orphans"]}
+    assert set(repaired.keys()) == {52, 54, 56}
+    assert repaired[52]["original_source_type"] == "opportunity"
+    assert repaired[54]["original_source_type"] == "experiment"
+    assert repaired[56]["original_source_type"] == "review"
+
+    report = result["verification"]
+    assert report["ok"] is True
+    assert all(count == 0 for count in report["soft_orphans"].values())
+
+    staged_conn = sqlite3.connect(staged)
+    staged_conn.row_factory = sqlite3.Row
+    try:
+        # Valid ones retained
+        assert staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 51").fetchone()["source_id"] == 80
+        assert staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 53").fetchone()["source_id"] == 90
+        assert staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 55").fetchone()["source_id"] == 40
+        # Orphan ones cleansed
+        row_52 = staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 52").fetchone()
+        assert row_52["source_type"] == "" and row_52["source_id"] is None
+        row_54 = staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 54").fetchone()
+        assert row_54["source_type"] == "" and row_54["source_id"] is None
+        row_56 = staged_conn.execute("SELECT source_type, source_id FROM assets WHERE id = 56").fetchone()
+        assert row_56["source_type"] == "" and row_56["source_id"] is None
+    finally:
+        staged_conn.close()
+

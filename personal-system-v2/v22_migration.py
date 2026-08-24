@@ -263,7 +263,15 @@ def _insert_admin(conn, username, email, password):
     return int(cursor.lastrowid)
 
 
-def _copy_table(source, staged, table, admin_id):
+ASSET_SOURCE_TARGETS = {
+    "review": "reviews",
+    "feedback": "feedback_items",
+    "experiment": "experiments",
+    "opportunity": "opportunities",
+}
+
+
+def _copy_table(source, staged, table, admin_id, repaired_orphans=None):
     source_columns = _table_columns(source, table)
     expected = LEGACY_V214_COLUMNS[table]
     if set(source_columns) != set(expected) or len(source_columns) != len(expected):
@@ -283,12 +291,36 @@ def _copy_table(source, staged, table, admin_id):
         rows = cursor.fetchmany(1000)
         if not rows:
             break
+        tuples_to_insert = []
+        for row in rows:
+            row_dict = dict(row)
+            if table == "assets":
+                source_type = (row_dict.get("source_type") or "").strip()
+                source_id = row_dict.get("source_id")
+                if source_type in ASSET_SOURCE_TARGETS and source_id is not None and source_id != "":
+                    target_table = ASSET_SOURCE_TARGETS[source_type]
+                    exists = source.execute(
+                        f"SELECT 1 FROM {_quote(target_table)} WHERE id = ?",
+                        (source_id,),
+                    ).fetchone()
+                    if not exists:
+                        row_dict["source_type"] = ""
+                        row_dict["source_id"] = None
+                        if repaired_orphans is not None:
+                            repaired_orphans.append({
+                                "table": "assets",
+                                "record_id": int(row_dict["id"]),
+                                "original_source_type": row["source_type"],
+                                "original_source_id": row["source_id"],
+                                "remediation": "cleared_to_null",
+                                "reason": f"referenced_{source_type}_not_found",
+                            })
+            tuples_to_insert.append(
+                tuple(row_dict[column] for column in source_columns) + (admin_id,)
+            )
         staged.executemany(
             f"INSERT INTO {_quote(table)} ({insert_columns}) VALUES ({placeholders})",
-            (
-                tuple(row[column] for column in source_columns) + (admin_id,)
-                for row in rows
-            ),
+            tuples_to_insert,
         )
         copied += len(rows)
     return copied
@@ -367,8 +399,11 @@ def migrate_legacy_database(
             staged, admin_username, admin_email, admin_password
         )
         row_counts = {}
+        repaired_orphans = []
         for table in database.PERSONAL_DATA_TABLES:
-            row_counts[table] = _copy_table(source, staged, table, admin_id)
+            row_counts[table] = _copy_table(
+                source, staged, table, admin_id, repaired_orphans=repaired_orphans
+            )
             if failure_hook is not None:
                 failure_hook(table, row_counts[table])
         _copy_sequences(source, staged)
@@ -403,6 +438,7 @@ def migrate_legacy_database(
             "admin_id": admin_id,
             "source_sha256": source_hash,
             "row_counts": row_counts,
+            "repaired_orphans": repaired_orphans,
             "verification": verification,
         }
     except Exception:
@@ -692,12 +728,97 @@ def verify_migration(source_path, staged_path):
                 f"SELECT COUNT(*) FROM main.{_quote(table)} WHERE user_id != ?",
                 (admin_id,),
             )
-            old_minus_new = _except_count(
-                conn, "legacy", "main", table, columns, admin_id
-            )
-            new_minus_old = _except_count(
-                conn, "legacy", "main", table, columns, admin_id, reverse=True
-            )
+            if table == "assets":
+                legacy_orphans = []
+                for source_type, target in ASSET_SOURCE_TARGETS.items():
+                    orphan_rows = conn.execute(
+                        f"""
+                        SELECT id, source_type, source_id FROM legacy.assets
+                        WHERE source_type = ? AND source_id IS NOT NULL
+                          AND NOT EXISTS (
+                            SELECT 1 FROM legacy.{_quote(target)} parent
+                            WHERE parent.id = legacy.assets.source_id
+                          )
+                        """,
+                        (source_type,),
+                    ).fetchall()
+                    for r in orphan_rows:
+                        legacy_orphans.append(r)
+
+                if legacy_orphans:
+                    orphan_ids = tuple(int(r["id"]) for r in legacy_orphans)
+                    other_cols = tuple(
+                        c for c in columns if c not in ("source_type", "source_id")
+                    )
+                    other_cols_sql = ", ".join(_quote(c) for c in other_cols)
+
+                    for r in legacy_orphans:
+                        staged_row = conn.execute(
+                            f"SELECT source_type, source_id, {other_cols_sql} FROM main.assets WHERE id = ? AND user_id = ?",
+                            (r["id"], admin_id),
+                        ).fetchone()
+                        legacy_row = conn.execute(
+                            f"SELECT {other_cols_sql} FROM legacy.assets WHERE id = ?",
+                            (r["id"],),
+                        ).fetchone()
+                        if (
+                            staged_row is None
+                            or (staged_row["source_type"] or "") != ""
+                            or staged_row["source_id"] is not None
+                            or tuple(staged_row[c] for c in other_cols)
+                            != tuple(legacy_row[c] for c in other_cols)
+                        ):
+                            issues.append(f"assets 孤儿清洗验证失败 id={r['id']}")
+
+                    placeholders = ", ".join("?" for _ in orphan_ids)
+                    column_sql = ", ".join(_quote(c) for c in columns)
+                    old_minus_new = _count_query(
+                        conn,
+                        f"""
+                        SELECT COUNT(*) FROM (
+                            SELECT {column_sql} FROM legacy.assets WHERE id NOT IN ({placeholders})
+                            EXCEPT
+                            SELECT {column_sql} FROM main.assets WHERE user_id = ? AND id NOT IN ({placeholders})
+                        )
+                        """,
+                        orphan_ids + (admin_id,) + orphan_ids,
+                    )
+                    new_minus_old = _count_query(
+                        conn,
+                        f"""
+                        SELECT COUNT(*) FROM (
+                            SELECT {column_sql} FROM main.assets WHERE user_id = ? AND id NOT IN ({placeholders})
+                            EXCEPT
+                            SELECT {column_sql} FROM legacy.assets WHERE id NOT IN ({placeholders})
+                        )
+                        """,
+                        (admin_id,) + orphan_ids + orphan_ids,
+                    )
+                    report["repaired_orphans"] = [
+                        {
+                            "table": "assets",
+                            "record_id": int(r["id"]),
+                            "original_source_type": r["source_type"],
+                            "original_source_id": r["source_id"],
+                            "remediation": "cleared_to_null",
+                            "reason": f"referenced_{r['source_type']}_not_found",
+                        }
+                        for r in legacy_orphans
+                    ]
+                else:
+                    old_minus_new = _except_count(
+                        conn, "legacy", "main", table, columns, admin_id
+                    )
+                    new_minus_old = _except_count(
+                        conn, "legacy", "main", table, columns, admin_id, reverse=True
+                    )
+            else:
+                old_minus_new = _except_count(
+                    conn, "legacy", "main", table, columns, admin_id
+                )
+                new_minus_old = _except_count(
+                    conn, "legacy", "main", table, columns, admin_id, reverse=True
+                )
             missing_ids = _except_count(
                 conn, "legacy", "main", table, ("id",), admin_id
             )
