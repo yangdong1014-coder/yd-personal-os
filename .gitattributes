@@ -1,3 +1,5 @@
 * text=auto eol=lf
 personal-system-v2/requirements.txt text eol=lf
 personal-system-v2/requirements.lock text eol=lf
+personal-system-v2/data export-ignore
+personal-system-v2/data/** export-ignore

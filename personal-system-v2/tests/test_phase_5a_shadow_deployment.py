@@ -801,8 +801,151 @@ def test_runbook_step_4_specifies_lockfile_with_hashes_and_no_nodeps():
     assert "pip-tools 7.6.1" in step_4_text
 
 
-def test_gitattributes_enforces_lf_for_requirements():
+def test_gitattributes_enforces_lf_and_release_bundle_exclusions():
+    # 1. Verify export-ignore attribute semantics are set using git check-attr
+    import subprocess
+    cmd = ["git", "check-attr", "export-ignore", "personal-system-v2/data", "personal-system-v2/data/.gitkeep"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT, check=True)
+    lines = proc.stdout.strip().splitlines()
+    assert len(lines) == 2, f"Expected 2 lines from git check-attr, got {lines}"
+    assert "personal-system-v2/data: export-ignore: set" in lines[0]
+    assert "personal-system-v2/data/.gitkeep: export-ignore: set" in lines[1]
+
+    # 2. Verify text content of .gitattributes
     gitattributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "* text=auto eol=lf" in gitattributes
     assert "personal-system-v2/requirements.txt text eol=lf" in gitattributes
     assert "personal-system-v2/requirements.lock text eol=lf" in gitattributes
+    assert "personal-system-v2/data export-ignore" in gitattributes
+    assert "personal-system-v2/data/** export-ignore" in gitattributes
+
+
+def is_forbidden_env_file(path_or_name: str) -> bool:
+    """
+    Detect whether a filename or path represents a forbidden environment file in release bundles.
+    Forbidden:
+      - .env, .env.production, .env.local, .env.*
+      - runtime.env, launcher.env, production.env, *.env
+      - config/runtime.env.backup, *.env.*
+    Allowed:
+      - Explicit example templates ending in .example (.env.example, runtime.env.example, etc.)
+      - Normal code/doc files like environment.py, envelope.json
+    """
+    basename = Path(path_or_name).name
+    if basename.endswith(".example"):
+        return False
+    if basename == ".env":
+        return True
+    if basename.startswith(".env."):
+        return True
+    if basename.endswith(".env"):
+        return True
+    if ".env." in basename:
+        return True
+    return False
+
+
+def test_forbidden_env_file_detection_synthetic_cases():
+    """Verify is_forbidden_env_file correctly classifies forbidden vs allowed env files."""
+    must_be_forbidden = [
+        ".env",
+        ".env.production",
+        "runtime.env",
+        "launcher.env",
+        "production.env",
+        "config/runtime.env.backup",
+        "deploy/runtime.env",
+        ".env.local",
+        "sub/dir/secret.env",
+        "custom.env.old",
+        "personal-system-v2/deploy/launcher.env",
+        "personal-system-v2/deploy/runtime.env",
+    ]
+    for path in must_be_forbidden:
+        assert is_forbidden_env_file(path) is True, f"Expected {path} to be classified as forbidden env file"
+
+    must_be_allowed = [
+        ".env.example",
+        "runtime.env.example",
+        "launcher.env.example",
+        "deploy/runtime.env.example",
+        "deploy/shadow-runtime.env.example",
+        "deploy/launcher.env.example",
+        "deploy/shadow-launcher.env.example",
+        "personal-system-v2/deploy/shadow-launcher.env.example",
+        "environment.py",
+        "envelope.json",
+        "main.css",
+        "test_auth.py",
+    ]
+    for path in must_be_allowed:
+        assert is_forbidden_env_file(path) is False, f"Expected {path} to be classified as allowed file"
+
+
+def test_git_archive_release_bundle_strictly_excludes_forbidden_items():
+    """
+    Dynamically verify git archive with --worktree-attributes excludes all forbidden entries:
+    - personal-system-v2/data directory does NOT exist
+    - Any members under personal-system-v2/data do NOT exist
+    - Cache path segments ('cache', '__pycache__', '.pytest_cache', '.mypy_cache') do NOT exist
+    - Venv path segments ('venv', '.venv') do NOT exist
+    - .git repository directory does NOT exist
+    - Real .env files do NOT exist (checked via unified is_forbidden_env_file)
+    - All archive members must be regular files or directories (no symlinks, hardlinks, devices, fifos)
+    """
+    import io
+    import subprocess
+    import tarfile
+
+    cmd = ["git", "archive", "--worktree-attributes", "--format=tar", "HEAD"]
+    proc = subprocess.run(cmd, capture_output=True, cwd=REPO_ROOT, check=True)
+
+    with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as tar:
+        members = tar.getmembers()
+        assert len(members) > 0, "Archive must contain members"
+
+        # 1. Hard assertion: personal-system-v2/data directory and any members under data
+        data_members = [
+            m.name for m in members
+            if m.name == "personal-system-v2/data"
+            or m.name.startswith("personal-system-v2/data/")
+            or any(seg == "data" for seg in m.name.split("/"))
+        ]
+        assert len(data_members) == 0, f"Archive contains forbidden data members: {data_members}"
+
+        # 2. Hard assertion: cache path segments by full segment
+        forbidden_cache_segments = {"cache", "__pycache__", ".pytest_cache", ".mypy_cache"}
+        cache_members = [
+            m.name for m in members
+            if any(seg in forbidden_cache_segments for seg in m.name.split("/"))
+        ]
+        assert len(cache_members) == 0, f"Archive contains forbidden cache members: {cache_members}"
+
+        # 3. Hard assertion: venv path segments by full segment
+        forbidden_venv_segments = {"venv", ".venv"}
+        venv_members = [
+            m.name for m in members
+            if any(seg in forbidden_venv_segments for seg in m.name.split("/"))
+        ]
+        assert len(venv_members) == 0, f"Archive contains forbidden venv members: {venv_members}"
+
+        # 4. Hard assertion: .git repository directory
+        git_members = [
+            m.name for m in members
+            if m.name == ".git" or m.name.startswith(".git/") or any(seg == ".git" for seg in m.name.split("/"))
+        ]
+        assert len(git_members) == 0, f"Archive contains forbidden .git members: {git_members}"
+
+        # 5. Hard assertion: Real .env files (using unified is_forbidden_env_file helper)
+        env_files = [
+            m.name for m in members
+            if is_forbidden_env_file(m.name)
+        ]
+        assert len(env_files) == 0, f"Archive contains forbidden .env files: {env_files}"
+
+        # 6. Hard assertion: All members must be regular files (REGTYPE) or directories (DIRTYPE)
+        invalid_type_members = [
+            f"type={m.type}:{m.name}" for m in members
+            if m.type not in (tarfile.REGTYPE, tarfile.DIRTYPE)
+        ]
+        assert len(invalid_type_members) == 0, f"Archive contains non-regular/non-dir members: {invalid_type_members}"
