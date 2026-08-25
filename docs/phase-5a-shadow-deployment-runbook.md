@@ -95,11 +95,28 @@ install -o root -g root -m 0755 \
 
 ### 4. 创建独立 venv
 
-使用 ECS 已核验的 Python 创建 `/opt/psy/venvs/shadow-${INSTANCE}`，从批准 release 的锁定依赖输入安装。核对：
+使用 ECS 已核验的 Python 创建 `/opt/psy/venvs/shadow-${INSTANCE}`，从批准 release 的 `personal-system-v2/requirements.lock` 以 `--require-hashes` 安装全部锁定依赖（不得使用 `--no-deps`）。
+
+锁文件生成基线：
+- 环境：Ubuntu 22.04 LTS (`x86_64`)
+- Python：`Python 3.10.12`
+- pip：`pip 26.2.1`
+- pip-tools：`pip-tools 7.6.1`
+- 生成命令：在 Scratch 隔离目录中执行相对路径 `pip-compile --generate-hashes --output-file=requirements.lock requirements.txt`
+
+安装与验收命令（以 `shadow-01` 为例）：
 
 ```bash
+"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m pip install \
+  --require-hashes \
+  -r "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/requirements.lock"
+
 "/opt/psy/venvs/shadow-${INSTANCE}/bin/python" --version
+"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m pip check
 "/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m gunicorn --version
+
+# group/world writable 权限审计（严禁包含 group/world 写权限）
+find "/opt/psy/venvs/shadow-${INSTANCE}" -perm -0002 -o -perm -0020
 ```
 
 不得引用正式 venv。

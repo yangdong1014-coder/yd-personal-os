@@ -728,3 +728,80 @@ def test_runbook_has_all_21_shadow_steps_and_stops_before_phase_5b():
     assert "nginx -t" in runbook
     assert "$INSTANCE" not in runbook
     assert "$RELEASE_ID" not in runbook
+
+
+def test_requirements_lock_file_integrity_and_security():
+    lock_file = APP_ROOT / "requirements.lock"
+    assert lock_file.is_file(), "requirements.lock must exist"
+
+    raw = lock_file.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf"), "requirements.lock must not contain UTF-8 BOM"
+    assert b"\r" not in raw, "requirements.lock must use pure LF line endings"
+    assert raw.endswith(b"\n"), "requirements.lock must end with a newline"
+
+    content = raw.decode("utf-8")
+    lines = content.splitlines()
+
+    # 1. Check prohibited patterns
+    forbidden_patterns = [
+        "/tmp/", "psy-lock-scratch", "file:", "git+", "--editable", "http://", "@",
+        "C:", "D:", "E:", "F:"
+    ]
+    for pattern in forbidden_patterns:
+        for idx, line in enumerate(lines, 1):
+            assert pattern not in line, f"Found forbidden pattern '{pattern}' at line {idx}: {line}"
+
+    # 2. Check packages, exact == pinning, and hashes
+    import re
+    packages = {}
+    current_pkg = None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        pkg_match = re.match(r"^([a-zA-Z0-9_\-\.]+)(?:==|===|@|<=|>=|<|>|~=)(.*)$", stripped)
+        if pkg_match and not stripped.startswith("--"):
+            current_pkg = pkg_match.group(1).lower()
+            req_str = stripped.rstrip(" \\")
+            packages[current_pkg] = {"req": req_str, "hashes": []}
+            assert "==" in req_str, f"Package {current_pkg} is not pinned with exact ==: {req_str}"
+            assert not any(op in req_str for op in (">", "<", "~=")), f"Package {current_pkg} contains loose operator: {req_str}"
+        elif stripped.startswith("--hash=") and current_pkg:
+            packages[current_pkg]["hashes"].append(stripped)
+
+    assert len(packages) >= 30, f"Expected full transitive dependencies locked, found {len(packages)}"
+    for pkg_name, pkg_data in packages.items():
+        assert len(pkg_data["hashes"]) > 0, f"Package {pkg_name} must contain at least one --hash"
+
+    # 3. Check Linux gunicorn
+    assert "gunicorn" in packages, "requirements.lock must contain gunicorn"
+    gunicorn_req = packages["gunicorn"]["req"]
+    assert "gunicorn==" in gunicorn_req
+    assert 'sys_platform != "win32"' in gunicorn_req or "win32" in gunicorn_req
+
+
+def test_runbook_step_4_specifies_lockfile_with_hashes_and_no_nodeps():
+    runbook = (REPO_ROOT / "docs" / "phase-5a-shadow-deployment-runbook.md").read_text(
+        encoding="utf-8"
+    )
+    # Extract Step 4 section
+    assert "### 4. 创建独立 venv" in runbook
+    step_4_start = runbook.find("### 4. 创建独立 venv")
+    step_5_start = runbook.find("### 5. 安装 shadow runtime.env")
+    assert step_4_start != -1 and step_5_start != -1
+    step_4_text = runbook[step_4_start:step_5_start]
+
+    assert "requirements.lock" in step_4_text
+    assert "--require-hashes" in step_4_text
+    assert "--no-deps" not in step_4_text or "不得使用 `--no-deps`" in step_4_text
+    assert "-m pip check" in step_4_text
+    assert "-m gunicorn --version" in step_4_text
+    assert "group/world writable" in step_4_text
+    assert "Ubuntu 22.04" in step_4_text
+    assert "pip-tools 7.6.1" in step_4_text
+
+
+def test_gitattributes_enforces_lf_for_requirements():
+    gitattributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "personal-system-v2/requirements.txt text eol=lf" in gitattributes
+    assert "personal-system-v2/requirements.lock text eol=lf" in gitattributes
