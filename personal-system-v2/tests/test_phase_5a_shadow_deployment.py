@@ -1,6 +1,7 @@
 import os
 import runpy
 import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -802,22 +803,24 @@ def test_runbook_step_4_specifies_lockfile_with_hashes_and_no_nodeps():
 
 
 def test_gitattributes_enforces_lf_and_release_bundle_exclusions():
-    # 1. Verify export-ignore attribute semantics are set using git check-attr
-    import subprocess
-    cmd = ["git", "check-attr", "export-ignore", "personal-system-v2/data", "personal-system-v2/data/.gitkeep"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT, check=True)
-    lines = proc.stdout.strip().splitlines()
-    assert len(lines) == 2, f"Expected 2 lines from git check-attr, got {lines}"
-    assert "personal-system-v2/data: export-ignore: set" in lines[0]
-    assert "personal-system-v2/data/.gitkeep: export-ignore: set" in lines[1]
-
-    # 2. Verify text content of .gitattributes
+    # 1. Verify text content of .gitattributes (checked in ALL environments)
     gitattributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "* text=auto eol=lf" in gitattributes
     assert "personal-system-v2/requirements.txt text eol=lf" in gitattributes
     assert "personal-system-v2/requirements.lock text eol=lf" in gitattributes
     assert "personal-system-v2/data export-ignore" in gitattributes
     assert "personal-system-v2/data/** export-ignore" in gitattributes
+
+    # 2. If in a Git repository, verify export-ignore attribute semantics are set using git check-attr
+    is_git_repo = (REPO_ROOT / ".git").exists()
+    if is_git_repo:
+        import subprocess
+        cmd = ["git", "check-attr", "export-ignore", "personal-system-v2/data", "personal-system-v2/data/.gitkeep"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT, check=True)
+        lines = proc.stdout.strip().splitlines()
+        assert len(lines) == 2, f"Expected 2 lines from git check-attr, got {lines}"
+        assert "personal-system-v2/data: export-ignore: set" in lines[0]
+        assert "personal-system-v2/data/.gitkeep: export-ignore: set" in lines[1]
 
 
 def is_forbidden_env_file(path_or_name: str) -> bool:
@@ -884,68 +887,157 @@ def test_forbidden_env_file_detection_synthetic_cases():
 
 def test_git_archive_release_bundle_strictly_excludes_forbidden_items():
     """
-    Dynamically verify git archive with --worktree-attributes excludes all forbidden entries:
-    - personal-system-v2/data directory does NOT exist
-    - Any members under personal-system-v2/data do NOT exist
-    - Cache path segments ('cache', '__pycache__', '.pytest_cache', '.mypy_cache') do NOT exist
-    - Venv path segments ('venv', '.venv') do NOT exist
-    - .git repository directory does NOT exist
-    - Real .env files do NOT exist (checked via unified is_forbidden_env_file)
-    - All archive members must be regular files or directories (no symlinks, hardlinks, devices, fifos)
+    Dual-mode validation of release bundle exclusion safety:
+    Mode 1 (Git Repository Workspace, .git exists):
+      - Uses git archive --worktree-attributes --format=tar HEAD to stream in-memory archive
+      - Hard asserts exclusion of data, cache, venv, .git, real .env, special types.
+    Mode 2 (Non-Git Release Tree, .git does NOT exist):
+      - Verifies PYTHONDONTWRITEBYTECODE is set to prevent test pollution
+      - Directly traverses physical release directory tree (followlinks=False)
+      - Hard asserts exclusion of data, cache, venv, .git, real .env, special types.
     """
-    import io
-    import subprocess
-    import tarfile
+    is_git_repo = (REPO_ROOT / ".git").exists()
+    forbidden_cache_segments = {"cache", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    forbidden_venv_segments = {"venv", ".venv"}
 
-    cmd = ["git", "archive", "--worktree-attributes", "--format=tar", "HEAD"]
-    proc = subprocess.run(cmd, capture_output=True, cwd=REPO_ROOT, check=True)
+    if is_git_repo:
+        import io
+        import subprocess
+        import tarfile
 
-    with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as tar:
-        members = tar.getmembers()
-        assert len(members) > 0, "Archive must contain members"
+        cmd = ["git", "archive", "--worktree-attributes", "--format=tar", "HEAD"]
+        proc = subprocess.run(cmd, capture_output=True, cwd=REPO_ROOT, check=True)
 
-        # 1. Hard assertion: personal-system-v2/data directory and any members under data
-        data_members = [
-            m.name for m in members
-            if m.name == "personal-system-v2/data"
-            or m.name.startswith("personal-system-v2/data/")
-            or any(seg == "data" for seg in m.name.split("/"))
-        ]
-        assert len(data_members) == 0, f"Archive contains forbidden data members: {data_members}"
+        with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as tar:
+            members = tar.getmembers()
+            assert len(members) > 0, "Archive must contain members"
 
-        # 2. Hard assertion: cache path segments by full segment
-        forbidden_cache_segments = {"cache", "__pycache__", ".pytest_cache", ".mypy_cache"}
-        cache_members = [
-            m.name for m in members
-            if any(seg in forbidden_cache_segments for seg in m.name.split("/"))
-        ]
-        assert len(cache_members) == 0, f"Archive contains forbidden cache members: {cache_members}"
+            # 1. Hard assertion: personal-system-v2/data directory and any members under data
+            data_members = [
+                m.name for m in members
+                if m.name == "personal-system-v2/data"
+                or m.name.startswith("personal-system-v2/data/")
+                or any(seg == "data" for seg in m.name.split("/"))
+            ]
+            assert len(data_members) == 0, f"Archive contains forbidden data members: {data_members}"
 
-        # 3. Hard assertion: venv path segments by full segment
-        forbidden_venv_segments = {"venv", ".venv"}
-        venv_members = [
-            m.name for m in members
-            if any(seg in forbidden_venv_segments for seg in m.name.split("/"))
-        ]
-        assert len(venv_members) == 0, f"Archive contains forbidden venv members: {venv_members}"
+            # 2. Hard assertion: cache path segments by full segment
+            cache_members = [
+                m.name for m in members
+                if any(seg in forbidden_cache_segments for seg in m.name.split("/"))
+            ]
+            assert len(cache_members) == 0, f"Archive contains forbidden cache members: {cache_members}"
 
-        # 4. Hard assertion: .git repository directory
-        git_members = [
-            m.name for m in members
-            if m.name == ".git" or m.name.startswith(".git/") or any(seg == ".git" for seg in m.name.split("/"))
-        ]
-        assert len(git_members) == 0, f"Archive contains forbidden .git members: {git_members}"
+            # 3. Hard assertion: venv path segments by full segment
+            venv_members = [
+                m.name for m in members
+                if any(seg in forbidden_venv_segments for seg in m.name.split("/"))
+            ]
+            assert len(venv_members) == 0, f"Archive contains forbidden venv members: {venv_members}"
 
-        # 5. Hard assertion: Real .env files (using unified is_forbidden_env_file helper)
-        env_files = [
-            m.name for m in members
-            if is_forbidden_env_file(m.name)
-        ]
-        assert len(env_files) == 0, f"Archive contains forbidden .env files: {env_files}"
+            # 4. Hard assertion: .git repository directory
+            git_members = [
+                m.name for m in members
+                if m.name == ".git" or m.name.startswith(".git/") or any(seg == ".git" for seg in m.name.split("/"))
+            ]
+            assert len(git_members) == 0, f"Archive contains forbidden .git members: {git_members}"
 
-        # 6. Hard assertion: All members must be regular files (REGTYPE) or directories (DIRTYPE)
-        invalid_type_members = [
-            f"type={m.type}:{m.name}" for m in members
-            if m.type not in (tarfile.REGTYPE, tarfile.DIRTYPE)
-        ]
-        assert len(invalid_type_members) == 0, f"Archive contains non-regular/non-dir members: {invalid_type_members}"
+            # 5. Hard assertion: Real .env files (using unified is_forbidden_env_file helper)
+            env_files = [
+                m.name for m in members
+                if is_forbidden_env_file(m.name)
+            ]
+            assert len(env_files) == 0, f"Archive contains forbidden .env files: {env_files}"
+
+            # 6. Hard assertion: All members must be regular files (REGTYPE) or directories (DIRTYPE)
+            invalid_type_members = [
+                f"type={m.type}:{m.name}" for m in members
+                if m.type not in (tarfile.REGTYPE, tarfile.DIRTYPE)
+            ]
+            assert len(invalid_type_members) == 0, f"Archive contains non-regular/non-dir members: {invalid_type_members}"
+    else:
+        # Non-Git Release Tree Mode
+        # Guard: Check PYTHONDONTWRITEBYTECODE / dont_write_bytecode
+        assert sys.dont_write_bytecode or os.environ.get("PYTHONDONTWRITEBYTECODE") == "1", (
+            "In non-git release tree, PYTHONDONTWRITEBYTECODE=1 must be set to prevent bytecode pollution"
+        )
+
+        # 1. Hard assertion: personal-system-v2/data directory must not exist
+        data_dir = REPO_ROOT / "personal-system-v2" / "data"
+        assert not data_dir.exists(), f"Forbidden data directory exists in release tree: {data_dir}"
+
+        # 2. Direct physical traversal without following symlinks
+        found_data_items = []
+        found_cache_items = []
+        found_venv_items = []
+        found_git_items = []
+        found_env_items = []
+        found_special_items = []
+
+        for root, dirs, files in os.walk(REPO_ROOT, followlinks=False):
+            root_path = Path(root)
+            rel_root = root_path.relative_to(REPO_ROOT).as_posix()
+            parts = rel_root.split("/") if rel_root != "." else []
+
+            # Check root directory segments
+            if any(p in forbidden_cache_segments for p in parts):
+                found_cache_items.append(rel_root)
+            if any(p in forbidden_venv_segments for p in parts):
+                found_venv_items.append(rel_root)
+            if any(p == ".git" for p in parts):
+                found_git_items.append(rel_root)
+            if "personal-system-v2" in parts and "data" in parts:
+                found_data_items.append(rel_root)
+
+            # Check directory items in dirs (symlinks, junctions, abnormal dir types)
+            for d in list(dirs):
+                d_path = root_path / d
+                d_rel = (root_path.relative_to(REPO_ROOT) / d).as_posix()
+                d_parts = parts + [d]
+
+                if "personal-system-v2" in d_parts and "data" in d_parts:
+                    found_data_items.append(d_rel)
+                if any(p in forbidden_cache_segments for p in d_parts):
+                    found_cache_items.append(d_rel)
+                if any(p in forbidden_venv_segments for p in d_parts):
+                    found_venv_items.append(d_rel)
+                if any(p == ".git" for p in d_parts):
+                    found_git_items.append(d_rel)
+
+                is_dir_symlink = d_path.is_symlink()
+                is_dir_junction = getattr(d_path, "is_junction", lambda: False)() or (
+                    hasattr(os.path, "isjunction") and os.path.isjunction(d_path)
+                )
+                if is_dir_symlink or is_dir_junction or not d_path.is_dir():
+                    found_special_items.append(d_rel)
+
+            # Check file items in files (symlinks, non-regular files, forbidden env)
+            for f in files:
+                f_path = root_path / f
+                f_rel = (root_path.relative_to(REPO_ROOT) / f).as_posix()
+                f_parts = parts + [f]
+
+                if "personal-system-v2" in f_parts and "data" in f_parts:
+                    found_data_items.append(f_rel)
+                if any(p in forbidden_cache_segments for p in f_parts):
+                    found_cache_items.append(f_rel)
+                if any(p in forbidden_venv_segments for p in f_parts):
+                    found_venv_items.append(f_rel)
+                if any(p == ".git" for p in f_parts):
+                    found_git_items.append(f_rel)
+                if is_forbidden_env_file(f):
+                    found_env_items.append(f_rel)
+
+                is_file_symlink = f_path.is_symlink()
+                is_file_junction = getattr(f_path, "is_junction", lambda: False)() or (
+                    hasattr(os.path, "isjunction") and os.path.isjunction(f_path)
+                )
+                if is_file_symlink or is_file_junction or not f_path.is_file():
+                    found_special_items.append(f_rel)
+
+        assert len(found_data_items) == 0, f"Found forbidden data items in release tree: {found_data_items}"
+        assert len(found_cache_items) == 0, f"Found forbidden cache items in release tree: {found_cache_items}"
+        assert len(found_venv_items) == 0, f"Found forbidden venv items in release tree: {found_venv_items}"
+        assert len(found_git_items) == 0, f"Found forbidden .git items in release tree: {found_git_items}"
+        assert len(found_env_items) == 0, f"Found forbidden env files in release tree: {found_env_items}"
+        assert len(found_special_items) == 0, f"Found forbidden special items in release tree: {found_special_items}"
