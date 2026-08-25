@@ -803,5 +803,6 @@ def test_runbook_step_4_specifies_lockfile_with_hashes_and_no_nodeps():
 
 def test_gitattributes_enforces_lf_for_requirements():
     gitattributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "* text=auto eol=lf" in gitattributes
     assert "personal-system-v2/requirements.txt text eol=lf" in gitattributes
     assert "personal-system-v2/requirements.lock text eol=lf" in gitattributes
