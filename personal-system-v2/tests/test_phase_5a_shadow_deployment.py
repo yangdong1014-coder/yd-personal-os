@@ -1,4 +1,5 @@
 import os
+import re
 import runpy
 import stat
 import sys
@@ -1177,6 +1178,7 @@ def test_contract_regression_static_guards():
     runbook_text = (REPO_ROOT / "docs" / "phase-5a-shadow-deployment-runbook.md").read_text(encoding="utf-8")
     cutover_runbook_text = (REPO_ROOT / "docs" / "phase-5-database-cutover-runbook.md").read_text(encoding="utf-8")
     launcher_env_example = (APP_ROOT / "deploy" / "shadow-launcher.env.example").read_text(encoding="utf-8")
+    release_text = (REPO_ROOT / "docs" / "standards" / "RELEASE.md").read_text(encoding="utf-8")
 
     # Prohibited legacy patterns
     for text, doc_name in (
@@ -1184,11 +1186,13 @@ def test_contract_regression_static_guards():
         (runbook_text, "phase-5a-shadow-deployment-runbook.md"),
         (cutover_runbook_text, "phase-5-database-cutover-runbook.md"),
         (launcher_env_example, "shadow-launcher.env.example"),
+        (release_text, "RELEASE.md"),
     ):
         assert "/usr/local/libexec/psy-production-launcher.py" not in text, f"Found legacy launcher path in {doc_name}"
         assert "shadow-shadow-" not in text, f"Found shadow-shadow- in {doc_name}"
         assert "/var/lib/psy/databases/shadow/" not in text, f"Found legacy database shadow root in {doc_name}"
         assert "SHORT_COMMIT" not in text, f"Found SHORT_COMMIT in {doc_name}"
+        assert "{incoming,verified}" not in text, f"Found ambiguous brace expansion in {doc_name}"
 
     # Prohibited unflagged mv in promotion contexts
     assert 'mv -n "${SRC}" "${DEST}"' not in runbook_text
@@ -1201,3 +1205,94 @@ def test_contract_regression_static_guards():
     assert "--venv-root" in service_text
     assert "--expected-venv-path" in service_text
     assert "rel-v220-shadow-${GIT_COMMIT}" in runbook_text
+
+
+def test_artifact_namespace_contract_hierarchy_and_permissions():
+    """Regression test ensuring authoritative artifact namespace hierarchy and permissions.
+
+    Verifies exact path + owner + group + mode structure without relying solely on keyword presence.
+    """
+    runbook_path = REPO_ROOT / "docs" / "phase-5a-shadow-deployment-runbook.md"
+    release_path = REPO_ROOT / "docs" / "standards" / "RELEASE.md"
+
+    runbook_text = runbook_path.read_text(encoding="utf-8")
+    release_text = release_path.read_text(encoding="utf-8")
+
+    expected_hierarchy = [
+        {
+            "role": "shared namespace root",
+            "path": "/var/lib/psy/artifacts",
+            "owner": "root",
+            "group": "root",
+            "mode": "0755",
+        },
+        {
+            "role": "instance boundary",
+            "path": "/var/lib/psy/artifacts/${INSTANCE}",
+            "owner": "root",
+            "group": "root",
+            "mode": "0750",
+        },
+        {
+            "role": "leaf operational directory (incoming)",
+            "path": "/var/lib/psy/artifacts/${INSTANCE}/incoming",
+            "owner": "root",
+            "group": "root",
+            "mode": "0750",
+        },
+        {
+            "role": "leaf operational directory (verified)",
+            "path": "/var/lib/psy/artifacts/${INSTANCE}/verified",
+            "owner": "root",
+            "group": "root",
+            "mode": "0750",
+        },
+    ]
+
+    # 1. Parse markdown table rows in phase-5a-shadow-deployment-runbook.md
+    # Canonical Path Mapping table format: | 资源 | Shadow 路径/名称 | 权限真源 |
+    table_rows = {}
+    for line in runbook_text.splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith("|") and trimmed.endswith("|"):
+            cells = [c.strip() for c in trimmed.split("|")[1:-1]]
+            if len(cells) >= 3:
+                resource_name, path_cell, perm_cell = cells[0], cells[1], cells[2]
+                raw_path = path_cell.strip("`")
+                perm_match = re.search(r"([a-z0-9_]+):([a-z0-9_]+)\s+([0-7]{4})", perm_cell)
+                if perm_match:
+                    owner, group, mode = perm_match.groups()
+                    table_rows[raw_path] = {
+                        "resource": resource_name,
+                        "owner": owner,
+                        "group": group,
+                        "mode": mode,
+                    }
+
+    # Verify each expected hierarchy item in runbook table
+    for item in expected_hierarchy:
+        path = item["path"]
+        assert path in table_rows, f"Path {path} not found in runbook canonical path mapping table"
+        actual = table_rows[path]
+        assert actual["owner"] == item["owner"], f"{path} owner expected {item['owner']}, got {actual['owner']}"
+        assert actual["group"] == item["group"], f"{path} group expected {item['group']}, got {actual['group']}"
+        assert actual["mode"] == item["mode"], f"{path} mode expected {item['mode']}, got {actual['mode']}"
+
+    # Verify ambiguous shorthand is completely absent
+    assert "{incoming,verified}" not in runbook_text
+    assert "{incoming,verified}" not in release_text
+
+    # 2. Verify explicit hierarchy distinction and permission contract in RELEASE.md
+    assert "shared namespace root" in release_text
+    assert "instance boundary" in release_text
+    assert "leaf operational directories" in release_text
+
+    for item in expected_hierarchy:
+        path = item["path"]
+        owner = item["owner"]
+        group = item["group"]
+        mode = item["mode"]
+        # Match pattern: path ... 必须为 `owner:group` + `mode`
+        pattern = rf"{re.escape(path)}[^\n]*?必须为\s*`{owner}:{group}`\s*\+\s*`{mode}`"
+        match = re.search(pattern, release_text)
+        assert match is not None, f"Contract for {path} ({owner}:{group} {mode}) not found in RELEASE.md"

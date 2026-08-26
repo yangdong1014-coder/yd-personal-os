@@ -34,7 +34,10 @@ SHADOW_ADMIN_EMAIL="<shadow-admin-email>"
 
 | 资源 | Shadow 路径/名称 | 权限真源 |
 |---|---|---|
-| Artifact root | `/var/lib/psy/artifacts/${INSTANCE}/{incoming,verified}` | `root:root 0750` |
+| Artifact shared namespace root | `/var/lib/psy/artifacts` | `root:root 0755` |
+| Artifact instance boundary | `/var/lib/psy/artifacts/${INSTANCE}` | `root:root 0750` |
+| Artifact incoming (leaf) | `/var/lib/psy/artifacts/${INSTANCE}/incoming` | `root:root 0750` |
+| Artifact verified (leaf) | `/var/lib/psy/artifacts/${INSTANCE}/verified` | `root:root 0750` |
 | immutable physical release | `/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/` / `repo/personal-system-v2/` | `root:root`, directories `0755`, files non-writable |
 | venv | `/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}` | 独立、root 管理、运行期只读 |
 | runtime/launcher config | `/etc/psy/releases/${INSTANCE}/` | directory `root:psy 0750`, files `root:psy 0640` |

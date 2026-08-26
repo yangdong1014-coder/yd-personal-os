@@ -53,6 +53,10 @@ local main
 - `/var/lib/psy/releases` 推荐 `root:root` + `0755`：`psy` 可 traverse/read，但不得 create、rename、delete 或 write。
 - active pointer 与 release descriptor 必须为 `root:root` + `0644`：`psy` 可读但不可写，且不得包含 group/world write 位。
 - descriptor-bound runtime config 含 `SECRET_KEY`、proxy token 与可选 API key，必须为 `root:psy` + `0640`，不得使用 `0644`；`/etc/psy/releases` 必须允许 `psy` traverse/read 但不得允许其写入，可使用 `root:root` + `0755`、`root:psy` + `0750` 或等价 ACL。
+- Artifact 存储层级与权限边界必须明确区分 shared namespace root、instance boundary 与 leaf operational directories：
+  - shared namespace root `/var/lib/psy/artifacts` 必须为 `root:root` + `0755`：允许 traverse 但禁止非特权修改；
+  - instance boundary `/var/lib/psy/artifacts/${INSTANCE}` 必须为 `root:root` + `0750`：仅 root 可操作，隔绝跨实例与非特权访问；
+  - leaf operational directories `/var/lib/psy/artifacts/${INSTANCE}/incoming` 与 `/var/lib/psy/artifacts/${INSTANCE}/verified` 必须为 `root:root` + `0750`。
 
 部署前 MUST：
 
