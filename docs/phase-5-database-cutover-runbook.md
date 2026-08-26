@@ -74,10 +74,10 @@ Phase 5A 设计和执行时至少建立以下独立边界：
 
 | 资源 | Shadow 约束 |
 |---|---|
-| code | /opt/psy/releases/shadow-<release-id>/ 下的批准 commit，只读且不可变 |
-| runtime config | /etc/psy/releases/shadow-<release-id>/runtime.env，不含 YD_OS_DB_PATH |
-| descriptor/pointer state | /var/lib/psy/releases/shadow/<release-id>.json 与独立 shadow pointer；不得指向正式 active-release.json |
-| database | /var/lib/psy/databases/shadow/<release-id>/ 下的批准独立副本、staged DB 与 manifest |
+| code | /opt/psy/releases/rel-v220-shadow-<approved-commit>/ 下的批准 commit，只读且不可变 |
+| runtime config | /etc/psy/releases/<instance>/runtime.env，不含 YD_OS_DB_PATH |
+| descriptor/pointer state | /var/lib/psy/releases/<instance>/<release-id>.json 与独立 shadow pointer；不得指向正式 active-release.json |
+| database | /var/lib/psy/databases/<instance>/ 下的批准独立副本、staged DB 与 manifest |
 | Gunicorn | 独立 loopback 端口，不与正式 upstream 共用 |
 | systemd | 独立 shadow unit，不替换或重启正式 unit |
 | Nginx | 独立 upstream 与受控 shadow server_name/URL，使用真实 HTTPS |

@@ -35,14 +35,23 @@ def _fake_release_layout(tmp_path, monkeypatch):
     database_root = (tmp_path / "shadow-databases").resolve()
     runtime_parent = (database_root / "staged").resolve()
     manifest_parent = (database_root / "manifests").resolve()
+    venv_root = (tmp_path / "venvs").resolve()
+    expected_venv_path = (venv_root / f"phase5a-test-{GIT_COMMIT}").resolve()
+    venv_bin = expected_venv_path / ("Scripts" if os.name == "nt" else "bin")
     for directory in (
         descriptor_root,
         code_root,
         config_root,
         runtime_parent,
         manifest_parent,
+        venv_root,
+        expected_venv_path,
+        venv_bin,
     ):
         directory.mkdir(parents=True, exist_ok=False)
+
+    venv_python = venv_bin / ("python.exe" if os.name == "nt" else "python")
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
 
     pointer = (descriptor_root / "active-release.json").resolve()
     descriptor = (descriptor_root / "shadow.json").resolve()
@@ -114,11 +123,17 @@ def _fake_release_layout(tmp_path, monkeypatch):
         database_root=database_root,
         database_path=database_path,
         manifest_path=manifest_path,
+        venv_root=venv_root,
+        expected_venv_path=expected_venv_path,
+        venv_python=venv_python,
         release=resolved_release,
     )
 
 
 def _prepare(layout, **overrides):
+    require_separated = overrides.get(
+        "require_separated_database_artifacts", True
+    )
     values = {
         "active_pointer": layout.pointer,
         "descriptor_root": layout.descriptor_root,
@@ -132,6 +147,9 @@ def _prepare(layout, **overrides):
         "shadow_instance": "phase5a-test",
         "expected_release_id": layout.release["release_id"],
     }
+    if require_separated:
+        values["venv_root"] = layout.venv_root
+        values["expected_venv_path"] = layout.expected_venv_path
     values.update(overrides)
     return production_launcher.prepare_launch(**values)
 
@@ -451,34 +469,53 @@ def test_shadow_systemd_template_isolated_and_has_runtime_access_proof():
     )
 
     assert "User=psy" in unit and "Group=psy" in unit
-    assert "WorkingDirectory=/opt/psy/releases/shadow-%i/repo" in unit
-    assert "EnvironmentFile=/etc/psy/releases/shadow-%i/launcher.env" in unit
+    assert "WorkingDirectory=/etc/psy/releases/%i" in unit
+    assert "EnvironmentFile=/etc/psy/releases/%i/launcher.env" in unit
     assert "Environment=PYTHONDONTWRITEBYTECODE=1" in unit
     assert (
         "ExecStartPre=/usr/bin/python3 "
         "/usr/local/libexec/psy-shadow-deployment.py validate-identity "
         '--instance "%I" --release-id "${PSY_APPROVED_RELEASE_ID}"'
     ) in unit
-    assert "/opt/psy/venvs/shadow-%i/" in unit
-    assert "/opt/psy/releases/shadow-%i/repo/personal-system-v2/production_launcher.py" in unit
-    assert "--release-root /opt/psy/releases/shadow-%i/repo" in unit
-    assert "/var/lib/psy/releases/shadow/%i/active-release.json" in unit
-    assert "/var/lib/psy/databases/shadow/%i/staged" in unit
+    assert "/usr/bin/python3" in unit
+    assert (
+        "/opt/psy/releases/rel-v220-shadow-${PSY_APPROVED_GIT_COMMIT}/repo/personal-system-v2/production_launcher.py"
+        in unit
+    )
+    assert (
+        "--release-root /opt/psy/releases/rel-v220-shadow-${PSY_APPROVED_GIT_COMMIT}/repo"
+        in unit
+    )
+    assert "--venv-root /opt/psy/venvs" in unit
+    assert "--expected-venv-path /opt/psy/venvs/%i-${PSY_APPROVED_GIT_COMMIT}" in unit
+    assert "/var/lib/psy/releases/%i/active-release.json" in unit
+    assert "/var/lib/psy/databases/%i/staged" in unit
     assert '--expected-database-path "${PSY_APPROVED_DATABASE_PATH}"' in unit
     assert '--bind-port "${PSY_APPROVED_BIND_PORT}"' in unit
     assert '--shadow-instance "%I"' in unit
     assert '--expected-release-id "${PSY_APPROVED_RELEASE_ID}"' in unit
     assert "--require-separated-database-artifacts" in unit
     assert "ConditionPathExists=/opt/psy1" in unit
-    assert "InaccessiblePaths=/opt/psy1" in unit
+    assert "InaccessiblePaths=/opt/psy1 /var/lib/psy/databases/%i/source /var/lib/psy/databases/%i/migration" in unit
     assert "ExecStartPre=/usr/bin/test ! -e /opt/psy1" in unit
-    assert "ReadWritePaths=/var/lib/psy/databases/shadow/%i/staged" in unit
+    assert "ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/%i/source" in unit
+    assert "ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/%i/migration" in unit
+    assert "ExecStartPre=/usr/bin/test -f /var/lib/psy/releases/%i/active-release.json" in unit
+    assert "ReadOnlyPaths=/opt/psy/releases /opt/psy/venvs /etc/psy/releases/%i /var/lib/psy/releases/%i /var/lib/psy/databases/%i/manifests" in unit
+    assert "ReadWritePaths=/var/lib/psy/databases/%i/staged" in unit
     assert "Restart=on-failure" in unit
     assert "127.0.0.1:5000" not in unit and "5100" not in unit
     assert "/opt/psy1/" not in unit
     assert "/opt/psy/venv/bin" not in unit
+    assert "/usr/local/libexec/psy-production-launcher.py" not in unit
     assert "/etc/psy/launcher.env" not in unit
     assert "/var/lib/psy/releases/active-release.json" not in unit
+    assert "/opt/psy/releases/shadow-%i" not in unit
+    assert "/opt/psy/venvs/shadow-%i" not in unit
+    assert "/etc/psy/releases/shadow-%i" not in unit
+    assert "/var/lib/psy/releases/shadow/%i" not in unit
+    assert "/var/lib/psy/databases/shadow/%i" not in unit
+    assert "shadow/%i" not in unit
 
     runbook = (REPO_ROOT / "docs" / "phase-5a-shadow-deployment-runbook.md").read_text(
         encoding="utf-8"
@@ -671,7 +708,11 @@ def test_shadow_examples_are_distinct_and_have_no_committed_secret():
     assert "PSY_APPROVED_APP_VERSION=v2.2.0-shadow" in launcher
     assert "PSY_APPROVED_RELEASE_ID=replace_with_" in launcher
     assert "PSY_APPROVED_BIND_PORT=5100" in launcher
-    assert "PSY_APPROVED_DATABASE_PATH=/var/lib/psy/databases/shadow/" in launcher
+    assert (
+        "PSY_APPROVED_DATABASE_PATH=/var/lib/psy/databases/replace_instance/staged/yd_os-v22-shadow.db"
+        in launcher
+    )
+    assert "/var/lib/psy/databases/shadow/" not in launcher
     assert "YD_OS_DB_PATH" not in launcher
     assert "PERSONAL_OS_BIND_HOST=127.0.0.1" in runtime
     assert "YD_OS_DB_PATH" not in runtime
@@ -1041,3 +1082,122 @@ def test_git_archive_release_bundle_strictly_excludes_forbidden_items():
         assert len(found_git_items) == 0, f"Found forbidden .git items in release tree: {found_git_items}"
         assert len(found_env_items) == 0, f"Found forbidden env files in release tree: {found_env_items}"
         assert len(found_special_items) == 0, f"Found forbidden special items in release tree: {found_special_items}"
+
+
+def test_shadow_launcher_requires_venv_root_and_expected_venv_path(tmp_path, monkeypatch):
+    layout = _fake_release_layout(tmp_path, monkeypatch)
+
+    with pytest.raises(ProductionLaunchError, match="--venv-root and --expected-venv-path"):
+        _prepare(layout, venv_root=None)
+    with pytest.raises(ProductionLaunchError, match="--venv-root and --expected-venv-path"):
+        _prepare(layout, expected_venv_path=None)
+
+
+def test_shadow_launcher_rejects_venv_outside_root(tmp_path, monkeypatch):
+    layout = _fake_release_layout(tmp_path, monkeypatch)
+    escaped_venv = (tmp_path / "other-venvs" / f"phase5a-test-{GIT_COMMIT}").resolve()
+    escaped_venv.parent.mkdir(parents=True)
+    escaped_venv.mkdir()
+    bin_dir = escaped_venv / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir()
+    (bin_dir / ("python.exe" if os.name == "nt" else "python")).write_text("#!/bin/sh\n", encoding="utf-8")
+
+    with pytest.raises(ProductionLaunchError, match="escapes its approved root"):
+        _prepare(layout, expected_venv_path=escaped_venv)
+
+
+def test_shadow_launcher_rejects_venv_commit_or_instance_mismatch(tmp_path, monkeypatch):
+    layout = _fake_release_layout(tmp_path, monkeypatch)
+    mismatched_venv = (layout.venv_root / f"phase5a-test-{'0'*40}").resolve()
+    mismatched_venv.mkdir()
+    bin_dir = mismatched_venv / ("Scripts" if os.name == "nt" else "bin")
+    bin_dir.mkdir()
+    (bin_dir / ("python.exe" if os.name == "nt" else "python")).write_text("#!/bin/sh\n", encoding="utf-8")
+
+    with pytest.raises(ProductionLaunchError, match="instance and git commit"):
+        _prepare(layout, expected_venv_path=mismatched_venv)
+
+
+def test_shadow_launcher_rejects_missing_or_non_regular_venv_python(tmp_path, monkeypatch):
+    layout = _fake_release_layout(tmp_path, monkeypatch)
+    layout.venv_python.unlink()
+
+    with pytest.raises(ProductionLaunchError, match="venv python executable must exist"):
+        _prepare(layout)
+
+
+def test_shadow_launcher_posix_permissions_validate_venv_tree(tmp_path, monkeypatch):
+    code_root = tmp_path / "code"
+    code_root.mkdir()
+    inspected = []
+
+    def fake_validate_mode(_path, *, label, forbidden_bits):
+        inspected.append((label, forbidden_bits))
+        service_owned = {"runtime database", "runtime database directory"}
+        return SimpleNamespace(st_uid=1000 if label in service_owned else 0)
+
+    monkeypatch.setattr(
+        production_launcher,
+        "os",
+        SimpleNamespace(name="posix", geteuid=lambda: 1000),
+    )
+    monkeypatch.setattr(production_launcher, "_validate_mode", fake_validate_mode)
+
+    venv_dir = tmp_path / "venvs" / f"shadow-01-{GIT_COMMIT}"
+    venv_dir.mkdir(parents=True)
+    venv_bin = venv_dir / "bin"
+    venv_bin.mkdir()
+    venv_py = venv_bin / "python"
+    venv_py.write_text("#!/bin/sh\n")
+
+    production_launcher._validate_posix_permissions(
+        active_pointer=tmp_path / "selectors" / "active.json",
+        descriptor=tmp_path / "selectors" / "release.json",
+        code_root=code_root,
+        entrypoint=code_root / "production.py",
+        gunicorn_config=code_root / "gunicorn.conf.py",
+        config_path=tmp_path / "config" / "runtime.env",
+        database_path=tmp_path / "database" / "staged" / "shadow.db",
+        manifest_path=tmp_path / "database" / "manifests" / "shadow.manifest.json",
+        database_root=tmp_path / "database",
+        require_separated_database_artifacts=True,
+        venv_root=tmp_path / "venvs",
+        venv_path=venv_dir,
+        python_executable=venv_py,
+    )
+
+    labels = {label for label, _bits in inspected}
+    assert "venv root" in labels
+    assert "expected venv directory" in labels
+    assert "venv python executable" in labels
+
+
+def test_contract_regression_static_guards():
+    service_text = (APP_ROOT / "deploy" / "psy-v22-shadow@.service").read_text(encoding="utf-8")
+    runbook_text = (REPO_ROOT / "docs" / "phase-5a-shadow-deployment-runbook.md").read_text(encoding="utf-8")
+    cutover_runbook_text = (REPO_ROOT / "docs" / "phase-5-database-cutover-runbook.md").read_text(encoding="utf-8")
+    launcher_env_example = (APP_ROOT / "deploy" / "shadow-launcher.env.example").read_text(encoding="utf-8")
+
+    # Prohibited legacy patterns
+    for text, doc_name in (
+        (service_text, "psy-v22-shadow@.service"),
+        (runbook_text, "phase-5a-shadow-deployment-runbook.md"),
+        (cutover_runbook_text, "phase-5-database-cutover-runbook.md"),
+        (launcher_env_example, "shadow-launcher.env.example"),
+    ):
+        assert "/usr/local/libexec/psy-production-launcher.py" not in text, f"Found legacy launcher path in {doc_name}"
+        assert "shadow-shadow-" not in text, f"Found shadow-shadow- in {doc_name}"
+        assert "/var/lib/psy/databases/shadow/" not in text, f"Found legacy database shadow root in {doc_name}"
+        assert "SHORT_COMMIT" not in text, f"Found SHORT_COMMIT in {doc_name}"
+
+    # Prohibited unflagged mv in promotion contexts
+    assert 'mv -n "${SRC}" "${DEST}"' not in runbook_text
+    assert 'mv -n "${STAGING_ROOT}" "${TARGET_ROOT}"' not in runbook_text
+
+    # Mandatory canonical patterns
+    assert "mv -T -n" in runbook_text
+    assert "/usr/bin/python3" in service_text
+    assert "rel-v220-shadow-${PSY_APPROVED_GIT_COMMIT}" in service_text
+    assert "--venv-root" in service_text
+    assert "--expected-venv-path" in service_text
+    assert "rel-v220-shadow-${GIT_COMMIT}" in runbook_text

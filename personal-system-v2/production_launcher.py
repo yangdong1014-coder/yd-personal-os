@@ -98,6 +98,8 @@ class LaunchPlan:
     bind_port: int
     runtime_environment: dict[str, str]
     command: tuple[str, ...]
+    python_executable: Path | None = None
+    venv_path: Path | None = None
 
 
 def validate_bind_port(value) -> int:
@@ -246,6 +248,9 @@ def _validate_posix_permissions(
     manifest_path: Path,
     database_root: Path | None = None,
     require_separated_database_artifacts: bool = False,
+    venv_root: Path | None = None,
+    venv_path: Path | None = None,
+    python_executable: Path | None = None,
 ) -> None:
     if os.name == "nt":
         return
@@ -279,6 +284,12 @@ def _validate_posix_permissions(
                 "database manifest directory": manifest_path.parent,
             }
         )
+        if venv_root is not None:
+            root_owned_directories["venv root"] = venv_root
+        if venv_path is not None:
+            root_owned_directories["expected venv directory"] = venv_path
+        if python_executable is not None:
+            root_owned["venv python executable"] = python_executable
     for label, path in root_owned_directories.items():
         details = _validate_mode(
             path,
@@ -408,16 +419,26 @@ def prepare_launch(
     require_separated_database_artifacts: bool = False,
     shadow_instance=None,
     expected_release_id=None,
+    venv_root=None,
+    expected_venv_path=None,
 ) -> LaunchPlan:
     """Resolve and validate the complete selected production launch plan."""
     bind_port = validate_bind_port(bind_port)
     approved_shadow_instance = None
     approved_release_id = None
+    python_executable = Path(sys.executable)
+    approved_venv_path = None
+    approved_venv_root = None
+
     if require_separated_database_artifacts:
         if expected_database_path is None:
             raise ProductionLaunchError(
                 "separated database artifacts require an explicitly approved "
                 "database path"
+            )
+        if venv_root is None or expected_venv_path is None:
+            raise ProductionLaunchError(
+                "separated shadow launch requires both --venv-root and --expected-venv-path"
             )
         try:
             approved_shadow_instance = validate_shadow_identity(
@@ -428,6 +449,12 @@ def prepare_launch(
             )
         except ShadowDeploymentError as exc:
             raise ProductionLaunchError(str(exc)) from exc
+    else:
+        if venv_root is not None or expected_venv_path is not None:
+            raise ProductionLaunchError(
+                "non-separated production launch must not specify venv arguments"
+            )
+
     if not str(expected_application_version or "").startswith("v2.2"):
         raise ProductionLaunchError("launcher only accepts an approved v2.2 release")
     if not _COMMIT_RE.fullmatch(str(expected_git_commit or "")):
@@ -448,6 +475,35 @@ def prepare_launch(
     database_root = _canonical_existing(
         database_root, label="database root", directory=True
     )
+    if require_separated_database_artifacts:
+        approved_venv_root = _canonical_existing(
+            venv_root, label="venv root", directory=True
+        )
+        approved_venv_path = _canonical_existing(
+            expected_venv_path, label="expected venv path", directory=True
+        )
+        _require_within(
+            approved_venv_path,
+            approved_venv_root,
+            label="expected venv path",
+        )
+        if approved_venv_path.name != f"{approved_shadow_instance}-{expected_git_commit}":
+            raise ProductionLaunchError(
+                "expected venv path does not match the approved instance and git commit"
+            )
+        if os.name == "nt":
+            candidate_bin = approved_venv_path / "Scripts" / "python.exe"
+            if not candidate_bin.exists():
+                candidate_bin = approved_venv_path / "bin" / "python"
+        else:
+            candidate_bin = approved_venv_path / "bin" / "python"
+
+        if not candidate_bin.is_file() or candidate_bin.stat().st_size <= 0:
+            raise ProductionLaunchError(
+                "venv python executable must exist and be a non-empty regular file"
+            )
+        python_executable = candidate_bin
+
     approved_database_path = None
     if expected_database_path is not None:
         approved_database_path = _canonical_existing(
@@ -540,6 +596,9 @@ def prepare_launch(
         manifest_path=manifest_path,
         database_root=database_root,
         require_separated_database_artifacts=require_separated_database_artifacts,
+        venv_root=approved_venv_root,
+        venv_path=approved_venv_path,
+        python_executable=python_executable if require_separated_database_artifacts else None,
     )
     environment = _build_runtime_environment(
         runtime_values,
@@ -550,7 +609,7 @@ def prepare_launch(
         bind_port=bind_port,
     )
     command = (
-        sys.executable,
+        str(python_executable),
         "-m",
         "gunicorn",
         "--config",
@@ -579,13 +638,16 @@ def prepare_launch(
         bind_port=bind_port,
         runtime_environment=environment,
         command=command,
+        python_executable=python_executable,
+        venv_path=approved_venv_path,
     )
 
 
 def run_selected_preflight(plan: LaunchPlan) -> None:
+    executable = str(plan.python_executable) if plan.python_executable else sys.executable
     try:
         result = subprocess.run(
-            [sys.executable, str(plan.entrypoint), "--check"],
+            [executable, str(plan.entrypoint), "--check"],
             cwd=plan.code_root,
             env=plan.runtime_environment,
             stdin=subprocess.DEVNULL,
@@ -606,9 +668,10 @@ def launch(plan: LaunchPlan) -> None:
     if os.name == "nt" or not plan.command:
         raise ProductionLaunchError("Gunicorn production launch requires Linux")
     run_selected_preflight(plan)
+    executable = str(plan.python_executable) if plan.python_executable else sys.executable
     try:
         os.chdir(plan.code_root)
-        os.execve(sys.executable, list(plan.command), plan.runtime_environment)
+        os.execve(executable, list(plan.command), plan.runtime_environment)
     except OSError as exc:
         raise ProductionLaunchError("Gunicorn exec failed") from exc
 
@@ -627,6 +690,8 @@ def _report(plan: LaunchPlan) -> dict:
         "database_manifest_path": str(plan.database_manifest_path),
         "separated_database_artifacts": plan.separated_database_artifacts,
         "shadow_instance": plan.shadow_instance,
+        "venv_path": str(plan.venv_path) if plan.venv_path else None,
+        "python_executable": str(plan.python_executable) if plan.python_executable else sys.executable,
         "gunicorn": {
             "bind": f"127.0.0.1:{plan.bind_port}",
             "workers": 1,
@@ -680,6 +745,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="strict, explicitly approved Phase 5A shadow release id",
     )
     parser.add_argument(
+        "--venv-root",
+        type=Path,
+        help="strict venv root directory; required for separated shadow mode",
+    )
+    parser.add_argument(
+        "--expected-venv-path",
+        type=Path,
+        help="strict expected venv path; required for separated shadow mode",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="resolve the active release and run its preflight without listening",
@@ -705,6 +780,8 @@ def main(argv=None) -> int:
             ),
             shadow_instance=args.shadow_instance,
             expected_release_id=args.expected_release_id,
+            venv_root=args.venv_root,
+            expected_venv_path=args.expected_venv_path,
         )
         if args.check:
             run_selected_preflight(plan)

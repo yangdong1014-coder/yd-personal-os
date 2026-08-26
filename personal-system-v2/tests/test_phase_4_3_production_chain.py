@@ -542,3 +542,62 @@ def test_phase43_browser_fixture_can_seed_three_users_without_real_data(
     assert {admin["role"], user_a["role"], user_b["role"]} == {"admin", "user"}
     assert str(db_path).casefold().endswith("browser.db")
     assert "data" not in db_path.parts[-2:]
+
+
+def test_production_launcher_compatibility_rejects_venv_arguments_in_standard_mode(
+    tmp_path, monkeypatch
+):
+    release = _build_active_release(tmp_path)
+    monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
+
+    # 1. Both defaulted/omitted -> PASS / existing behavior
+    plan = _prepare(release)
+    assert plan.code_root == release.code_root
+    assert plan.venv_path is None
+    assert plan.python_executable == Path(sys.executable)
+
+    # 2. Only venv-root passed -> FAIL
+    with pytest.raises(
+        ProductionLaunchError, match="must not specify venv arguments"
+    ):
+        production_launcher.prepare_launch(
+            active_pointer=release.pointer,
+            descriptor_root=release.descriptor_root,
+            release_root=release.release_root,
+            config_root=release.config_root,
+            database_root=release.database_root,
+            expected_application_version=APP_VERSION,
+            expected_git_commit=HEAD_COMMIT,
+            venv_root=tmp_path / "venvs",
+        )
+
+    # 3. Only expected-venv-path passed -> FAIL
+    with pytest.raises(
+        ProductionLaunchError, match="must not specify venv arguments"
+    ):
+        production_launcher.prepare_launch(
+            active_pointer=release.pointer,
+            descriptor_root=release.descriptor_root,
+            release_root=release.release_root,
+            config_root=release.config_root,
+            database_root=release.database_root,
+            expected_application_version=APP_VERSION,
+            expected_git_commit=HEAD_COMMIT,
+            expected_venv_path=tmp_path / "venvs" / "fake-venv",
+        )
+
+    # 4. Both passed -> FAIL
+    with pytest.raises(
+        ProductionLaunchError, match="must not specify venv arguments"
+    ):
+        production_launcher.prepare_launch(
+            active_pointer=release.pointer,
+            descriptor_root=release.descriptor_root,
+            release_root=release.release_root,
+            config_root=release.config_root,
+            database_root=release.database_root,
+            expected_application_version=APP_VERSION,
+            expected_git_commit=HEAD_COMMIT,
+            venv_root=tmp_path / "venvs",
+            expected_venv_path=tmp_path / "venvs" / "fake-venv",
+        )

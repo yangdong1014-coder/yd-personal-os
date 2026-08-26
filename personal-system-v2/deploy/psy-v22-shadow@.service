@@ -10,15 +10,30 @@ ConditionPathExists=/opt/psy1
 Type=simple
 User=psy
 Group=psy
-WorkingDirectory=/opt/psy/releases/shadow-%i/repo
-EnvironmentFile=/etc/psy/releases/shadow-%i/launcher.env
+WorkingDirectory=/etc/psy/releases/%i
+EnvironmentFile=/etc/psy/releases/%i/launcher.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStartPre=/usr/bin/python3 /usr/local/libexec/psy-shadow-deployment.py validate-identity --instance "%I" --release-id "${PSY_APPROVED_RELEASE_ID}"
 ExecStartPre=/usr/bin/test ! -e /opt/psy1
-ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/shadow/%i/source
-ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/shadow/%i/migration
-ExecStartPre=/usr/bin/test -f /var/lib/psy/releases/shadow/%i/active-release.json
-ExecStart=/opt/psy/venvs/shadow-%i/bin/python /opt/psy/releases/shadow-%i/repo/personal-system-v2/production_launcher.py --active-pointer /var/lib/psy/releases/shadow/%i/active-release.json --descriptor-root /var/lib/psy/releases/shadow/%i --release-root /opt/psy/releases/shadow-%i/repo --config-root /etc/psy/releases/shadow-%i --database-root /var/lib/psy/databases/shadow/%i --expected-app-version "${PSY_APPROVED_APP_VERSION}" --expected-git-commit "${PSY_APPROVED_GIT_COMMIT}" --expected-database-path "${PSY_APPROVED_DATABASE_PATH}" --bind-port "${PSY_APPROVED_BIND_PORT}" --shadow-instance "%I" --expected-release-id "${PSY_APPROVED_RELEASE_ID}" --require-separated-database-artifacts
+ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/%i/source
+ExecStartPre=/usr/bin/test ! -e /var/lib/psy/databases/%i/migration
+ExecStartPre=/usr/bin/test -f /var/lib/psy/releases/%i/active-release.json
+ExecStart=/usr/bin/python3 \
+  /opt/psy/releases/rel-v220-shadow-${PSY_APPROVED_GIT_COMMIT}/repo/personal-system-v2/production_launcher.py \
+  --active-pointer /var/lib/psy/releases/%i/active-release.json \
+  --descriptor-root /var/lib/psy/releases/%i \
+  --release-root /opt/psy/releases/rel-v220-shadow-${PSY_APPROVED_GIT_COMMIT}/repo \
+  --config-root /etc/psy/releases/%i \
+  --database-root /var/lib/psy/databases/%i \
+  --venv-root /opt/psy/venvs \
+  --expected-venv-path /opt/psy/venvs/%i-${PSY_APPROVED_GIT_COMMIT} \
+  --expected-app-version "${PSY_APPROVED_APP_VERSION}" \
+  --expected-git-commit "${PSY_APPROVED_GIT_COMMIT}" \
+  --expected-database-path "${PSY_APPROVED_DATABASE_PATH}" \
+  --bind-port "${PSY_APPROVED_BIND_PORT}" \
+  --shadow-instance "%I" \
+  --expected-release-id "${PSY_APPROVED_RELEASE_ID}" \
+  --require-separated-database-artifacts
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=90s
@@ -39,9 +54,9 @@ RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-InaccessiblePaths=/opt/psy1 /var/lib/psy/databases/shadow/%i/source /var/lib/psy/databases/shadow/%i/migration
-ReadOnlyPaths=/opt/psy/releases/shadow-%i /opt/psy/venvs/shadow-%i /etc/psy/releases/shadow-%i /var/lib/psy/releases/shadow/%i /var/lib/psy/databases/shadow/%i/manifests
-ReadWritePaths=/var/lib/psy/databases/shadow/%i/staged
+InaccessiblePaths=/opt/psy1 /var/lib/psy/databases/%i/source /var/lib/psy/databases/%i/migration
+ReadOnlyPaths=/opt/psy/releases /opt/psy/venvs /etc/psy/releases/%i /var/lib/psy/releases/%i /var/lib/psy/databases/%i/manifests
+ReadWritePaths=/var/lib/psy/databases/%i/staged
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=psy-v22-shadow-%i

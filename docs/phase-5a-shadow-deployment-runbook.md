@@ -26,22 +26,23 @@ SHADOW_ADMIN_USERNAME="<shadow-admin>"
 SHADOW_ADMIN_EMAIL="<shadow-admin-email>"
 ```
 
-`INSTANCE` 与 `RELEASE_ID` 必须先由代码验证并严格匹配 `^[a-z0-9][a-z0-9-]{0,63}$`。slash、whitespace/newline、semicolon、wildcard、`..`、leading `-` 和 shell metacharacter 都必须在任何目录、unit、descriptor 或模板渲染前被拒绝。不得只依赖人工目检。
+`INSTANCE` 与 `RELEASE_ID` 必须先由代码验证并严格匹配 `^[a-z0-9][a-z0-9-]{0,63}$`。slash、whitespace/newline、semicolon、wildcard、`..`、leading `-` 和 shell metacharacter 都必须在任何目录、unit、descriptor 或模板渲染前被拒绝。不得只依赖人工目检。`INSTANCE` 永远是完整实例 ID（如 `shadow-01`）。
 
 `ECS_BIND_ADDRESS` 是部署时参数，不是产品默认值。Phase 5A.0 曾观察到 `eth0=172.25.103.111`，执行窗口仍须重新核对；公网 `8.137.186.60` 仅是待确认的 EIP/NAT 事实，不能作为 Nginx 本机 listen 地址，必须先由人工确认映射链、DNS 和安全组。
 
-建议路径契约：
+建议路径契约（Canonical Path Mapping）：
 
 | 资源 | Shadow 路径/名称 | 权限真源 |
 |---|---|---|
-| immutable release repo / app code | `/opt/psy/releases/shadow-${INSTANCE}/repo/` / `repo/personal-system-v2/` | `root:root`, directories `0755`, files non-writable |
-| venv | `/opt/psy/venvs/shadow-${INSTANCE}` | 独立、root 管理、运行期只读 |
-| runtime/launcher config | `/etc/psy/releases/shadow-${INSTANCE}/` | directory `root:psy 0750`, files `root:psy 0640` |
-| descriptor/pointer | `/var/lib/psy/releases/shadow/${INSTANCE}/` | `root:root`, service 只读 |
-| approved source copy | `/var/lib/psy/databases/shadow/${INSTANCE}/source/` | `root:root 0700`, runtime 不可见 |
-| migration artifact | `/var/lib/psy/databases/shadow/${INSTANCE}/migration/` | `root:root 0700`, runtime 不可见 |
-| immutable manifest/checksum | `/var/lib/psy/databases/shadow/${INSTANCE}/manifests/` | parent `root:psy 0750`, files `root:root 0644` |
-| runtime DB | `/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db` | parent `psy:psy 0700`, DB `psy:psy 0600` |
+| Artifact root | `/var/lib/psy/artifacts/${INSTANCE}/{incoming,verified}` | `root:root 0750` |
+| immutable physical release | `/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/` / `repo/personal-system-v2/` | `root:root`, directories `0755`, files non-writable |
+| venv | `/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}` | 独立、root 管理、运行期只读 |
+| runtime/launcher config | `/etc/psy/releases/${INSTANCE}/` | directory `root:psy 0750`, files `root:psy 0640` |
+| descriptor/pointer | `/var/lib/psy/releases/${INSTANCE}/` | `root:root`, service 只读 |
+| approved source copy | `/var/lib/psy/databases/${INSTANCE}/source/` | `root:root 0700`, runtime 不可见 |
+| migration artifact | `/var/lib/psy/databases/${INSTANCE}/migration/` | `root:root 0700`, runtime 不可见 |
+| immutable manifest/checksum | `/var/lib/psy/databases/${INSTANCE}/manifests/` | parent `root:psy 0750`, files `root:root 0644` |
+| runtime DB | `/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db` | parent `psy:psy 0700`, DB `psy:psy 0600` |
 | service | `psy-v22-shadow@${INSTANCE}.service` | 只 start，不 enable |
 | upstream | `psy_v22_shadow` | 只代理到 `127.0.0.1:${SHADOW_PORT}` |
 
@@ -83,19 +84,90 @@ getent passwd psy
 getent group psy
 ```
 
-### 3. 安装不可变 code release
+### 1. 创建独立 release layout
 
-将批准 commit 的独立、已校验 repository release bundle 安装到 `/opt/psy/releases/shadow-${INSTANCE}/repo`，应用 code root 固定为其下的 `personal-system-v2/`。同时将该 bundle 的 `shadow_deployment.py` 安装为 root-owned、不可写的 `/usr/local/libexec/psy-shadow-deployment.py`，供 unit 在任何应用进程前复验 instance/release id。核对 `git_commit`/bundle checksum，移除 `.git`、所有 `.env`、`personal-system-v2/data`、cache 和 venv；release tree 全部 root-owned，group/world 不可写。不得在 ECS checkout/pull 一个可漂移工作树后直接运行。
+先从已校验、尚未安装到 identity 派生目标路径的 release bundle 执行 validator；只有返回 `0` 才能确认目标不存在并由 root 创建上表目录：
+
+```bash
+/usr/bin/python3 "${SHADOW_TOOL}" validate-identity \
+  --instance "${INSTANCE}" \
+  --release-id "${RELEASE_ID}"
+```
+
+禁止复用 `/opt/psy1`、正式 pointer、正式配置、正式 venv 或正式数据库目录。记录 `readlink -f` 结果，确认每个 shadow 目标都在批准根内。
+
+### 2. 核验 runtime user/group
+
+只复用 Phase 5A.0 已确认的 `psy:psy`，不得新建或改变正式账号：
+
+```bash
+id psy
+getent passwd psy
+getent group psy
+```
+
+### 3. 安装不可变 code release 与 Promotion 门禁
+
+代码发布采用严格的四层发布与双重 Promotion 门禁（Artifact Promotion 与 Physical Release Promotion），两处均使用 `mv -T -n` 并具备完整的 PRE / MOVE / POST 三段式门禁。
+
+#### 3.1 Artifact Promotion（Layer 1 → Layer 2）
+
+将经过校验的 release artifact 上传至 incoming，并执行严密的前置核验与原子晋升：
+
+```text
+SRC=/var/lib/psy/artifacts/${INSTANCE}/incoming/personal-system-v2-${GIT_COMMIT}.tar.gz
+DEST=/var/lib/psy/artifacts/${INSTANCE}/verified/personal-system-v2-${GIT_COMMIT}.tar.gz
+```
+
+- **PRE 门禁**：确认 SRC 存在、是普通文件、非 symlink；DEST 不存在；SRC 与 DEST 父目录位于同一文件系统/设备；SRC 的 size 与 SHA-256 与批准值严格一致。
+- **MOVE**：执行原子移动：
+  ```bash
+  mv -T -n "${SRC}" "${DEST}"
+  ```
+- **POST 门禁**：确认 SRC 已消失；DEST 已存在、是普通文件、非 symlink；重新计算 DEST size 与 SHA-256 并确认一致；权限与 owner 符合 `root:root 0644`。任意一项不满足即 FAIL-CLOSED。
+
+#### 3.2 Build Staging 与安全审计（Layer 3）
+
+解包至受隔离的 Build Staging 根目录：
+
+```text
+STAGING_ROOT=/opt/psy/releases/.build-staging-${GIT_COMMIT}
+TARGET_ROOT=/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}
+```
+
+在 `STAGING_ROOT/repo` 下解包后执行严格安全审计：
+- `data/**` = 0
+- `.git` = 0
+- 真实 env secret = 0
+- venv = 0
+- cache (`__pycache__`, `.pytest_cache`) = 0
+- special/symlink/junction = 0
+- 生成并记录 Staging Code Tree Checksum
+
+若 Build Staging 或审计失败，目录状态定为 `QUARANTINED`，禁止自动递归删除（`rm -rf`），保留供离线审查。临时 `.part` 文件的清理只允许针对本门禁新建且精确匹配的对象，禁止通配符和 `rm -f`。
+
+#### 3.3 Physical Release Promotion（Layer 3 → Layer 4）
+
+按整个 Physical Release root 执行晋升：
+
+- **PRE 门禁**：确认 `STAGING_ROOT` 是真实目录、非 symlink、非 mount point；`TARGET_ROOT` 不存在；两者 parent 位于同一文件系统/设备；解包安全审计全部 PASS；Staging Code Tree Checksum 已记录。
+- **MOVE**：执行原子移动：
+  ```bash
+  mv -T -n "${STAGING_ROOT}" "${TARGET_ROOT}"
+  ```
+- **POST 门禁**：确认 `STAGING_ROOT` 已消失；`TARGET_ROOT` 已存在且为真实目录、非 symlink；`TARGET_ROOT/repo` 存在；对 `TARGET_ROOT/repo` 重新计算 Tree Checksum 并确认与 Staging Tree Checksum 完全一致；owner 为 `root:root`，目录权限 `0755`，文件只读不可写，group/other 无写权限；`TARGET_ROOT` 目录名精确包含批准的 40 位 Commit。
+
+同时将该 bundle 的 `shadow_deployment.py` 安装为 root-owned、不可写的 `/usr/local/libexec/psy-shadow-deployment.py`（launcher 直接在 Physical Release 内运行，禁止重新复制 launcher 至 `/usr/local/libexec`）：
 
 ```bash
 install -o root -g root -m 0755 \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/shadow_deployment.py" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/shadow_deployment.py" \
   /usr/local/libexec/psy-shadow-deployment.py
 ```
 
 ### 4. 创建独立 venv
 
-使用 ECS 已核验的 Python 创建 `/opt/psy/venvs/shadow-${INSTANCE}`，从批准 release 的 `personal-system-v2/requirements.lock` 以 `--require-hashes` 安装全部锁定依赖（不得使用 `--no-deps`）。
+使用 ECS 已核验的 Python 创建 `/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}`，从批准 release 的 `personal-system-v2/requirements.lock` 以 `--require-hashes` 安装全部锁定依赖（不得使用 `--no-deps`）。
 
 锁文件生成基线：
 - 环境：Ubuntu 22.04 LTS (`x86_64`)
@@ -107,39 +179,39 @@ install -o root -g root -m 0755 \
 安装与验收命令（以 `shadow-01` 为例）：
 
 ```bash
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m pip install \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" -m pip install \
   --require-hashes \
-  -r "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/requirements.lock"
+  -r "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/requirements.lock"
 
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" --version
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m pip check
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" -m gunicorn --version
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" --version
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" -m pip check
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" -m gunicorn --version
 
 # group/world writable 权限审计（严禁包含 group/world 写权限）
-find "/opt/psy/venvs/shadow-${INSTANCE}" -perm -0002 -o -perm -0020
+find "/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}" -perm -0002 -o -perm -0020
 ```
 
 不得引用正式 venv。
 
 ### 5. 安装 shadow runtime.env
 
-从 `personal-system-v2/deploy/shadow-runtime.env.example` 生成 `/etc/psy/releases/shadow-${INSTANCE}/runtime.env`。必须是 `root:psy 0640`，且只允许 launcher allowlist 中的键。使用独立强随机 `SECRET_KEY` 和 `PERSONAL_OS_PROXY_TOKEN`；`PERSONAL_OS_TRUSTED_HOSTS` 必须是唯一 shadow FQDN。禁止 `YD_OS_DB_PATH`、host override、Gunicorn 参数和正式 `.env`。
+从 `personal-system-v2/deploy/shadow-runtime.env.example` 生成 `/etc/psy/releases/${INSTANCE}/runtime.env`。必须是 `root:psy 0640`，且只允许 launcher allowlist 中的键。使用独立强随机 `SECRET_KEY` 和 `PERSONAL_OS_PROXY_TOKEN`；`PERSONAL_OS_TRUSTED_HOSTS` 必须是唯一 shadow FQDN。禁止 `YD_OS_DB_PATH`、host override、Gunicorn 参数和正式 `.env`。
 
 ### 6. 安装 shadow launcher.env
 
-从 `shadow-launcher.env.example` 生成同目录 `launcher.env`，写入五项精确批准值：candidate version、符合 allowlist 的 release id、40 字符 commit、runtime DB 绝对路径和端口。`5100` 只是当前候选；现场端口复验后才可写入。文件为 `root:psy 0640`。
+从 `shadow-launcher.env.example` 生成同目录 `launcher.env`，写入五项精确批准值：candidate version、符合 allowlist 的 release id、40 字符 commit、runtime DB 绝对路径（`/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db`）和端口。`5100` 只是当前候选；现场端口复验后才可写入。文件为 `root:psy 0640`。
 
 ### 7. 接收 approved DB copy
 
-取得 source copy 是独立的、需另行批准的运维动作；本文不授权从正式数据库复制。执行本 runbook 时，批准副本及外部保存的 source identity/hash 必须已经由负责人交付到 shadow `source/`，且路径不得包含 `/opt/psy1` 或仓库 `personal-system-v2/data/yd_os.db`。先验证目标是非 symlink regular file、`root:root 0400`，再核对交付 hash；不查询私人行数据。
+取得 source copy 是独立的、需另行批准的运维动作；本文不授权从正式数据库复制。执行本 runbook 时，批准副本及外部保存的 source identity/hash 必须已经由负责人交付到 shadow `source/`（`/var/lib/psy/databases/${INSTANCE}/source/`），且路径不得包含 `/opt/psy1` 或仓库 `personal-system-v2/data/yd_os.db`。先验证目标是非 symlink regular file、`root:root 0400`，再核对交付 hash；不查询私人行数据。
 
 ### 8. 固化 source checksum
 
 对“已批准副本”计算 SHA-256、size 和 mtime，和工单中的外部值比较；输出只记录路径身份和摘要，不记录内容：
 
 ```bash
-sha256sum "/var/lib/psy/databases/shadow/${INSTANCE}/source/<approved-copy>.db"
-stat --format='%n %s %y %U:%G %a' "/var/lib/psy/databases/shadow/${INSTANCE}/source/<approved-copy>.db"
+sha256sum "/var/lib/psy/databases/${INSTANCE}/source/<approved-copy>.db"
+stat --format='%n %s %y %U:%G %a' "/var/lib/psy/databases/${INSTANCE}/source/<approved-copy>.db"
 ```
 
 ### 9. 执行离线 migration
@@ -147,10 +219,10 @@ stat --format='%n %s %y %U:%G %a' "/var/lib/psy/databases/shadow/${INSTANCE}/sou
 目标必须是 migration parent 中一个不存在的新文件；迁移器从 source copy 以 SQLite read-only URI 打开源库，并通过隐藏提示读取/确认 bootstrap admin 密码：
 
 ```bash
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/scripts/migrate-v2.2-multiuser.py" \
-  "/var/lib/psy/databases/shadow/${INSTANCE}/source/<approved-copy>.db" \
-  "/var/lib/psy/databases/shadow/${INSTANCE}/migration/yd_os-v22-shadow.db" \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/scripts/migrate-v2.2-multiuser.py" \
+  "/var/lib/psy/databases/${INSTANCE}/source/<approved-copy>.db" \
+  "/var/lib/psy/databases/${INSTANCE}/migration/yd_os-v22-shadow.db" \
   --admin-username "${SHADOW_ADMIN_USERNAME}" \
   --admin-email "${SHADOW_ADMIN_EMAIL}"
 ```
@@ -160,10 +232,10 @@ stat --format='%n %s %y %U:%G %a' "/var/lib/psy/databases/shadow/${INSTANCE}/sou
 运行独立 verifier，并再次核对 source hash 未变化：
 
 ```bash
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/scripts/verify-v2.2-migration.py" \
-  "/var/lib/psy/databases/shadow/${INSTANCE}/source/<approved-copy>.db" \
-  "/var/lib/psy/databases/shadow/${INSTANCE}/migration/yd_os-v22-shadow.db"
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/scripts/verify-v2.2-migration.py" \
+  "/var/lib/psy/databases/${INSTANCE}/source/<approved-copy>.db" \
+  "/var/lib/psy/databases/${INSTANCE}/migration/yd_os-v22-shadow.db"
 ```
 
 必须通过 schema、16 表双向数据、ID、sequence、integrity、FK、软/硬关联和 admin ownership 检查。
@@ -173,48 +245,48 @@ stat --format='%n %s %y %U:%G %a' "/var/lib/psy/databases/shadow/${INSTANCE}/sou
 先对 migration artifact 生成 manifest 到独立 `manifests/`，再一次性复制为尚不存在的 runtime DB。三者 basename 必须一致；复制后用 manifest 复验 runtime DB。不得覆盖任一已有目标：
 
 ```bash
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/scripts/manifest-db.py" \
-  --database "/var/lib/psy/databases/shadow/${INSTANCE}/migration/yd_os-v22-shadow.db" \
-  --manifest "/var/lib/psy/databases/shadow/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/scripts/manifest-db.py" \
+  --database "/var/lib/psy/databases/${INSTANCE}/migration/yd_os-v22-shadow.db" \
+  --manifest "/var/lib/psy/databases/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
   --schema-profile v22 \
   --artifact-kind migration-staged \
-  --source "/var/lib/psy/databases/shadow/${INSTANCE}/source/<approved-copy>.db" \
+  --source "/var/lib/psy/databases/${INSTANCE}/source/<approved-copy>.db" \
   --source-schema-profile legacy_v214 \
   --git-commit "${GIT_COMMIT}" \
   --app-version "${APP_VERSION}"
 
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/scripts/backup-db.py" restore \
-  --database "/var/lib/psy/databases/shadow/${INSTANCE}/migration/yd_os-v22-shadow.db" \
-  --manifest "/var/lib/psy/databases/shadow/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
-  --restore "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db" \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/scripts/backup-db.py" restore \
+  --database "/var/lib/psy/databases/${INSTANCE}/migration/yd_os-v22-shadow.db" \
+  --manifest "/var/lib/psy/databases/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
+  --restore "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db" \
   --schema-profile v22
 
-chown psy:psy "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db"
-chmod 0600 "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db"
+chown psy:psy "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db"
+chmod 0600 "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db"
 ```
 
 随后建立 shadow descriptor，并在服务尚未启动时创建独立 pointer；两条命令只能引用本 runbook 的 shadow code/config/runtime DB/manifest 路径和 `v2.2.0-shadow`：
 
 ```bash
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/scripts/switch-release.py" describe \
-  --descriptor "/var/lib/psy/releases/shadow/${INSTANCE}/${RELEASE_ID}.json" \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/scripts/switch-release.py" describe \
+  --descriptor "/var/lib/psy/releases/${INSTANCE}/${RELEASE_ID}.json" \
   --release-id "${RELEASE_ID}" \
   --app-version "${APP_VERSION}" \
   --git-commit "${GIT_COMMIT}" \
-  --code-root "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2" \
-  --entrypoint "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/production.py" \
-  --config "/etc/psy/releases/shadow-${INSTANCE}/runtime.env" \
-  --database "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db" \
-  --manifest "/var/lib/psy/databases/shadow/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
+  --code-root "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2" \
+  --entrypoint "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/production.py" \
+  --config "/etc/psy/releases/${INSTANCE}/runtime.env" \
+  --database "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db" \
+  --manifest "/var/lib/psy/databases/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json" \
   --schema-profile v22
 
-"/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/scripts/switch-release.py" activate \
-  --descriptor "/var/lib/psy/releases/shadow/${INSTANCE}/${RELEASE_ID}.json" \
-  --active-pointer "/var/lib/psy/releases/shadow/${INSTANCE}/active-release.json" \
+"/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}/bin/python" \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/scripts/switch-release.py" activate \
+  --descriptor "/var/lib/psy/releases/${INSTANCE}/${RELEASE_ID}.json" \
+  --active-pointer "/var/lib/psy/releases/${INSTANCE}/active-release.json" \
   --expected-app-version "${APP_VERSION}" \
   --expected-git-commit "${GIT_COMMIT}" \
   --service-stopped-confirmed
@@ -225,27 +297,29 @@ chmod 0600 "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db
 逐级执行 `namei -l`/`stat`，证明：code、venv、config、descriptor、pointer、manifest/checksum 对 `psy` 不可写；source/migration 为 root-only；只有 `staged/` 及 runtime DB 由 `psy` 写。显式负向检查：
 
 ```bash
-sudo -u psy test -r "/etc/psy/releases/shadow-${INSTANCE}/runtime.env"
-sudo -u psy test ! -w "/etc/psy/releases/shadow-${INSTANCE}/runtime.env"
-sudo -u psy test ! -w "/var/lib/psy/databases/shadow/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json"
-sudo -u psy test -w "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db"
+sudo -u psy test -r "/etc/psy/releases/${INSTANCE}/runtime.env"
+sudo -u psy test ! -w "/etc/psy/releases/${INSTANCE}/runtime.env"
+sudo -u psy test ! -w "/var/lib/psy/databases/${INSTANCE}/manifests/yd_os-v22-shadow.db.manifest.json"
+sudo -u psy test -w "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db"
 ```
 
 ### 13. 端口和 launcher preflight
 
-用 `ss -ltnp` 同时确认 5000 仍由正式链占用/保持原状、批准 shadow 端口空闲，且附近候选没有冲突。随后以 unit 中完全相同的参数执行 launcher：
+用 `ss -ltnp` 同时确认 5000 仍由正式链占用/保持原状、批准 shadow 端口空闲，且附近候选没有冲突。随后以 unit 中完全相同的参数直接调用版本化 Physical Release 内的 launcher：
 
 ```bash
-sudo -u psy "/opt/psy/venvs/shadow-${INSTANCE}/bin/python" \
-  "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/production_launcher.py" \
-  --active-pointer "/var/lib/psy/releases/shadow/${INSTANCE}/active-release.json" \
-  --descriptor-root "/var/lib/psy/releases/shadow/${INSTANCE}" \
-  --release-root "/opt/psy/releases/shadow-${INSTANCE}/repo" \
-  --config-root "/etc/psy/releases/shadow-${INSTANCE}" \
-  --database-root "/var/lib/psy/databases/shadow/${INSTANCE}" \
+sudo -u psy /usr/bin/python3 \
+  "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/production_launcher.py" \
+  --active-pointer "/var/lib/psy/releases/${INSTANCE}/active-release.json" \
+  --descriptor-root "/var/lib/psy/releases/${INSTANCE}" \
+  --release-root "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo" \
+  --config-root "/etc/psy/releases/${INSTANCE}" \
+  --database-root "/var/lib/psy/databases/${INSTANCE}" \
+  --venv-root "/opt/psy/venvs" \
+  --expected-venv-path "/opt/psy/venvs/${INSTANCE}-${GIT_COMMIT}" \
   --expected-app-version "${APP_VERSION}" \
   --expected-git-commit "${GIT_COMMIT}" \
-  --expected-database-path "/var/lib/psy/databases/shadow/${INSTANCE}/staged/yd_os-v22-shadow.db" \
+  --expected-database-path "/var/lib/psy/databases/${INSTANCE}/staged/yd_os-v22-shadow.db" \
   --bind-port "${SHADOW_PORT}" \
   --shadow-instance "${INSTANCE}" \
   --expected-release-id "${RELEASE_ID}" \
@@ -288,7 +362,7 @@ nsenter --target "${MAINPID}" --mount -- \
 /usr/bin/python3 /usr/local/libexec/psy-shadow-deployment.py render-nginx \
   --instance "${INSTANCE}" \
   --release-id "${RELEASE_ID}" \
-  --template "/opt/psy/releases/shadow-${INSTANCE}/repo/personal-system-v2/deploy/nginx-psy-v22-shadow.conf.template" \
+  --template "/opt/psy/releases/rel-v220-shadow-${GIT_COMMIT}/repo/personal-system-v2/deploy/nginx-psy-v22-shadow.conf.template" \
   --output "${SHADOW_NGINX_OUTPUT}" \
   --server-name "${SHADOW_SERVER_NAME}" \
   --bind-address "${ECS_BIND_ADDRESS}" \
