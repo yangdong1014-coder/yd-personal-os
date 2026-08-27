@@ -1434,5 +1434,3 @@ def test_remediation_i_v22_artifact_with_soft_orphan_fails_manifest_publication(
 
     assert not manifest.exists()
     assert not checksum.exists()
-
-
