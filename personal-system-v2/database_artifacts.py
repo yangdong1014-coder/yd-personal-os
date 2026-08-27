@@ -138,6 +138,7 @@ def _inspect_connection(
     connection: sqlite3.Connection,
     *,
     expected_profile: str,
+    enforce_zero_soft_orphans: bool = True,
 ) -> dict:
     if expected_profile not in SUPPORTED_PROFILES:
         raise DatabaseArtifactError(
@@ -241,7 +242,7 @@ def _inspect_connection(
             table: _sequence_value(connection, table) for table in sequence_tables
         }
         soft_orphans = _soft_orphan_counts(connection, expected_profile)
-        if any(soft_orphans.values()):
+        if enforce_zero_soft_orphans and any(soft_orphans.values()):
             raise DatabaseArtifactError(
                 "database soft relation verification failed: "
                 + ", ".join(
@@ -409,6 +410,32 @@ def inspect_database(path, *, expected_profile: str) -> dict:
         report = _inspect_connection(
             connection,
             expected_profile=expected_profile,
+        )
+    finally:
+        connection.close()
+    report["path"] = str(database_path)
+    report["size_bytes"] = database_path.stat().st_size
+    report["sha256"] = sha256_file(database_path)
+    return report
+
+
+def _inspect_source_lineage(path, *, expected_profile: str) -> dict:
+    """Read-only lineage inspection permitting historical soft orphans for legacy_v214 only."""
+    if expected_profile == LEGACY_PROFILE:
+        enforce_zero_soft_orphans = False
+    elif expected_profile == V22_PROFILE:
+        enforce_zero_soft_orphans = True
+    else:
+        raise DatabaseArtifactError(
+            "expected_profile must be legacy_v214 or v22"
+        )
+    database_path = _require_existing_file(path, label="source database path")
+    connection = _readonly_connection(database_path)
+    try:
+        report = _inspect_connection(
+            connection,
+            expected_profile=expected_profile,
+            enforce_zero_soft_orphans=enforce_zero_soft_orphans,
         )
     finally:
         connection.close()
@@ -756,7 +783,7 @@ def create_database_manifest(
     if manifest_file.exists() or _checksum_path(manifest_file).exists():
         raise DatabaseArtifactError("manifest target or checksum already exists")
     artifact_report = inspect_database(artifact_path, expected_profile=expected_profile)
-    source_report = inspect_database(source_path, expected_profile=source_profile)
+    source_report = _inspect_source_lineage(source_path, expected_profile=source_profile)
     manifest = _make_manifest(
         artifact_report,
         artifact_filename=artifact_path.name,

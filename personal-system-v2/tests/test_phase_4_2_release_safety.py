@@ -16,9 +16,13 @@ import production
 import release_switch
 from database_artifacts import (
     DatabaseArtifactError,
+    _inspect_source_lineage,
+    _make_manifest,
+    _write_manifest_pair_no_overwrite,
     create_database_manifest,
     create_verified_backup,
     inspect_database,
+    read_verified_manifest,
     restore_verified_backup,
     verify_database_artifact,
 )
@@ -1119,3 +1123,316 @@ def test_wrong_schema_code_pair_is_rejected(tmp_path):
             database_manifest_path=Path(backup["manifest"]),
             expected_profile="legacy_v214",
         )
+
+
+# =============================================================================
+# Phase 5A.2 Step 11.R Remediation Regression Suite (Tests A-I)
+# =============================================================================
+
+
+def test_remediation_a_inspect_database_rejects_legacy_with_soft_orphan(tmp_path):
+    """Test A: inspect_database(legacy_v214 with soft orphan) => REJECT soft relation."""
+    source = _create_legacy(tmp_path / "legacy_orphan_a.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        "UPDATE feedback_items SET related_type = 'experiment', related_id = 99999"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(
+        DatabaseArtifactError,
+        match=r"database soft relation verification failed: feedback_items\.experiment=1",
+    ):
+        inspect_database(source, expected_profile="legacy_v214")
+
+
+def test_remediation_b_create_verified_backup_rejects_legacy_with_soft_orphan(tmp_path):
+    """Test B: create_verified_backup(legacy_v214 with soft orphan) => REJECT => no publication."""
+    source = _create_legacy(tmp_path / "legacy_orphan_b.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        "UPDATE feedback_items SET related_type = 'experiment', related_id = 99999"
+    )
+    conn.commit()
+    conn.close()
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+
+    with pytest.raises(
+        DatabaseArtifactError,
+        match=r"database soft relation verification failed: feedback_items\.experiment=1",
+    ):
+        create_verified_backup(
+            source.resolve(),
+            backup_dir.resolve(),
+            expected_profile="legacy_v214",
+            git_commit=LEGACY_COMMIT,
+            application_version="v2.1.4",
+        )
+
+    assert list(backup_dir.iterdir()) == []
+
+
+def test_remediation_c_verify_database_artifact_rejects_legacy_artifact_with_soft_orphan(
+    tmp_path,
+):
+    """Test C: verify_database_artifact(legacy artifact with soft orphan) => REJECT.
+
+    Constructs a structurally valid, checksummed manifest matching size/hash/metadata
+    so that execution specifically validates inspect_database soft-orphan rejection.
+    """
+    artifact_db = _create_legacy(tmp_path / "artifact_legacy.db")
+    conn = sqlite3.connect(artifact_db)
+    conn.execute(
+        "UPDATE feedback_items SET related_type = 'experiment', related_id = 99999"
+    )
+    conn.commit()
+    conn.close()
+
+    artifact_report = _inspect_source_lineage(
+        artifact_db, expected_profile="legacy_v214"
+    )
+    manifest_file = tmp_path / f"{artifact_db.name}.manifest.json"
+    manifest_payload = _make_manifest(
+        artifact_report,
+        artifact_filename=artifact_db.name,
+        artifact_kind="sqlite-backup",
+        source_report=artifact_report,
+        git_commit=LEGACY_COMMIT,
+        application_version="v2.1.4",
+    )
+    _write_manifest_pair_no_overwrite(manifest_file, manifest_payload)
+
+    manifest_verified = read_verified_manifest(manifest_file)
+    assert manifest_verified["ok"] is True
+
+    with pytest.raises(
+        DatabaseArtifactError,
+        match=r"database soft relation verification failed: feedback_items\.experiment=1",
+    ):
+        verify_database_artifact(
+            artifact_db,
+            manifest_file,
+            expected_profile="legacy_v214",
+        )
+
+
+def test_remediation_d_inspect_source_lineage_permits_legacy_soft_orphan(tmp_path):
+    """Test D: _inspect_source_lineage(legacy_v214 with historical soft orphan) => PASS."""
+    source = _create_legacy(tmp_path / "legacy_orphan_d.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        "UPDATE feedback_items SET related_type = 'experiment', related_id = 99999"
+    )
+    conn.commit()
+    conn.close()
+
+    report = _inspect_source_lineage(source, expected_profile="legacy_v214")
+    assert report["schema_profile"] == "legacy_v214"
+    assert report["integrity_check"] == "ok"
+    assert report["foreign_key_check_rows"] == 0
+    assert report["soft_orphans"]["feedback_items.experiment"] == 1
+    assert any(report["soft_orphans"].values()) is True
+    assert report["sha256"] == _digest(source)
+    assert report["size_bytes"] == source.stat().st_size
+
+
+def test_remediation_e_inspect_source_lineage_rejects_v22_with_soft_orphan(tmp_path):
+    """Test E: _inspect_source_lineage(v22 with soft orphan) => REJECT soft relation."""
+    source = _create_legacy(tmp_path / "legacy_for_v22_e.db")
+    staged = tmp_path / "staged_v22_e.db"
+    _migrate(source, staged)
+
+    conn = sqlite3.connect(staged)
+    conn.execute(
+        "UPDATE inbox_suggestions SET suggested_payload = '{\"goal_id\": 99999}'"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(
+        DatabaseArtifactError,
+        match=r"database soft relation verification failed: inbox_suggestions\.suggested_payload=1",
+    ):
+        _inspect_source_lineage(staged, expected_profile="v22")
+
+
+@pytest.mark.parametrize(
+    "corrupt_kind",
+    [
+        "physical_corruption",
+        "missing_table",
+        "extra_table",
+        "column_mismatch",
+        "schema_version_mismatch",
+    ],
+)
+def test_remediation_f_inspect_source_lineage_rejects_corrupt_or_invalid_legacy(
+    tmp_path, corrupt_kind
+):
+    """Test F: _inspect_source_lineage(corrupt/schema-invalid legacy) => REJECT."""
+    source = _create_legacy(tmp_path / f"legacy_{corrupt_kind}.db")
+    if corrupt_kind == "physical_corruption":
+        with open(source, "r+b") as stream:
+            stream.seek(16)
+            stream.write(b"\xff" * 64)
+        with pytest.raises(
+            DatabaseArtifactError,
+            match="database cannot be opened read-only|database integrity_check failed|database inspection failed",
+        ):
+            _inspect_source_lineage(source, expected_profile="legacy_v214")
+    elif corrupt_kind == "missing_table":
+        conn = sqlite3.connect(source)
+        conn.execute("DROP TABLE deliberations")
+        conn.commit()
+        conn.close()
+        with pytest.raises(
+            DatabaseArtifactError,
+            match=r"database table set mismatch: missing=\['deliberations'\]",
+        ):
+            _inspect_source_lineage(source, expected_profile="legacy_v214")
+    elif corrupt_kind == "extra_table":
+        conn = sqlite3.connect(source)
+        conn.execute("CREATE TABLE rogue_table (id INTEGER PRIMARY KEY)")
+        conn.commit()
+        conn.close()
+        with pytest.raises(
+            DatabaseArtifactError,
+            match=r"database table set mismatch: missing=\[\], extra=\['rogue_table'\]",
+        ):
+            _inspect_source_lineage(source, expected_profile="legacy_v214")
+    elif corrupt_kind == "column_mismatch":
+        conn = sqlite3.connect(source)
+        conn.execute("ALTER TABLE goals ADD COLUMN rogue_field TEXT")
+        conn.commit()
+        conn.close()
+        with pytest.raises(
+            DatabaseArtifactError,
+            match="goals column set mismatch",
+        ):
+            _inspect_source_lineage(source, expected_profile="legacy_v214")
+    elif corrupt_kind == "schema_version_mismatch":
+        conn = sqlite3.connect(source)
+        conn.execute("PRAGMA user_version = 42")
+        conn.commit()
+        conn.close()
+        with pytest.raises(
+            DatabaseArtifactError,
+            match="database schema version mismatch: expected=0, actual=42",
+        ):
+            _inspect_source_lineage(source, expected_profile="legacy_v214")
+
+
+def test_remediation_g_inspect_source_lineage_unsupported_profile_fails_closed(
+    tmp_path,
+):
+    """Test G: _inspect_source_lineage(unsupported profile) => FAIL-CLOSED."""
+    source = _create_legacy(tmp_path / "legacy_g.db")
+    with pytest.raises(
+        DatabaseArtifactError,
+        match="expected_profile must be legacy_v214 or v22",
+    ):
+        _inspect_source_lineage(source, expected_profile="unknown_v99")
+
+
+def test_remediation_h_legacy_source_with_soft_orphan_migrated_to_clean_v22_succeeds(
+    tmp_path,
+):
+    """Test H: legacy source with historical soft orphan + clean migrated v22 artifact => PASS."""
+    source = _create_legacy(tmp_path / "legacy_orphan_h.db")
+    conn = sqlite3.connect(source)
+    conn.execute(
+        "UPDATE assets SET source_type = 'review', source_id = 99999"
+    )
+    conn.commit()
+    conn.close()
+
+    source_lineage = _inspect_source_lineage(source, expected_profile="legacy_v214")
+    assert source_lineage["soft_orphans"]["assets.source_id.review"] == 1
+
+    staged = tmp_path / "staged_clean_h.db"
+    migration_result = _migrate(source, staged)
+    assert migration_result["ok"] is True
+
+    staged_report = inspect_database(staged, expected_profile="v22")
+    assert all(count == 0 for count in staged_report["soft_orphans"].values())
+
+    manifest = tmp_path / "staged_h.manifest.json"
+    manifest_report = create_database_manifest(
+        staged.resolve(),
+        manifest.resolve(),
+        expected_profile="v22",
+        artifact_kind="migration-staged",
+        source_path=source.resolve(),
+        source_profile="legacy_v214",
+        git_commit=HEAD_COMMIT,
+        application_version="v2.2.0",
+    )
+    assert manifest_report["ok"] is True
+
+    raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    assert set(raw_manifest.keys()) == {
+        "format",
+        "timestamp",
+        "application",
+        "source",
+        "artifact",
+    }
+    assert set(raw_manifest["source"].keys()) == {
+        "path",
+        "size_bytes",
+        "sha256",
+        "schema_profile",
+        "schema_version",
+    }
+    assert "soft_orphans" not in raw_manifest["source"]
+
+    verified = verify_database_artifact(
+        staged,
+        manifest,
+        expected_profile="v22",
+    )
+    assert verified["ok"] is True
+    assert verified["source"]["schema_profile"] == "legacy_v214"
+    assert verified["artifact"]["schema_profile"] == "v22"
+
+
+def test_remediation_i_v22_artifact_with_soft_orphan_fails_manifest_publication(
+    tmp_path,
+):
+    """Test I: legacy source + v22 artifact containing soft orphan => REJECT before publication."""
+    source = _create_legacy(tmp_path / "legacy_source_i.db")
+    staged = tmp_path / "staged_orphan_i.db"
+    _migrate(source, staged)
+
+    conn = sqlite3.connect(staged)
+    conn.execute(
+        "UPDATE inbox_suggestions SET suggested_payload = '{\"goal_id\": 99999}'"
+    )
+    conn.commit()
+    conn.close()
+
+    manifest = tmp_path / "staged_orphan_i.manifest.json"
+    checksum = Path(str(manifest) + ".sha256")
+
+    with pytest.raises(
+        DatabaseArtifactError,
+        match=r"database soft relation verification failed: inbox_suggestions\.suggested_payload=1",
+    ):
+        create_database_manifest(
+            staged.resolve(),
+            manifest.resolve(),
+            expected_profile="v22",
+            artifact_kind="migration-staged",
+            source_path=source.resolve(),
+            source_profile="legacy_v214",
+            git_commit=HEAD_COMMIT,
+            application_version="v2.2.0",
+        )
+
+    assert not manifest.exists()
+    assert not checksum.exists()
+
+
