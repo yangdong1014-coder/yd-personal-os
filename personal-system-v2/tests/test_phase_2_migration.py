@@ -11,8 +11,12 @@ import database
 from v22_migration import (
     LEGACY_V214_COLUMNS,
     MigrationError,
+    V22_USERS_COLUMNS,
     VerificationError,
+    audit_postflight,
+    audit_preflight,
     migrate_legacy_database,
+    verify_authoritative_envelope,
     verify_migration,
 )
 
@@ -390,4 +394,461 @@ def test_migration_handles_opportunity_experiment_review_sources(tmp_path):
         assert row_56["source_type"] == "" and row_56["source_id"] is None
     finally:
         staged_conn.close()
+
+
+def _setup_valid_migration(tmp_path):
+    source = _create_legacy(tmp_path / "legacy.db")
+    staged = tmp_path / "staged.db"
+    _migrate(source, staged)
+    return source, staged
+
+
+def test_f22_rejects_extra_table(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("CREATE TABLE unapproved_table (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="多余未授权表"):
+        verify_migration(source, staged)
+
+    res = verify_authoritative_envelope(source, staged)
+    assert res["raw_ok"] is False
+    assert res["raw_exit"] == 1
+    assert any("多余未授权表" in issue for issue in res["issues"])
+
+
+def test_f22_rejects_missing_table(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("DROP TABLE tasks")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="缺少业务表/用户表"):
+        verify_migration(source, staged)
+
+
+def test_f23_rejects_non_integer_user_id(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("ALTER TABLE tasks RENAME TO tasks_old")
+    conn.execute("""
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待处理',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            created_at TEXT NOT NULL,
+            today_progress INTEGER NOT NULL DEFAULT 0,
+            today_progress_date TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        )
+    """)
+    conn.execute(
+        "INSERT INTO tasks SELECT id, CAST(user_id AS TEXT), project_id, name, status, priority, created_at, today_progress, today_progress_date FROM tasks_old"
+    )
+    conn.execute("DROP TABLE tasks_old")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="类型不是 INTEGER"):
+        verify_migration(source, staged)
+
+
+def test_f23_rejects_nullable_user_id(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("ALTER TABLE tasks RENAME TO tasks_old")
+    conn.execute("""
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待处理',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            created_at TEXT NOT NULL,
+            today_progress INTEGER NOT NULL DEFAULT 0,
+            today_progress_date TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        )
+    """)
+    conn.execute(
+        "INSERT INTO tasks SELECT id, user_id, project_id, name, status, priority, created_at, today_progress, today_progress_date FROM tasks_old"
+    )
+    conn.execute("DROP TABLE tasks_old")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="不是 NOT NULL"):
+        verify_migration(source, staged)
+
+
+def test_f23_rejects_unexpected_business_column_drift(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("ALTER TABLE tasks ADD COLUMN unapproved_column TEXT")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="字段集合与权威契约不一致"):
+        verify_migration(source, staged)
+
+
+def test_f24_accepts_required_users_id_fk_plus_composite_fk(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    fks = conn.execute("PRAGMA foreign_key_list(projects)").fetchall()
+    conn.close()
+    assert len(fks) >= 2
+    report = verify_migration(source, staged)
+    assert report["ok"] is True
+
+
+def test_f24_rejects_user_id_to_non_id_target(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("ALTER TABLE tasks RENAME TO tasks_old")
+    conn.execute("""
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '待处理',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            created_at TEXT NOT NULL,
+            today_progress INTEGER NOT NULL DEFAULT 0,
+            today_progress_date TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(username) ON DELETE RESTRICT
+        )
+    """)
+    conn.execute(
+        "INSERT INTO tasks SELECT id, user_id, project_id, name, status, priority, created_at, today_progress, today_progress_date FROM tasks_old"
+    )
+    conn.execute("DROP TABLE tasks_old")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="缺少指向 users\\(id\\) 的外键"):
+        verify_migration(source, staged)
+
+
+def test_f25_rejects_users_column_mismatch(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("ALTER TABLE users ADD COLUMN unapproved_user_col TEXT")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="users 表字段契约不匹配"):
+        verify_migration(source, staged)
+
+
+def test_f28_accepts_legal_source_type_with_null_source_id(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("UPDATE assets SET source_type = 'review', source_id = NULL WHERE id = 50")
+    conn.commit()
+    conn.close()
+
+    report = verify_migration(source, staged)
+    assert report["ok"] is True
+    assert report["soft_orphans"]["assets.source_id.review"] == 0
+
+
+def test_f28_rejects_non_null_dangling_soft_relation(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("UPDATE assets SET source_type = 'review', source_id = 999999 WHERE id = 50")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(VerificationError, match="软关联孤儿"):
+        verify_migration(source, staged)
+
+
+def test_u01_diagnostic_source_contains_users_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(source)
+    conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert result["diagnostics"]["legacy_source"]["has_users_table"] is True
+
+
+def test_u02_diagnostic_source_column_drift_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(source)
+    conn.execute("ALTER TABLE tasks ADD COLUMN extra_legacy_col TEXT")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert "tasks" in result["diagnostics"]["legacy_source"]["column_mismatches"]
+
+
+def test_u03_diagnostic_source_contains_user_id_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(source)
+    conn.execute("ALTER TABLE tasks ADD COLUMN user_id INTEGER")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert "tasks" in result["diagnostics"]["legacy_source"]["tables_with_user_id"]
+
+
+def test_u04_diagnostic_source_positioning_anchor_gt_1_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(source)
+    conn.execute(
+        """
+        INSERT INTO positioning_anchor (
+            id, first_principle, identity_core, flywheel_def,
+            current_stage, north_star, updated_at
+        ) VALUES (999, 'p', 'i', 'f', 'c', 'n', '2026-01-01')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    conn_staged = sqlite3.connect(staged)
+    conn_staged.execute("ALTER TABLE positioning_anchor RENAME TO positioning_anchor_old")
+    conn_staged.execute(
+        """
+        CREATE TABLE positioning_anchor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            first_principle TEXT NOT NULL DEFAULT '',
+            identity_core TEXT NOT NULL DEFAULT '',
+            flywheel_def TEXT NOT NULL DEFAULT '',
+            current_stage TEXT NOT NULL DEFAULT '',
+            north_star TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        )
+        """
+    )
+    conn_staged.execute("INSERT INTO positioning_anchor SELECT * FROM positioning_anchor_old")
+    conn_staged.execute(
+        """
+        INSERT INTO positioning_anchor (
+            id, user_id, first_principle, identity_core, flywheel_def,
+            current_stage, north_star, updated_at
+        ) VALUES (999, 1, 'p', 'i', 'f', 'c', 'n', '2026-01-01')
+        """
+    )
+    conn_staged.execute("DROP TABLE positioning_anchor_old")
+    conn_staged.commit()
+    conn_staged.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert result["diagnostics"]["legacy_source"]["positioning_anchor_count"] == 2
+
+
+def test_u05_diagnostic_bidirectional_except_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("UPDATE tasks SET name = 'mutated task name' WHERE id = 30")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert result["diagnostics"]["except_checks"]["tasks"]["legacy_except_staged"] == 1
+
+
+def test_u06_diagnostic_business_table_sequence_drift_does_not_change_verdict(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("UPDATE sqlite_sequence SET seq = 9999 WHERE name = 'tasks'")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert result["diagnostics"]["sequence_checks"]["tasks"]["sequence_matches"] is False
+
+
+def test_u07_diagnostic_hard_relation_custom_sql_does_not_change_verdict(tmp_path, monkeypatch):
+    source, staged = _setup_valid_migration(tmp_path)
+    import v22_migration
+    monkeypatch.setattr(
+        v22_migration,
+        "_verify_hard_relations",
+        lambda conn, staged_tables=None: ({"mock.relation": 1}, ["mock hard relation orphan issue"]),
+    )
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+    assert result["diagnostics"]["hard_orphans"]["counts"]["mock.relation"] == 1
+
+
+def test_u08_leading_user_index_not_in_blocking_path(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.row_factory = sqlite3.Row
+    for row in conn.execute("PRAGMA index_list(tasks)").fetchall():
+        conn.execute(f'DROP INDEX IF EXISTS "{row["name"]}"')
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["ok"] is True
+    assert result["raw_exit"] == 0
+
+
+def test_pre_failure_prevents_semantic_db_open(tmp_path):
+    source = tmp_path / "corrupt_source.db"
+    source.write_bytes(b"NOT A SQLITE FILE HEADER")
+    staged = tmp_path / "staged.db"
+    staged.write_bytes(b"NOT A SQLITE FILE HEADER")
+
+    def forbidden_db_opener(*args, **kwargs):
+        raise AssertionError("DB opener should NOT have been called on PRE failure!")
+
+    result = verify_authoritative_envelope(
+        source, staged, db_opener=forbidden_db_opener
+    )
+    assert result["pre_ok"] is False
+    assert result["raw_ok"] is False
+    assert result["raw_exit"] == 1
+    assert result["semantic_ok"] is False
+    assert result["post_ok"] is False
+
+
+def test_semantic_failure_cannot_skip_post_audit_after_db_access_begins(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    conn = sqlite3.connect(staged)
+    conn.execute("CREATE TABLE unapproved_extra_table (id INT)")
+    conn.commit()
+    conn.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["pre_ok"] is True
+    assert result["connection_safety_ok"] is True
+    assert result["semantic_ok"] is False
+    assert result["post_ok"] is True
+    assert result["raw_ok"] is False
+    assert result["raw_exit"] == 1
+
+
+def test_post_failure_forces_raw_fail(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+
+    def mutating_db_opener(src, stg):
+        sidecar = Path(str(stg) + "-wal")
+        sidecar.write_bytes(b"rogue wal file")
+        return verify_migration(src, stg)
+
+    result = verify_authoritative_envelope(
+        source, staged, db_opener=mutating_db_opener
+    )
+    assert result["pre_ok"] is True
+    assert result["semantic_ok"] is True
+    assert result["post_ok"] is False
+    assert any("F-36" in issue for issue in result["post_issues"])
+    assert result["raw_ok"] is False
+    assert result["raw_exit"] == 1
+
+
+def test_no_diagnostic_can_convert_raw_fail_to_pass(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    # Inject real blocking failure: F-21 wrong user_version
+    conn = sqlite3.connect(staged)
+    conn.execute("PRAGMA user_version = 999")
+    conn.commit()
+    conn.close()
+
+    # Also inject diagnostic: source has users table (U-01)
+    conn_src = sqlite3.connect(source)
+    conn_src.execute("CREATE TABLE users (id INT)")
+    conn_src.commit()
+    conn_src.close()
+
+    result = verify_authoritative_envelope(source, staged)
+    assert result["diagnostics"]["legacy_source"]["has_users_table"] is True
+    assert result["semantic_ok"] is False
+    assert result["raw_ok"] is False
+    assert result["raw_exit"] == 1
+
+
+def test_preflight_strict_shadow_layout_checks_and_absence(tmp_path):
+    source, staged = _setup_valid_migration(tmp_path)
+    instance_root = tmp_path / "shadow-01"
+    for sub in ("source", "migration", "manifests", "staged"):
+        (instance_root / sub).mkdir(parents=True)
+    databases_root = tmp_path / "databases"
+    databases_root.mkdir(parents=True)
+
+    # Absence targets
+    staged_dest = instance_root / "staged" / "yd_os-v22-shadow.db"
+    manifest_path = instance_root / "manifests" / "yd_os-v22-shadow.db.manifest.json"
+
+    # 1. When files strictly absent -> pre_ok should pass
+    pre_ok, issues, _ = audit_preflight(
+        source,
+        staged,
+        staged_dest=staged_dest,
+        manifest_path=manifest_path,
+        instance_root=instance_root,
+        databases_root=databases_root,
+    )
+    assert pre_ok is True
+    assert issues == []
+
+    # 2. If staged_dest exists -> F-16 failure
+    staged_dest.write_bytes(b"existing staged db")
+    pre_ok, issues, _ = audit_preflight(
+        source,
+        staged,
+        staged_dest=staged_dest,
+        manifest_path=manifest_path,
+    )
+    assert pre_ok is False
+    assert any("F-16" in issue for issue in issues)
+    staged_dest.unlink()
+
+    # 3. If manifest exists -> F-18 failure
+    manifest_path.write_text("{}", encoding="utf-8")
+    pre_ok, issues, _ = audit_preflight(
+        source,
+        staged,
+        staged_dest=staged_dest,
+        manifest_path=manifest_path,
+    )
+    assert pre_ok is False
+    assert any("F-18" in issue for issue in issues)
+    manifest_path.unlink()
+
+    # 4. If sidecar exists on staged_dest -> F-17 failure
+    staged_sidecar = Path(str(staged_dest) + "-wal")
+    staged_sidecar.write_bytes(b"wal")
+    pre_ok, issues, _ = audit_preflight(
+        source,
+        staged,
+        staged_dest=staged_dest,
+        manifest_path=manifest_path,
+    )
+    assert pre_ok is False
+    assert any("F-17" in issue for issue in issues)
+    staged_sidecar.unlink()
 
