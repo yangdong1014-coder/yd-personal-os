@@ -269,7 +269,7 @@ def test_gunicorn_consumes_launcher_port_and_preserves_forwarding_guards(monkeyp
         threads=4,
         preload_app=True,
         reload=False,
-        forwarded_allow_ips="127.0.0.1",
+        forwarded_allow_ips=["127.0.0.1"],
         forwarder_headers="",
         control_socket_disable=True,
     )
@@ -277,6 +277,34 @@ def test_gunicorn_consumes_launcher_port_and_preserves_forwarding_guards(monkeyp
     safe_cfg.bind = ["0.0.0.0:5100"]
     with pytest.raises(RuntimeError, match="127.0.0.1:5100"):
         shadow_config["on_starting"](SimpleNamespace(cfg=safe_cfg))
+
+
+@pytest.mark.parametrize(
+    "forwarded_allow_ips",
+    (
+        ["127.0.0.1", "::1"],
+        ["*"],
+        ["10.0.0.1"],
+        [],
+    ),
+)
+def test_shadow_gunicorn_rejects_non_exact_forwarded_allow_ips(
+    monkeypatch, forwarded_allow_ips
+):
+    shadow_config = _load_gunicorn_config(monkeypatch, 5100)
+    cfg = SimpleNamespace(
+        bind=["127.0.0.1:5100"],
+        workers=1,
+        worker_class_str="gthread",
+        threads=4,
+        preload_app=True,
+        reload=False,
+        forwarded_allow_ips=forwarded_allow_ips,
+        forwarder_headers="",
+        control_socket_disable=True,
+    )
+    with pytest.raises(RuntimeError, match="forwarded_allow_ips must match the trusted proxy"):
+        shadow_config["on_starting"](SimpleNamespace(cfg=cfg))
 
 
 @pytest.mark.parametrize("port", ("80", "65536", "not-a-port"))

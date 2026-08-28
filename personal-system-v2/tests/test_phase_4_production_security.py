@@ -797,7 +797,7 @@ def test_gunicorn_config_rejects_worker_or_bind_overrides(monkeypatch):
         threads = 4
         preload_app = True
         reload = False
-        forwarded_allow_ips = "127.0.0.1"
+        forwarded_allow_ips = ["127.0.0.1"]
         forwarder_headers = ""
         control_socket_disable = True
 
@@ -812,3 +812,57 @@ def test_gunicorn_config_rejects_worker_or_bind_overrides(monkeypatch):
 
     with pytest.raises(RuntimeError, match="one Gunicorn worker"):
         gunicorn_config.nworkers_changed(fake_server, 2, 1)
+
+
+def _gunicorn_runtime_server(forwarded_allow_ips):
+    class FakeConfig:
+        bind = ["127.0.0.1:5000"]
+        workers = 1
+        worker_class_str = "gthread"
+        threads = 4
+        preload_app = True
+        reload = False
+        forwarder_headers = ""
+        control_socket_disable = True
+
+    cfg = FakeConfig()
+    cfg.forwarded_allow_ips = forwarded_allow_ips
+    return type("FakeServer", (), {"cfg": cfg})()
+
+
+def test_gunicorn_on_starting_accepts_exact_forwarded_allow_ips_list(monkeypatch):
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    config_path = Path(__file__).parents[1] / "gunicorn.conf.py"
+    spec = importlib.util.spec_from_file_location(
+        "psy_gunicorn_forwarded_allow_ips_pass", config_path
+    )
+    gunicorn_config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gunicorn_config)
+
+    gunicorn_config.on_starting(_gunicorn_runtime_server(["127.0.0.1"]))
+
+
+@pytest.mark.parametrize(
+    "forwarded_allow_ips",
+    (
+        ["127.0.0.1", "::1"],
+        ["*"],
+        ["8.8.8.8"],
+        [],
+        "127.0.0.1",
+        "*",
+    ),
+)
+def test_gunicorn_on_starting_rejects_non_exact_forwarded_allow_ips(
+    monkeypatch, forwarded_allow_ips
+):
+    monkeypatch.setenv("PERSONAL_OS_TRUSTED_PROXY", "127.0.0.1")
+    config_path = Path(__file__).parents[1] / "gunicorn.conf.py"
+    spec = importlib.util.spec_from_file_location(
+        "psy_gunicorn_forwarded_allow_ips_fail", config_path
+    )
+    gunicorn_config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gunicorn_config)
+
+    with pytest.raises(RuntimeError, match="forwarded_allow_ips must match the trusted proxy"):
+        gunicorn_config.on_starting(_gunicorn_runtime_server(forwarded_allow_ips))

@@ -48,7 +48,7 @@ def on_starting(server):
     trusted_proxy = os.environ.get("PERSONAL_OS_TRUSTED_PROXY", "").strip()
     if trusted_proxy not in {"127.0.0.1", "::1"}:
         raise RuntimeError("Gunicorn requires one exact loopback trusted proxy")
-    if server.cfg.forwarded_allow_ips != trusted_proxy:
+    if server.cfg.forwarded_allow_ips != [trusted_proxy]:
         raise RuntimeError("Gunicorn forwarded_allow_ips must match the trusted proxy")
     if server.cfg.forwarder_headers:
         raise RuntimeError("Gunicorn forwarder_headers must remain empty")
