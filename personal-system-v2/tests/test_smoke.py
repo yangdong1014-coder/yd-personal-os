@@ -126,10 +126,10 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v2.2.0-shadow"
-    assert payload["data"]["build_identity"].startswith("v2.2.0-shadow")
+    assert payload["data"]["current"] == "v2.2.0"
+    assert payload["data"]["build_identity"].startswith("v2.2.0")
     versions = [entry["version"] for entry in payload["data"]["entries"]]
-    assert versions[:2] == ["v2.2.0-shadow", "v2.1.4"]
+    assert versions[:3] == ["v2.2.0", "v2.2.0-shadow", "v2.1.4"]
     assert isinstance(payload["data"]["entries"], list)
 
 

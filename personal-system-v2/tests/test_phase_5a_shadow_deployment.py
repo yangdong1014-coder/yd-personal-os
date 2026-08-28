@@ -749,14 +749,14 @@ def test_shadow_examples_are_distinct_and_have_no_committed_secret():
     assert "X-PSY-Proxy-Token" in proxy and STRONG_PROXY_TOKEN not in proxy
 
 
-def test_candidate_build_identity_combines_version_and_release_id(
+def test_build_identity_combines_version_and_release_id(
     unauthenticated_client, monkeypatch
 ):
     monkeypatch.setenv("PSY_RELEASE_ID", "phase5a-local-browser")
 
-    assert changelog.get_current_version() == "v2.2.0-shadow"
+    assert changelog.get_current_version() == "v2.2.0"
     assert changelog.get_build_identity() == (
-        "v2.2.0-shadow · phase5a-local-browser"
+        "v2.2.0 · phase5a-local-browser"
     )
     assert changelog.get_build_identity(
         {
@@ -766,7 +766,7 @@ def test_candidate_build_identity_combines_version_and_release_id(
     ) == "v2.2.0-shadow · phase5a-approved-release"
     response = unauthenticated_client.get("/login")
     assert response.status_code == 200
-    assert "v2.2.0-shadow · phase5a-local-browser" in response.get_data(
+    assert "v2.2.0 · phase5a-local-browser" in response.get_data(
         as_text=True
     )
 

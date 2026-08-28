@@ -1,6 +1,17 @@
 {
-  "current": "v2.2.0-shadow",
+  "current": "v2.2.0",
   "entries": [
+    {
+      "version": "v2.2.0",
+      "date": "2026-08-28",
+      "title": "PSY v2.2.0 正式版本身份",
+      "type": "release",
+      "items": [
+        "正式固化 v2.2.0 应用版本身份；生产激活仍由独立 Cutover Write Gate 控制。",
+        "继承并保留已通过 Shadow 验收的多用户认证、owner 数据隔离及 fail-closed release chain。",
+        "本身份变更不包含业务逻辑、认证行为、数据库 schema/migration 或用户功能调整。"
+      ]
+    },
     {
       "version": "v2.2.0-shadow",
       "date": "2026-08-14",
