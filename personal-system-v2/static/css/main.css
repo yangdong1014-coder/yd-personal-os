@@ -1664,6 +1664,19 @@ a {
   flex-shrink: 0;
 }
 
+.sidebar-icp {
+  flex-shrink: 0;
+  padding: 0 0.25rem;
+  color: var(--text-label);
+  font-size: 0.64rem;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.sidebar-icp:hover {
+  color: var(--text-subtle);
+}
+
 .sidebar-admin-link {
   flex-shrink: 0;
 }
@@ -1716,6 +1729,23 @@ a {
 
 .nav-brand span {
   color: var(--accent);
+}
+
+.nav-brand-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.42rem;
+  min-width: 0;
+}
+
+.nav-brand-version {
+  flex-shrink: 0;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .nav-links {
@@ -1978,6 +2008,14 @@ a {
     padding: 0.55rem 0.75rem 0;
     margin-top: 0.15rem;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .sidebar-icp {
+    width: 100%;
+    padding: 0.5rem 0.75rem 0;
+    margin-top: 0.2rem;
+    border-top: 1px solid var(--border-subtle);
+    white-space: normal;
   }
 
   .sidebar-logout-btn {

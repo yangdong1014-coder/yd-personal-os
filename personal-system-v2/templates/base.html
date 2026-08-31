@@ -25,7 +25,10 @@
     })();
   </script>
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='icons/brand/favicon.ico') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='icons/brand/favicon-32x32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='icons/brand/favicon-16x16.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='icons/brand/apple-touch-icon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -33,7 +36,12 @@
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="sidebar-head">
-        <a href="{{ url_for('index') }}" class="nav-brand">个人能力<span>OS</span></a>
+        <div class="nav-brand-line">
+          <a href="{{ url_for('index') }}" class="nav-brand">个人能力<span>OS</span></a>
+          {% if current_version %}
+          <span class="nav-brand-version">{{ current_version }}</span>
+          {% endif %}
+        </div>
       </div>
       <nav class="nav-links" aria-label="主导航">
         {% set nav_icons = {
@@ -100,6 +108,14 @@
             <button type="submit" class="nav-export-btn sidebar-logout-btn">退出</button>
           </form>
         </div>
+        {% endif %}
+        {% if icp_filing_number %}
+        <a
+          class="sidebar-icp"
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ icp_filing_number }}</a>
         {% endif %}
       </div>
     </aside>

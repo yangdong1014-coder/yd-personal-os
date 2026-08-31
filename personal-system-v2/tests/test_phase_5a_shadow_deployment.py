@@ -766,9 +766,9 @@ def test_build_identity_combines_version_and_release_id(
     ) == "v2.2.0-shadow · phase5a-approved-release"
     response = unauthenticated_client.get("/login")
     assert response.status_code == 200
-    assert "v2.2.0 · phase5a-local-browser" in response.get_data(
-        as_text=True
-    )
+    login_markup = response.get_data(as_text=True)
+    assert 'class="auth-build-identity"' not in login_markup
+    assert "phase5a-local-browser" not in login_markup
 
 
 def test_service_worker_never_caches_documents_api_or_login_state():

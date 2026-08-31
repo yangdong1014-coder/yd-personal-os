@@ -1,10 +1,18 @@
 import json
+import struct
 from pathlib import Path
 
 import database
+import site_config
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _png_dimensions(path):
+    header = path.read_bytes()[:24]
+    assert header[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", header[16:24])
 
 
 def _empty_backup():
@@ -37,6 +45,82 @@ def test_base_template_has_pwa_metadata(client):
     assert 'name="theme-color"' in html
     assert 'name="apple-mobile-web-app-capable"' in html
     assert 'name="apple-mobile-web-app-title"' in html
+
+
+def test_base_template_has_brand_favicons_and_dynamic_version(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'href="/static/icons/brand/favicon.ico"' in html
+    assert 'href="/static/icons/brand/favicon-32x32.png"' in html
+    assert 'href="/static/icons/brand/favicon-16x16.png"' in html
+    assert 'href="/static/icons/brand/apple-touch-icon.png"' in html
+    assert '<span class="nav-brand-version">v2.2.0</span>' in html
+
+    template = (PROJECT_ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+    assert "{{ current_version }}" in template
+    assert "v2.2.0" not in template
+
+
+def test_brand_icon_assets_are_available(client):
+    brand_dir = PROJECT_ROOT / "static" / "icons" / "brand"
+    assert not (PROJECT_ROOT / "psy-app-icon-source.png.png").exists()
+    assert _png_dimensions(brand_dir / "psy-app-icon.png") == (1254, 1254)
+    assert _png_dimensions(brand_dir / "favicon-16x16.png") == (16, 16)
+    assert _png_dimensions(brand_dir / "favicon-32x32.png") == (32, 32)
+    assert _png_dimensions(brand_dir / "apple-touch-icon.png") == (180, 180)
+
+    ico_header = (brand_dir / "favicon.ico").read_bytes()[:6]
+    assert ico_header[:4] == b"\x00\x00\x01\x00"
+    assert int.from_bytes(ico_header[4:6], "little") >= 2
+
+    for path in (
+        "/static/icons/brand/favicon.ico",
+        "/static/icons/brand/favicon-16x16.png",
+        "/static/icons/brand/favicon-32x32.png",
+        "/static/icons/brand/apple-touch-icon.png",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.content_type.startswith("image/")
+
+
+def test_login_page_uses_shared_brand_favicons(unauthenticated_client):
+    response = unauthenticated_client.get("/login")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'href="/static/icons/brand/favicon.ico"' in html
+    assert 'href="/static/icons/brand/apple-touch-icon.png"' in html
+
+
+def test_icp_filing_is_hidden_when_unconfigured(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'class="sidebar-icp"' not in response.get_data(as_text=True)
+
+
+def test_icp_filing_is_rendered_only_when_configured(client, monkeypatch):
+    filing_number = "测试ICP备00000000号-1"
+    monkeypatch.setattr(site_config, "get_icp_filing_number", lambda: filing_number)
+
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert filing_number in html
+    assert 'class="sidebar-icp"' in html
+    assert 'href="https://beian.miit.gov.cn/"' in html
+    assert 'target="_blank"' in html
+    assert 'rel="noopener noreferrer"' in html
+
+
+def test_site_config_reads_icp_filing_number(tmp_path, monkeypatch):
+    config_path = tmp_path / "site_config.json"
+    config_path.write_text(
+        json.dumps({"icp_filing_number": "  测试ICP备00000000号-1  "}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(config_path))
+    assert site_config.get_icp_filing_number() == "测试ICP备00000000号-1"
 
 
 def test_base_template_has_compact_theme_toggle(client):

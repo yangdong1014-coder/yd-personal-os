@@ -46,6 +46,7 @@ import obsidian_export
 import positioning_service
 import prompt_specs
 import settings_store
+import site_config
 from prompts import MODULES, PromptNotFoundError, list_prompts, read_raw, save as save_prompt
 
 app = Flask(__name__)
@@ -127,6 +128,7 @@ def inject_globals():
         "ai_enabled": config.is_ai_enabled(),
         "current_version": changelog.get_current_version(),
         "build_identity": changelog.get_build_identity(),
+        "icp_filing_number": site_config.get_icp_filing_number(),
         "nav_groups": NAV_GROUPS,
     }
 
