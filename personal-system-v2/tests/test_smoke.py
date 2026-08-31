@@ -123,6 +123,102 @@ def test_site_config_reads_icp_filing_number(tmp_path, monkeypatch):
     assert site_config.get_icp_filing_number() == "测试ICP备00000000号-1"
 
 
+def test_production_persistent_site_config_overrides_release_default(
+    tmp_path, monkeypatch
+):
+    release_config = tmp_path / "release-site-config.json"
+    persistent_config = tmp_path / "persistent-site-config.json"
+    release_config.write_text(
+        json.dumps({"icp_filing_number": "发布内默认备案号"}),
+        encoding="utf-8",
+    )
+    persistent_config.write_text(
+        json.dumps({"icp_filing_number": "持久配置备案号"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(release_config))
+    monkeypatch.setattr(
+        site_config, "PERSISTENT_SITE_CONFIG_PATH", str(persistent_config)
+    )
+
+    assert site_config.get_icp_filing_number() == "持久配置备案号"
+
+    release_config.write_text(
+        json.dumps({"icp_filing_number": "新发布内默认备案号"}),
+        encoding="utf-8",
+    )
+    assert site_config.get_icp_filing_number() == "持久配置备案号"
+
+
+def test_optional_production_site_config_missing_or_malformed_is_safe(
+    tmp_path, monkeypatch
+):
+    release_config = tmp_path / "release-site-config.json"
+    persistent_config = tmp_path / "persistent-site-config.json"
+    release_config.write_text(
+        json.dumps({"icp_filing_number": ""}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(release_config))
+    monkeypatch.setattr(
+        site_config, "PERSISTENT_SITE_CONFIG_PATH", str(persistent_config)
+    )
+
+    assert site_config.get_icp_filing_number() == ""
+
+    persistent_config.write_text("{malformed", encoding="utf-8")
+    assert site_config.get_icp_filing_number() == ""
+
+
+def test_development_does_not_require_production_site_config(tmp_path, monkeypatch):
+    release_config = tmp_path / "release-site-config.json"
+    persistent_config = tmp_path / "persistent-site-config.json"
+    release_config.write_text(
+        json.dumps({"icp_filing_number": ""}),
+        encoding="utf-8",
+    )
+    persistent_config.write_text(
+        json.dumps({"icp_filing_number": "仅生产使用的备案号"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PERSONAL_OS_ENV", "development")
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(release_config))
+    monkeypatch.setattr(
+        site_config, "PERSISTENT_SITE_CONFIG_PATH", str(persistent_config)
+    )
+
+    assert site_config.get_icp_filing_number() == ""
+
+
+def test_physical_release_switch_keeps_persistent_icp(tmp_path, monkeypatch):
+    release_a_config = tmp_path / "release-a" / "site_config.json"
+    release_b_config = tmp_path / "release-b" / "site_config.json"
+    persistent_config = tmp_path / "production" / "site_config.json"
+    for release_config in (release_a_config, release_b_config):
+        release_config.parent.mkdir(parents=True)
+        release_config.write_text(
+            json.dumps({"icp_filing_number": ""}),
+            encoding="utf-8",
+        )
+    persistent_config.parent.mkdir()
+    persistent_config.write_text(
+        json.dumps({"icp_filing_number": "跨发布持久备案号"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PERSONAL_OS_ENV", "production")
+    monkeypatch.setattr(
+        site_config, "PERSISTENT_SITE_CONFIG_PATH", str(persistent_config)
+    )
+
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(release_a_config))
+    assert site_config.get_icp_filing_number() == "跨发布持久备案号"
+
+    monkeypatch.setattr(site_config, "SITE_CONFIG_PATH", str(release_b_config))
+    assert site_config.get_icp_filing_number() == "跨发布持久备案号"
+
+
 def test_base_template_has_compact_theme_toggle(client):
     response = client.get("/")
     assert response.status_code == 200

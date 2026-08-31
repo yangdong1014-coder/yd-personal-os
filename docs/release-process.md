@@ -33,6 +33,20 @@ Phase 5A 独立 ECS shadow
 
 Phase 5A 使用独立 code/config/descriptor/pointer、批准的独立数据库副本、独立 Gunicorn 端口、shadow systemd unit 与 Nginx 路由；不得停止现有生产、替换正式 active pointer、读取或迁移真实 `personal-system-v2/data/yd_os.db`。未获得明确人工批准时，流程必须停留在 Phase 5A。
 
+## Production 站点级配置持久化
+
+Production 的站点级公开配置使用稳定文件 `/etc/psy/site_config.json`，不得写入不可变 physical release。文件由 root 管理，建议权限为 `root:psy 0640`；现有 `psy-v22.service` 已将 `/etc/psy` 作为运行期只读路径。当前支持的 JSON 结构为：
+
+```json
+{
+  "icp_filing_number": "<approved-filing-number>"
+}
+```
+
+仅在 `PERSONAL_OS_ENV=production` 时加载该文件，优先级为 `Production 持久配置 > release 内 site_config.json 默认值`。文件缺失、JSON malformed 或不是对象时保持可选配置行为：回退到 release 默认值，不阻止应用启动；默认备案号为空时不显示。
+
+创建 release artifact、解包并晋升新的 physical release、激活 descriptor/pointer 或回滚时，都不得创建、覆盖或删除 `/etc/psy/site_config.json`。release artifact 内的 `personal-system-v2/site_config.json` 必须继续保持非 Production 默认值；真实备案号只迁移一次到上述稳定文件，后续 release 复用同一外置配置。
+
 ## 发布步骤
 
 1. **开发与测试**：功能完成 → pytest 全绿
