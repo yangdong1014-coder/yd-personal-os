@@ -1,9 +1,12 @@
 import hashlib
+import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +25,16 @@ from v22_migration import (
 
 
 FIXTURE_SQL = Path(__file__).parent / "fixtures" / "legacy_v214.sql"
+
+
+@pytest.fixture(autouse=True)
+def _require_production_ownership_capability(request):
+    if request.node.get_closest_marker("production_ownership") is None:
+        return
+    if os.name != "nt" and (not hasattr(os, "geteuid") or os.geteuid() != 0):
+        pytest.skip(
+            "Production ownership tests require a privileged POSIX fixture"
+        )
 
 
 def _create_legacy(path):
@@ -43,6 +56,56 @@ def _migrate(source, staged):
 
 def _digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _apply_production_leaf_ownership(source, migration):
+    if os.name == "nt":
+        return
+    os.chown(source, 0, 0)
+    Path(source).chmod(0o400)
+    os.chown(migration, 0, 0)
+    Path(migration).chmod(0o600)
+
+
+def _production_shadow_layout_stat_resolver(
+    instance_root, databases_root, monkeypatch
+):
+    if os.name == "nt":
+        return None
+    import grp
+    import pwd
+
+    user_names = {0: "root", 1: "psy"}
+    group_names = {0: "root", 1: "psy"}
+    monkeypatch.setattr(
+        pwd, "getpwuid", lambda uid: SimpleNamespace(pw_name=user_names[uid])
+    )
+    monkeypatch.setattr(
+        grp, "getgrgid", lambda gid: SimpleNamespace(gr_name=group_names[gid])
+    )
+    specifications = {
+        Path(databases_root).resolve(): (0, 0, 0o755),
+        Path(instance_root).resolve(): (0, 0, 0o755),
+        (instance_root / "source").resolve(): (0, 0, 0o700),
+        (instance_root / "migration").resolve(): (0, 0, 0o700),
+        (instance_root / "manifests").resolve(): (0, 1, 0o750),
+        (instance_root / "staged").resolve(): (1, 1, 0o700),
+    }
+
+    def controlled_stat(path):
+        candidate = Path(path).resolve()
+        actual = candidate.stat()
+        expected = specifications.get(candidate)
+        if expected is None:
+            return actual
+        owner, group, mode = expected
+        return SimpleNamespace(
+            st_uid=owner,
+            st_gid=group,
+            st_mode=stat.S_IFDIR | mode,
+        )
+
+    return controlled_stat
 
 
 def test_migration_preserves_every_table_field_id_json_time_and_sequence(tmp_path):
@@ -103,10 +166,12 @@ def test_migration_preserves_every_table_field_id_json_time_and_sequence(tmp_pat
         conn.close()
 
 
+@pytest.mark.production_ownership
 def test_verify_tool_rechecks_a_completed_staged_database(tmp_path):
     source = _create_legacy(tmp_path / "legacy.db")
     staged = tmp_path / "staged.db"
     _migrate(source, staged)
+    _apply_production_leaf_ownership(source, staged)
 
     report = verify_migration(source, staged)
     assert report["ok"] is True
@@ -403,8 +468,15 @@ def _setup_valid_migration(tmp_path):
     return source, staged
 
 
-def test_f22_rejects_extra_table(tmp_path):
+def _setup_valid_production_migration(tmp_path):
     source, staged = _setup_valid_migration(tmp_path)
+    _apply_production_leaf_ownership(source, staged)
+    return source, staged
+
+
+@pytest.mark.production_ownership
+def test_f22_rejects_extra_table(tmp_path):
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(staged)
     conn.execute("CREATE TABLE unapproved_table (id INTEGER PRIMARY KEY)")
     conn.commit()
@@ -572,8 +644,9 @@ def test_f28_rejects_non_null_dangling_soft_relation(tmp_path):
         verify_migration(source, staged)
 
 
+@pytest.mark.production_ownership
 def test_u01_diagnostic_source_contains_users_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(source)
     conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
     conn.commit()
@@ -585,8 +658,9 @@ def test_u01_diagnostic_source_contains_users_does_not_change_verdict(tmp_path):
     assert result["diagnostics"]["legacy_source"]["has_users_table"] is True
 
 
+@pytest.mark.production_ownership
 def test_u02_diagnostic_source_column_drift_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(source)
     conn.execute("ALTER TABLE tasks ADD COLUMN extra_legacy_col TEXT")
     conn.commit()
@@ -598,8 +672,9 @@ def test_u02_diagnostic_source_column_drift_does_not_change_verdict(tmp_path):
     assert "tasks" in result["diagnostics"]["legacy_source"]["column_mismatches"]
 
 
+@pytest.mark.production_ownership
 def test_u03_diagnostic_source_contains_user_id_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(source)
     conn.execute("ALTER TABLE tasks ADD COLUMN user_id INTEGER")
     conn.commit()
@@ -611,8 +686,9 @@ def test_u03_diagnostic_source_contains_user_id_does_not_change_verdict(tmp_path
     assert "tasks" in result["diagnostics"]["legacy_source"]["tables_with_user_id"]
 
 
+@pytest.mark.production_ownership
 def test_u04_diagnostic_source_positioning_anchor_gt_1_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(source)
     conn.execute(
         """
@@ -661,8 +737,9 @@ def test_u04_diagnostic_source_positioning_anchor_gt_1_does_not_change_verdict(t
     assert result["diagnostics"]["legacy_source"]["positioning_anchor_count"] == 2
 
 
+@pytest.mark.production_ownership
 def test_u05_diagnostic_bidirectional_except_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(staged)
     conn.execute("UPDATE tasks SET name = 'mutated task name' WHERE id = 30")
     conn.commit()
@@ -674,8 +751,9 @@ def test_u05_diagnostic_bidirectional_except_does_not_change_verdict(tmp_path):
     assert result["diagnostics"]["except_checks"]["tasks"]["legacy_except_staged"] == 1
 
 
+@pytest.mark.production_ownership
 def test_u06_diagnostic_business_table_sequence_drift_does_not_change_verdict(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(staged)
     conn.execute("UPDATE sqlite_sequence SET seq = 9999 WHERE name = 'tasks'")
     conn.commit()
@@ -687,8 +765,9 @@ def test_u06_diagnostic_business_table_sequence_drift_does_not_change_verdict(tm
     assert result["diagnostics"]["sequence_checks"]["tasks"]["sequence_matches"] is False
 
 
+@pytest.mark.production_ownership
 def test_u07_diagnostic_hard_relation_custom_sql_does_not_change_verdict(tmp_path, monkeypatch):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     import v22_migration
     monkeypatch.setattr(
         v22_migration,
@@ -702,8 +781,9 @@ def test_u07_diagnostic_hard_relation_custom_sql_does_not_change_verdict(tmp_pat
     assert result["diagnostics"]["hard_orphans"]["counts"]["mock.relation"] == 1
 
 
+@pytest.mark.production_ownership
 def test_u08_leading_user_index_not_in_blocking_path(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(staged)
     conn.row_factory = sqlite3.Row
     for row in conn.execute("PRAGMA index_list(tasks)").fetchall():
@@ -735,8 +815,9 @@ def test_pre_failure_prevents_semantic_db_open(tmp_path):
     assert result["post_ok"] is False
 
 
+@pytest.mark.production_ownership
 def test_semantic_failure_cannot_skip_post_audit_after_db_access_begins(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     conn = sqlite3.connect(staged)
     conn.execute("CREATE TABLE unapproved_extra_table (id INT)")
     conn.commit()
@@ -751,8 +832,9 @@ def test_semantic_failure_cannot_skip_post_audit_after_db_access_begins(tmp_path
     assert result["raw_exit"] == 1
 
 
+@pytest.mark.production_ownership
 def test_post_failure_forces_raw_fail(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
 
     def mutating_db_opener(src, stg):
         sidecar = Path(str(stg) + "-wal")
@@ -770,8 +852,9 @@ def test_post_failure_forces_raw_fail(tmp_path):
     assert result["raw_exit"] == 1
 
 
+@pytest.mark.production_ownership
 def test_no_diagnostic_can_convert_raw_fail_to_pass(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+    source, staged = _setup_valid_production_migration(tmp_path)
     # Inject real blocking failure: F-21 wrong user_version
     conn = sqlite3.connect(staged)
     conn.execute("PRAGMA user_version = 999")
@@ -791,13 +874,17 @@ def test_no_diagnostic_can_convert_raw_fail_to_pass(tmp_path):
     assert result["raw_exit"] == 1
 
 
-def test_preflight_strict_shadow_layout_checks_and_absence(tmp_path):
-    source, staged = _setup_valid_migration(tmp_path)
+@pytest.mark.production_ownership
+def test_preflight_strict_shadow_layout_checks_and_absence(tmp_path, monkeypatch):
+    source, staged = _setup_valid_production_migration(tmp_path)
     instance_root = tmp_path / "shadow-01"
     for sub in ("source", "migration", "manifests", "staged"):
         (instance_root / sub).mkdir(parents=True)
     databases_root = tmp_path / "databases"
     databases_root.mkdir(parents=True)
+    stat_resolver = _production_shadow_layout_stat_resolver(
+        instance_root, databases_root, monkeypatch
+    )
 
     # Absence targets
     staged_dest = instance_root / "staged" / "yd_os-v22-shadow.db"
@@ -811,6 +898,7 @@ def test_preflight_strict_shadow_layout_checks_and_absence(tmp_path):
         manifest_path=manifest_path,
         instance_root=instance_root,
         databases_root=databases_root,
+        stat_resolver=stat_resolver,
     )
     assert pre_ok is True
     assert issues == []
@@ -851,4 +939,3 @@ def test_preflight_strict_shadow_layout_checks_and_absence(tmp_path):
     assert pre_ok is False
     assert any("F-17" in issue for issue in issues)
     staged_sidecar.unlink()
-

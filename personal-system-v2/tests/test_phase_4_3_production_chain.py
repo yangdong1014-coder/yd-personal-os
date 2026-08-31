@@ -129,7 +129,13 @@ def _build_active_release(tmp_path, *, config_text=None):
     )
 
 
-def _prepare(release):
+def _prepare_platform_independent(release, monkeypatch):
+    # These tests target release selection, configuration, schema and Gunicorn
+    # behavior. Host ownership is covered separately by the POSIX permission
+    # contract tests, so a normal CI checkout must not impersonate Production.
+    monkeypatch.setattr(
+        production_launcher, "_validate_posix_permissions", lambda **_values: None
+    )
     return production_launcher.prepare_launch(
         active_pointer=release.pointer,
         descriptor_root=release.descriptor_root,
@@ -154,7 +160,7 @@ def test_launcher_resolves_descriptor_as_the_only_code_config_and_db_selector(
     monkeypatch.setenv("YD_OS_DB_PATH", str((tmp_path / "wrong.db").resolve()))
     monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
 
-    plan = _prepare(release)
+    plan = _prepare_platform_independent(release, monkeypatch)
 
     assert plan.code_root == release.code_root
     assert plan.entrypoint == release.code_root / "production.py"
@@ -212,7 +218,7 @@ def test_launcher_rejects_dangerous_parent_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("GUNICORN_CMD_ARGS", "--workers 9 --bind 0.0.0.0:5000")
 
     with pytest.raises(ProductionLaunchError, match="GUNICORN_CMD_ARGS"):
-        _prepare(release)
+        _prepare_platform_independent(release, monkeypatch)
 
 
 @pytest.mark.parametrize("mutation", ("pointer", "descriptor", "code", "config"))
@@ -236,7 +242,7 @@ def test_launcher_rejects_pointer_descriptor_code_or_config_tampering(
             stream.write("# tampered\n")
 
     with pytest.raises(ProductionLaunchError):
-        _prepare(release)
+        _prepare_platform_independent(release, monkeypatch)
 
 
 def test_runtime_database_may_change_rows_but_not_schema_or_integrity(
@@ -249,20 +255,23 @@ def test_runtime_database_may_change_rows_but_not_schema_or_integrity(
     connection.commit()
     connection.close()
 
-    assert _prepare(release).database_path == release.database
+    assert (
+        _prepare_platform_independent(release, monkeypatch).database_path
+        == release.database
+    )
 
     connection = sqlite3.connect(release.database)
     connection.execute("PRAGMA user_version = 999")
     connection.commit()
     connection.close()
     with pytest.raises(ProductionLaunchError, match="schema|invariant"):
-        _prepare(release)
+        _prepare_platform_independent(release, monkeypatch)
 
 
 def test_selected_preflight_fails_closed_before_any_listener(tmp_path, monkeypatch):
     release = _build_active_release(tmp_path)
     monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
-    plan = _prepare(release)
+    plan = _prepare_platform_independent(release, monkeypatch)
     listener_state_before = _port_is_open()
 
     release.config_path.write_text(
@@ -284,7 +293,7 @@ def test_production_preflight_requires_and_revalidates_launcher_context(
 ):
     release = _build_active_release(tmp_path)
     monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
-    plan = _prepare(release)
+    plan = _prepare_platform_independent(release, monkeypatch)
     monkeypatch.setattr(database, "DB_PATH", str(release.database))
     monkeypatch.setattr(production, "__file__", str(release.code_root / "production.py"))
     for key, value in plan.runtime_environment.items():
@@ -425,26 +434,29 @@ def test_launcher_posix_permissions_require_root_owned_release_metadata(
         )
 
 
-def test_gunicorn_guard_rejects_cli_worker_and_bind_overrides_via_real_check(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("override_args", "expected_error"),
+    (
+        (("--workers", "2"), "login guards require exactly one Gunicorn worker"),
+        (("--bind", "127.0.0.1:0"), "must bind 127.0.0.1"),
+    ),
+)
+def test_gunicorn_guard_rejects_cli_overrides_via_real_startup(
+    tmp_path, monkeypatch, override_args, expected_error
 ):
     if os.name == "nt" or subprocess.run(
         [sys.executable, "-c", "import gunicorn"], capture_output=True
     ).returncode:
-        pytest.skip("real Gunicorn check requires Linux with Gunicorn installed")
+        pytest.skip("real Gunicorn startup requires Linux with Gunicorn installed")
     release = _build_active_release(tmp_path)
     monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
-    plan = _prepare(release)
+    plan = _prepare_platform_independent(release, monkeypatch)
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "gunicorn",
-            "--check-config",
-            "--workers",
-            "2",
-            "--bind",
-            "0.0.0.0:5000",
+            *override_args,
             "--config",
             str(plan.gunicorn_config),
             "production:create_production_app()",
@@ -454,8 +466,10 @@ def test_gunicorn_guard_rejects_cli_worker_and_bind_overrides_via_real_check(
         capture_output=True,
         text=True,
         check=False,
+        timeout=10,
     )
     assert result.returncode != 0
+    assert expected_error in result.stderr
 
 
 def test_systemd_template_has_no_shell_and_delegates_to_active_release_launcher():
@@ -551,7 +565,7 @@ def test_production_launcher_compatibility_rejects_venv_arguments_in_standard_mo
     monkeypatch.delenv("GUNICORN_CMD_ARGS", raising=False)
 
     # 1. Both defaulted/omitted -> PASS / existing behavior
-    plan = _prepare(release)
+    plan = _prepare_platform_independent(release, monkeypatch)
     assert plan.code_root == release.code_root
     assert plan.venv_path is None
     assert plan.python_executable == Path(sys.executable)

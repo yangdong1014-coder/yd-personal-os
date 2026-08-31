@@ -23,7 +23,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run pytest
-        run: pytest
+      - name: Run platform-independent pytest
+        run: pytest -m "not production_ownership"
         env:
           YD_OS_DB_PATH: /tmp/yd_os_test.db
+
+      - name: Run production ownership contract tests
+        run: |
+          python_bin="$(command -v python)"
+          sudo env YD_OS_DB_PATH=/tmp/yd_os_test-privileged.db "$python_bin" -m pytest -m production_ownership
