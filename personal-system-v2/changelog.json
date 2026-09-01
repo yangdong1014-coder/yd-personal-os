@@ -1,6 +1,17 @@
 {
-  "current": "v2.2.0",
+  "current": "v2.2.1",
   "entries": [
+    {
+      "version": "v2.2.1",
+      "date": "2026-09-01",
+      "title": "PSY v2.2.1：Runtime Import Idempotency Patch",
+      "type": "fix",
+      "items": [
+        "修复相同备份重复导入时无逻辑变化的训练步骤仍刷新 updated_at，并被误报为 32 条更新的问题。",
+        "保留真正需要纠正的训练步骤排序规范化，同时确保跨时间边界的相同备份导入保持零业务行写入。",
+        "本补丁不包含数据库 schema/migration、用户数据迁移或其他业务行为调整。"
+      ]
+    },
     {
       "version": "v2.2.0",
       "date": "2026-08-28",

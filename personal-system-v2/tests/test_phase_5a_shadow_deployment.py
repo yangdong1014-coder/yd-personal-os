@@ -754,9 +754,9 @@ def test_build_identity_combines_version_and_release_id(
 ):
     monkeypatch.setenv("PSY_RELEASE_ID", "phase5a-local-browser")
 
-    assert changelog.get_current_version() == "v2.2.0"
+    assert changelog.get_current_version() == "v2.2.1"
     assert changelog.get_build_identity() == (
-        "v2.2.0 · phase5a-local-browser"
+        "v2.2.1 · phase5a-local-browser"
     )
     assert changelog.get_build_identity(
         {

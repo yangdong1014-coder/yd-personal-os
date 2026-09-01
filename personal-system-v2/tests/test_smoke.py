@@ -55,11 +55,11 @@ def test_base_template_has_brand_favicons_and_dynamic_version(client):
     assert 'href="/static/icons/brand/favicon-32x32.png"' in html
     assert 'href="/static/icons/brand/favicon-16x16.png"' in html
     assert 'href="/static/icons/brand/apple-touch-icon.png"' in html
-    assert '<span class="nav-brand-version">v2.2.0</span>' in html
+    assert '<span class="nav-brand-version">v2.2.1</span>' in html
 
     template = (PROJECT_ROOT / "templates" / "base.html").read_text(encoding="utf-8")
     assert "{{ current_version }}" in template
-    assert "v2.2.0" not in template
+    assert "v2.2.1" not in template
 
 
 def test_brand_icon_assets_are_available(client):
@@ -306,10 +306,10 @@ def test_changelog_api(client):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["ok"] is True
-    assert payload["data"]["current"] == "v2.2.0"
-    assert payload["data"]["build_identity"].startswith("v2.2.0")
+    assert payload["data"]["current"] == "v2.2.1"
+    assert payload["data"]["build_identity"].startswith("v2.2.1")
     versions = [entry["version"] for entry in payload["data"]["entries"]]
-    assert versions[:3] == ["v2.2.0", "v2.2.0-shadow", "v2.1.4"]
+    assert versions[:4] == ["v2.2.1", "v2.2.0", "v2.2.0-shadow", "v2.1.4"]
     assert isinstance(payload["data"]["entries"], list)
 
 
