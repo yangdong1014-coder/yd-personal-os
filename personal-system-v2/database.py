@@ -3141,7 +3141,7 @@ def _practice_step_row(row):
 def _normalize_practice_step_order(conn, module, user_id):
     rows = conn.execute(
         """
-        SELECT id FROM capability_practice_steps
+        SELECT id, step_order FROM capability_practice_steps
         WHERE user_id = ? AND module = ?
         ORDER BY step_order ASC, id ASC
         """,
@@ -3149,6 +3149,8 @@ def _normalize_practice_step_order(conn, module, user_id):
     ).fetchall()
     now = _now()
     for index, row in enumerate(rows, start=1):
+        if row["step_order"] == index:
+            continue
         conn.execute(
             """
             UPDATE capability_practice_steps
